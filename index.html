@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vietnam H3 Grid</title>
+
+    <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+</head>
+
+<style>
+    html,
+    body,
+    #map {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+    }
+</style>
+
+
+<body>
+    <div id="map"></div>
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+    <script type="module">
+        import { polygonToCells, cellToBoundary } from "https://cdn.jsdelivr.net/npm/h3-js@4.1.0/+esm";
+        const map = new maplibregl.Map({
+            container: "map",
+
+            style: "https://tiles.openfreemap.org/styles/dark",
+            center: [108.2, 16.2],
+            zoom: 5
+        });
+
+        map.on("load", async () => {
+            const response = await fetch("./gadm41_VNM_0.json");
+            const vietnamGeoJSON = await response.json();
+
+            const geometry = vietnamGeoJSON.features[0].geometry;
+
+            const resolution = 3;
+
+            let h3Cells = [];
+            if (geometry.type === "Polygon") {
+                h3Cells = polygonToCells(
+                    convertPolygonToH3Format(geometry.coordinates),
+                    resolution
+                );
+            }
+
+            if (geometry.type === "MultiPolygon") {
+                geometry.coordinates.forEach((polygon) => {
+                    const cells = polygonToCells(
+                        convertPolygonToH3Format(polygon),
+                        resolution
+                    );
+                    h3Cells.push(...cells);
+                });
+            }
+
+            h3Cells = [...new Set(h3Cells)];
+            console.log("Số H3 cells:", h3Cells.length);
+
+            const h3Features = h3Cells.map((cell) => {
+                const boundary = cellToBoundary(cell);
+
+                const coordinates = boundary.map(([lat, lng]) => [
+                    lng,
+                    lat
+                ]);
+
+                // đóng polygon
+                coordinates.push(coordinates[0]);
+
+                return {
+                    type: "Feature",
+                    properties: { h3: cell },
+                    geometry: {
+                        type: "Polygon",
+                        coordinates: [coordinates]
+                    }
+                };
+            });
+
+            const h3GeoJSON = {
+                type: "FeatureCollection",
+                features: h3Features
+            };
+
+            map.addSource("h3-grid", {
+                type: "geojson",
+                data: h3GeoJSON
+            });
+
+            // Hai lớp dưới đây cùng tạo nên layer lục giác H3.
+            map.addLayer({
+                id: "h3-fill",
+                type: "fill",
+                source: "h3-grid",
+                paint: {
+                    "fill-color": "#22c55e",
+                    "fill-opacity": 0.45
+                }
+            });
+
+            map.addLayer({
+                id: "h3-border",
+                type: "line",
+                source: "h3-grid",
+                paint: {
+                    "line-color": "#ffffff",
+                    "line-width": 0.5,
+                    "line-opacity": 0.7
+                }
+            });
+        });
+
+        function convertPolygonToH3Format(coordinates) {
+            /*
+              GeoJSON:
+              [lng, lat]
+      
+              H3 polygonToCells:
+              [lat, lng]
+            */
+
+            return coordinates.map((ring) =>
+                ring.map(([lng, lat]) => [
+                    lat,
+                    lng
+                ])
+            );
+        }
+
+    </script>
+</body>
+
+</html>

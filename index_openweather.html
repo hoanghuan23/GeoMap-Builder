@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="GeoMap Builder - trực quan hoá dữ liệu không gian bằng H3">
+  <title>GeoMap Builder</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="./src/styles.css">
+  <link rel="stylesheet" href="./src/reference-tweaks.css">
+</head>
+<body>
+<div class="app-shell">
+  <header class="app-header">
+    <a class="brand" href="#"><span class="brand-mark">⬡</span><span>GeoMap <b>Builder</b></span></a>
+    <nav class="main-nav"><a class="active" href="#">Tạo bản đồ</a><a href="#">Dự án của tôi</a><a href="#">Dữ liệu mẫu</a><a href="#">Hướng dẫn</a></nav>
+    <div class="header-actions"><button class="icon-button" title="Trợ giúp">?</button><button class="icon-button notification" title="Thông báo">♢<i></i></button><button class="profile-button"><span class="avatar">HN</span><span><b>Hoàng Huấn</b><small>Workspace cá nhân</small></span><span>⌄</span></button></div>
+  </header>
+  <main class="workspace">
+    <aside class="sidebar">
+      <section class="panel-section">
+        <div class="section-title"><span class="step">1</span><div><h2>Chọn kiểu bản đồ</h2><p>Chọn hình học để trực quan hóa</p></div></div>
+        <div id="map-type-grid" class="map-type-grid"><button class="map-type active" data-type="H3 Hexagon"><span>⬡</span>H3 Hexagon</button><button class="map-type" data-type="Point"><span>●</span>Point</button><button class="map-type" data-type="Line"><span>╱</span>Line</button><button class="map-type" data-type="Polygon"><span>⬠</span>Polygon</button><button class="map-type" data-type="Rectangle"><span>▭</span>Rectangle</button><button class="map-type" data-type="Circle"><span>○</span>Circle</button><button class="map-type" data-type="Province"><span>⌖</span>Province</button><button class="map-type" data-type="Country"><span>◎</span>Country</button></div>
+      </section>
+      <section class="panel-section">
+        <div class="section-title"><span class="step">2</span><div><h2>Cung cấp dữ liệu không gian</h2><p>Tải lên hoặc nhập vùng cần phân tích</p></div></div>
+        <div class="tabs"><button class="tab active" data-tab="upload">Upload file</button><button class="tab" data-tab="draw">Vẽ trên bản đồ</button><button class="tab" data-tab="coordinates">Nhập tọa độ</button></div>
+        <div class="tab-panel active" data-panel="upload"><label class="drop-zone" for="spatial-file"><input id="spatial-file" type="file" accept=".geojson,.json,.csv,.zip"><span class="upload-icon">⇧</span><b>Kéo thả file vào đây</b><span>hoặc <u>chọn từ máy tính</u></span><small>GeoJSON, JSON, CSV hoặc ZIP/Shapefile</small></label><div class="selected-file"><span class="file-badge">GJ</span><div><b id="file-name">gadm41_VNM_0.json</b><small id="file-note">Dữ liệu mặc định · đang sử dụng</small></div><span class="success-check">✓</span></div></div>
+        <div class="tab-panel placeholder-panel" data-panel="draw">Chọn công cụ vẽ trên bản đồ để bắt đầu.</div>
+        <div class="tab-panel" data-panel="coordinates"><textarea id="coordinate-input" rows="4" placeholder="Nhập GeoJSON Polygon hoặc danh sách lng,lat"></textarea><button id="apply-coordinates" class="secondary-button">Áp dụng tọa độ</button></div>
+      </section>
+      <section class="panel-section">
+        <div class="section-title"><span class="step">3</span><div><h2>Cấu hình hiển thị</h2><p>Điều chỉnh độ chi tiết và thuộc tính</p></div></div>
+        <div class="field range-field"><div class="field-label"><label for="resolution">Resolution (H3)</label><output id="resolution-value">5</output></div><input id="resolution" type="range" min="0" max="15" value="5"><div class="range-labels"><span>0</span><span>Độ chi tiết</span><span>15</span></div></div>
+        <label class="field">Kiểu hiển thị<select id="display-mode"><option value="data">Tô màu theo dữ liệu</option><option value="fixed">Màu cố định</option></select></label><label class="field">Thuộc tính dữ liệu<select id="data-property"><option value="temperature">Nhiệt độ</option><option value="humidity">Độ ẩm</option></select></label>
+      </section>
+      <section class="panel-section style-section">
+        <button id="style-toggle" class="section-title collapsible" aria-expanded="true"><span class="step">4</span><div><h2>Tùy chỉnh style</h2><p>Màu sắc, độ mờ và đường viền</p></div><span class="chevron">⌃</span></button>
+        <div id="style-controls" class="style-controls"><div class="field"><span>Bảng màu</span><div class="palette-row"><button class="palette active" data-palette="thermal"></button><button class="palette viridis" data-palette="viridis"></button><button class="palette blue" data-palette="blue"></button></div></div><label class="field inline-field">Màu cố định<span class="color-control"><input id="fixed-color" type="color" value="#6c5ce7"><code id="fixed-color-value">#6C5CE7</code></span></label><div class="field range-field compact"><div class="field-label"><label for="opacity">Opacity</label><output id="opacity-value">72%</output></div><input id="opacity" type="range" min="0" max="1" step=".01" value=".72"></div><label class="toggle-row"><span>Hiển thị đường viền</span><input id="show-border" type="checkbox" checked><i></i></label><label class="field inline-field">Màu viền<span class="color-control"><input id="border-color" type="color" value="#ffffff"><code id="border-color-value">#FFFFFF</code></span></label><div class="field range-field compact"><div class="field-label"><label for="line-width">Độ dày đường viền</label><output id="line-width-value">0.5 px</output></div><input id="line-width" type="range" min=".1" max="4" step=".1" value=".5"></div><div class="builder-actions"><button id="build-map">♙&nbsp; Tạo bản đồ</button><button id="reset-map">↻&nbsp; Làm lại</button></div></div>
+      </section>
+    </aside>
+    <section class="content-area">
+      <div class="map-panel"><div id="map"></div><div id="status" class="status-pill">Đang khởi tạo bản đồ…</div><div class="map-toolbar" id="map-toolbar"><button class="active" data-tool="select" title="Chọn">↖</button><button data-tool="pan" title="Di chuyển">✥</button><i></i><button data-tool="rectangle" title="Hình chữ nhật">▭</button><button data-tool="circle" title="Hình tròn">○</button><button data-tool="line" title="Đường">╱</button><button data-tool="polygon" title="Đa giác">⬠</button><button data-tool="delete" title="Xóa">⌫</button></div><div class="map-controls"><button id="zoom-in">+</button><button id="zoom-out">−</button><button id="fullscreen">⛶</button></div>
+        <div class="right-cards"><article class="map-card legend-card"><div class="card-heading"><div><span class="card-icon">◉</span><b id="legend-title">Nhiệt độ (°C)</b></div><button>•••</button></div><div id="legend-gradient" class="legend-gradient"></div><div id="legend-labels" class="legend-labels"><span>≤10</span><span>20</span><span>25</span><span>30</span><span>≥40</span></div><div class="legend-meta"><span><i></i>Nguồn: OpenWeather</span><span id="legend-updated">Cập nhật: --:--</span></div></article><article class="map-card stats-card"><div class="card-heading"><div><span class="card-icon purple">⌁</span><b>Thống kê</b></div><button>•••</button></div><div class="stat-primary"><span id="cell-count">0</span><small id="cell-label">Tổng số cell (res 5)</small></div><div class="stat-grid"><div><span class="stat-symbol cold">↓</span><small id="min-label">Nhiệt độ thấp nhất</small><b id="stat-min">--</b></div><div><span class="stat-symbol hot">↑</span><small id="max-label">Nhiệt độ cao nhất</small><b id="stat-max">--</b></div><div><span class="stat-symbol avg">≈</span><small id="avg-label">Nhiệt độ trung bình</small><b id="stat-avg">--</b></div></div></article></div><div class="map-attribution">© OpenFreeMap · © OpenMapTiles · © OpenStreetMap</div>
+      </div>
+      <section class="data-panel"><div class="table-header"><div><h2>Dữ liệu thuộc tính</h2><p id="table-summary">Hiển thị 0 / 0 bản ghi</p></div><div class="table-actions"><label class="search-box"><span>⌕</span><input id="table-search" type="search" placeholder="Tìm kiếm H3 Index..."></label><button id="export-data" class="export-button">⇩ <span>Export data</span></button><button class="more-button">•••</button></div></div><div class="table-wrap"><table><thead><tr><th>#</th><th>H3 INDEX</th><th>TÂM Ô (LAT, LNG)</th><th>NHIỆT ĐỘ (°C)</th><th>ĐỘ ẨM (%)</th><th>THỜI GIAN CẬP NHẬT</th><th></th></tr></thead><tbody id="data-body"><tr><td colspan="7" class="empty-row">Đang chuẩn bị dữ liệu…</td></tr></tbody></table></div><div class="pagination"><span id="pagination-info">0–0 của 0</span><div><button id="prev-page" disabled>‹</button><span id="page-buttons"></span><button id="next-page" disabled>›</button></div><label>Hiển thị <select id="page-size"><option>10</option><option>25</option><option>50</option></select> bản ghi</label></div></section>
+    </section>
+  </main>
+</div><div id="toast" class="toast" role="status"></div>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script><script type="module" src="./src/app.js"></script>
+</body></html>
