@@ -20,11 +20,11 @@ export function weatherCellFor(displayCell, weatherResolution) {
   return displayCell;
 }
 
-export function cellsToFeatureCollection(cells, weatherResolution, weatherRecords) {
+export function cellsToFeatureCollection(cells, weatherResolution, weatherRecords, trafficRecords = new Map()) {
   return { type:"FeatureCollection", features: cells.map(cell => {
     const boundary = cellToBoundary(cell).map(([lat,lng]) => [lng,lat]); boundary.push(boundary[0]);
-    const [lat,lng] = cellToLatLng(cell); const weatherCell = weatherCellFor(cell, weatherResolution); const weather = weatherRecords.get(weatherCell);
-    return { type:"Feature", properties:{ h3:cell, weather_h3:weatherCell, center_lat:lat, center_lng:lng, temperature:weather?.temperature ?? null, humidity:weather?.humidity ?? null, updated_at:weather?.updatedAt ?? null }, geometry:{type:"Polygon",coordinates:[boundary]} };
+    const [lat,lng] = cellToLatLng(cell); const weatherCell = weatherCellFor(cell, weatherResolution); const weather = weatherRecords.get(weatherCell); const traffic = trafficRecords.get(cell);
+    return { type:"Feature", properties:{ h3:cell, weather_h3:weatherCell, center_lat:lat, center_lng:lng, temperature:weather?.temperature ?? null, humidity:weather?.humidity ?? null, updated_at:weather?.updatedAt ?? null, traffic_density:traffic?.density ?? null, current_speed:traffic?.currentSpeed ?? null, free_flow_speed:traffic?.freeFlowSpeed ?? null, speed_ratio:traffic?.speedRatio ?? null, traffic_status:traffic?.status ?? null, traffic_confidence:traffic?.confidence ?? null, traffic_updated_at:traffic?.updatedAt ?? null }, geometry:{type:"Polygon",coordinates:[boundary]} };
   }) };
 }
 

@@ -6,6 +6,11 @@ export const CONFIG = Object.freeze({
   CACHE_TTL_MS: 15 * 60 * 1000,
   CACHE_KEY: "openweather-h3-weather-v2",
   API_KEY: import.meta.env.VITE_OPENWEATHER_API_KEY || "",
+  TOMTOM_API_KEY: import.meta.env.VITE_TOMTOM_API_KEY || "",
+  TRAFFIC_CACHE_KEY: "tomtom-h3-traffic-v1",
+  TRAFFIC_CACHE_TTL_MS: 5 * 60 * 1000,
+  TRAFFIC_REQUEST_INTERVAL_MS: 120,
+  MAX_TRAFFIC_CELLS: 300,
   MAX_RENDER_CELLS: 120000
 });
 
