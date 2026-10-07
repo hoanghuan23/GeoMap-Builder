@@ -19,6 +19,7 @@ let map; let toastTimer; let renderTimer;
 
 function showToast(message) { const el = $("toast"); el.textContent = message; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2800); }
 function setStatus(message, hide = false) { const el = $("status"); el.textContent = message; el.style.display = "block"; if (hide) setTimeout(() => el.style.display = "none", 2200); }
+function setDataPanelVisible(visible) { $("data-panel").hidden = !visible; document.querySelector(".content-area").classList.toggle("table-hidden", !visible); map?.resize(); }
 function fmt(value, digits = 1) { return Number.isFinite(value) ? value.toFixed(digits) : "--"; }
 function formatTime(value) { return value ? new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "--"; }
 
@@ -444,9 +445,11 @@ function bindUI() {
       await rebuildGrid({ fetchWeather, fetchTraffic, preserveTraffic: true });
       state.weatherApplied = fetchWeather;
       applyStyle(); applyMapLayerVisibility(); updateDashboard();
+      setDataPanelVisible(true);
     } catch (error) { console.error(error); invalidateTrafficApplication(); setStatus(error.message); showToast(error.message); }
   });
-  $("reset-map").addEventListener("click", () => { state.resolution = CONFIG.DEFAULT_RESOLUTION; state.palette = "thermal"; state.displayMode = "data"; state.property = "temperature"; state.weatherApplied = false; invalidateTrafficApplication(); clearUploadedData(); $("resolution").value = 5; $("resolution-value").value = 5; $("display-mode").value = "data"; $("data-property").value = "temperature"; $("opacity").value = .72; $("opacity-value").value = "72%"; $("show-map-layers").checked = false; $("show-map-layers-status").textContent = "Đang tắt"; $("fetch-weather").checked = false; $("fetch-weather-status").textContent = "Đang tắt"; $("fetch-traffic").checked = false; $("fetch-traffic-status").textContent = "Đang tắt"; document.querySelectorAll(".palette").forEach(x => x.classList.toggle("active", x.dataset.palette === "thermal")); applyStyle(); updateDashboard(); setStatus("Đã làm lại. Hãy upload dữ liệu để bắt đầu.", true); });
+  $("reset-map").addEventListener("click", () => { state.resolution = CONFIG.DEFAULT_RESOLUTION; state.palette = "thermal"; state.displayMode = "data"; state.property = "temperature"; state.weatherApplied = false; invalidateTrafficApplication(); clearUploadedData(); setDataPanelVisible(false); $("resolution").value = 5; $("resolution-value").value = 5; $("display-mode").value = "data"; $("data-property").value = "temperature"; $("opacity").value = .72; $("opacity-value").value = "72%"; $("show-map-layers").checked = false; $("show-map-layers-status").textContent = "Đang tắt"; $("fetch-weather").checked = false; $("fetch-weather-status").textContent = "Đang tắt"; $("fetch-traffic").checked = false; $("fetch-traffic-status").textContent = "Đang tắt"; document.querySelectorAll(".palette").forEach(x => x.classList.toggle("active", x.dataset.palette === "thermal")); applyStyle(); updateDashboard(); setStatus("Đã làm lại. Hãy upload dữ liệu để bắt đầu.", true); });
+  $("close-data-panel").addEventListener("click", () => setDataPanelVisible(false));
   $("table-search").addEventListener("input", e => { state.query = e.target.value; state.page = 1; renderTable(); }); $("page-size").addEventListener("change", e => { state.pageSize = Number(e.target.value); state.page = 1; renderTable(); });
   $("prev-page").addEventListener("click", () => { state.page--; renderTable(); }); $("next-page").addEventListener("click", () => { state.page++; renderTable(); }); $("page-buttons").addEventListener("click", e => { if (e.target.dataset.page) { state.page = Number(e.target.dataset.page); renderTable(); } });
   $("zoom-in").addEventListener("click", () => map.zoomIn()); $("zoom-out").addEventListener("click", () => map.zoomOut()); $("fullscreen").addEventListener("click", () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector(".map-panel").requestFullscreen());

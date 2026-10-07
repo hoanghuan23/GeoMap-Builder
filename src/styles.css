@@ -731,6 +731,10 @@ input[type=range] {
     background: #e9eef5
 }
 
+.content-area.table-hidden {
+    grid-template-rows: minmax(280px, 1fr)
+}
+
 .map-panel {
     position: relative;
     min-height: 0;
@@ -990,6 +994,10 @@ input[type=range] {
     overflow: hidden
 }
 
+.data-panel[hidden] {
+    display: none
+}
+
 .table-header {
     height: 49px;
     flex: none;
@@ -1046,6 +1054,29 @@ input[type=range] {
 .more-button {
     width: 33px;
     padding: 0
+}
+
+.close-data-panel {
+    width: 31px;
+    height: 31px;
+    padding: 0;
+    border: 1px solid #dce3ed;
+    border-radius: 6px;
+    background: #fff;
+    color: #64748b;
+    font-size: 20px;
+    line-height: 1
+}
+
+.close-data-panel:hover {
+    border-color: #f3a6a6;
+    background: #fff1f1;
+    color: #dc2626
+}
+
+.close-data-panel:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px
 }
 
 .table-wrap {
