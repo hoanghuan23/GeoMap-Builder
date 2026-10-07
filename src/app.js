@@ -6,6 +6,7 @@ import { loadTraffic, loadTrafficCache, saveTrafficCache } from "./traffic-servi
 import { analyzeSpatialData, analyzeCsvData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
 
 const $ = id => document.getElementById(id);
+const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
 const state = {
   resolution: CONFIG.DEFAULT_RESOLUTION, boundary: null, sourceBoundary: null, h3Data: { type: "FeatureCollection", features: [] },
   weather: loadWeatherCache(CONFIG.CACHE_KEY, CONFIG.CACHE_TTL_MS),
@@ -106,7 +107,7 @@ function addMapLayers() {
   map.addSource("h3-grid", { type: "geojson", data: state.h3Data });
   map.addLayer({ id: "h3-fill", type: "fill", source: "h3-grid", paint: { "fill-color": fillExpression(), "fill-opacity": .72 } });
   map.addLayer({ id: "h3-border", type: "line", source: "h3-grid", paint: { "line-color": "#ffffff", "line-width": .5, "line-opacity": .75 } });
-  map.addSource("vietnam-boundary", { type: "geojson", data: state.boundary });
+  map.addSource("vietnam-boundary", { type: "geojson", data: state.boundary || EMPTY_FEATURE_COLLECTION });
   map.addLayer({ id: "vietnam-border", type: "line", source: "vietnam-boundary", paint: { "line-color": "#00e65c", "line-width": 2 } });
   applyMapLayerVisibility();
   map.on("click", "h3-fill", event => {
@@ -123,6 +124,7 @@ function estimateCellCount(resolution) {
 }
 
 async function rebuildGrid({ fit = false, fetchWeather = false, fetchTraffic = false, preserveTraffic = false } = {}) {
+  if (!state.boundary) { setStatus("Hãy upload dữ liệu không gian trước."); return; }
   if (!preserveTraffic) invalidateTrafficApplication();
   state.weatherController?.abort(); state.trafficController?.abort();
   const estimate = estimateCellCount(state.resolution);
@@ -304,6 +306,15 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
     : `Phát hiện ${describeDataProfile(profile)} · chưa có kiểu bản đồ phù hợp`;
 }
 
+function clearUploadedData() {
+  state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
+  state.mapType = null; state.dataProfile = null; state.baselineCount = null; state.page = 1;
+  $("map-type-grid").className = "map-type-grid is-empty"; $("map-type-grid").textContent = "Chưa có dữ liệu để phân tích.";
+  $("map-type-summary").textContent = "Danh sách sẽ tự cập nhật sau khi dữ liệu được đọc.";
+  $("selected-file").hidden = true; $("spatial-file").value = ""; setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
+  map?.getSource("h3-grid")?.setData(state.h3Data); map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+}
+
 async function readSpatialFile(file) {
   if (file.name.toLowerCase().endsWith(".zip")) throw new Error("ZIP/Shapefile sẽ được hỗ trợ ở phiên bản tiếp theo.");
   const text = await file.text();
@@ -314,7 +325,7 @@ async function readSpatialFile(file) {
 async function replaceBoundary(data, name, profile = null) {
   if (!data) throw new Error("Không tìm thấy dữ liệu."); geoJSONToCells(data, Math.min(state.resolution, 3)); state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
   renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));
-  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; state.baselineCount = null; await rebuildGrid({ fit: true });
+  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("selected-file").hidden = false; state.baselineCount = null; await rebuildGrid({ fit: true });
 }
 
 function bindUI() {
@@ -359,6 +370,7 @@ function bindUI() {
     const fetchWeather = $("fetch-weather").checked;
     const fetchTraffic = $("fetch-traffic").checked;
     try {
+      if (!state.boundary) throw new Error("Vui lòng upload dữ liệu không gian trước khi tạo bản đồ.");
       if (fetchTraffic) {
         state.property = "traffic_density"; $("data-property").value = state.property;
         createTrafficLayer(); state.trafficApplied = true;
@@ -371,7 +383,7 @@ function bindUI() {
       applyStyle(); applyMapLayerVisibility(); updateDashboard();
     } catch (error) { console.error(error); invalidateTrafficApplication(); setStatus(error.message); showToast(error.message); }
   });
-  $("reset-map").addEventListener("click", async () => { const response = await fetch(CONFIG.DEFAULT_DATA_URL); state.boundary = await response.json(); state.sourceBoundary = state.boundary; setupProvinceFilter(state.boundary); renderCompatibleMapTypes(state.boundary); state.resolution = CONFIG.DEFAULT_RESOLUTION; state.palette = "thermal"; state.displayMode = "data"; state.property = "temperature"; state.baselineCount = null; state.weatherApplied = false; invalidateTrafficApplication(); $("resolution").value = 5; $("resolution-value").value = 5; $("display-mode").value = "data"; $("data-property").value = "temperature"; $("opacity").value = .72; $("opacity-value").value = "72%"; $("show-map-layers").checked = false; $("show-map-layers-status").textContent = "Đang tắt"; $("fetch-weather").checked = false; $("fetch-weather-status").textContent = "Đang tắt"; $("fetch-traffic").checked = false; $("fetch-traffic-status").textContent = "Đang tắt"; $("file-name").textContent = "gadm41_VNM_0.json"; $("file-note").textContent = "Dữ liệu mặc định · đang sử dụng"; document.querySelectorAll(".palette").forEach(x => x.classList.toggle("active", x.dataset.palette === "thermal")); map.getSource("vietnam-boundary")?.setData(state.boundary); await rebuildGrid({ fit: true }); applyStyle(); });
+  $("reset-map").addEventListener("click", () => { state.resolution = CONFIG.DEFAULT_RESOLUTION; state.palette = "thermal"; state.displayMode = "data"; state.property = "temperature"; state.weatherApplied = false; invalidateTrafficApplication(); clearUploadedData(); $("resolution").value = 5; $("resolution-value").value = 5; $("display-mode").value = "data"; $("data-property").value = "temperature"; $("opacity").value = .72; $("opacity-value").value = "72%"; $("show-map-layers").checked = false; $("show-map-layers-status").textContent = "Đang tắt"; $("fetch-weather").checked = false; $("fetch-weather-status").textContent = "Đang tắt"; $("fetch-traffic").checked = false; $("fetch-traffic-status").textContent = "Đang tắt"; document.querySelectorAll(".palette").forEach(x => x.classList.toggle("active", x.dataset.palette === "thermal")); applyStyle(); updateDashboard(); setStatus("Đã làm lại. Hãy upload dữ liệu để bắt đầu.", true); });
   $("table-search").addEventListener("input", e => { state.query = e.target.value; state.page = 1; renderTable(); }); $("page-size").addEventListener("change", e => { state.pageSize = Number(e.target.value); state.page = 1; renderTable(); });
   $("prev-page").addEventListener("click", () => { state.page--; renderTable(); }); $("next-page").addEventListener("click", () => { state.page++; renderTable(); }); $("page-buttons").addEventListener("click", e => { if (e.target.dataset.page) { state.page = Number(e.target.dataset.page); renderTable(); } });
   $("zoom-in").addEventListener("click", () => map.zoomIn()); $("zoom-out").addEventListener("click", () => map.zoomOut()); $("fullscreen").addEventListener("click", () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector(".map-panel").requestFullscreen());
@@ -389,7 +401,7 @@ function exportCSV() {
 
 async function init() {
   bindUI(); map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/dark", center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
-  map.once("style.load", async () => { try { const response = await fetch(CONFIG.DEFAULT_DATA_URL); if (!response.ok) throw new Error(`HTTP ${response.status}`); state.boundary = await response.json(); state.sourceBoundary = state.boundary; setupProvinceFilter(state.boundary); renderCompatibleMapTypes(state.boundary); addMapLayers(); await rebuildGrid({ fit: true }); } catch (error) { console.error(error); setStatus("Không tải được dữ liệu ranh giới Việt Nam."); } });
+  map.once("style.load", () => { addMapLayers(); setupProvinceFilter(EMPTY_FEATURE_COLLECTION); updateDashboard(); setStatus("Hãy upload dữ liệu không gian để bắt đầu."); });
   map.on("error", event => console.warn("MapLibre:", event.error?.message || event.error));
 }
 init();

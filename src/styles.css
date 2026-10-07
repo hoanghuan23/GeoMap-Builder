@@ -247,6 +247,23 @@ button {
     gap: 7px
 }
 
+.map-type-grid.is-empty {
+    display: block;
+    padding: 12px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 7px;
+    color: var(--muted);
+    font-size: 10px;
+    text-align: center
+}
+
+.map-type-summary {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 9px;
+    line-height: 1.4
+}
+
 .map-type {
     height: 62px;
     border: 1px solid #dce3ed;
@@ -357,6 +374,10 @@ button {
     border-radius: 6px
 }
 
+.selected-file[hidden] {
+    display: none
+}
+
 .selected-file>div {
     min-width: 0;
     display: flex;
@@ -383,6 +404,92 @@ button {
 
 .province-filter[hidden] {
     display: none
+}
+
+.province-multiselect {
+    position: relative;
+    font-weight: 400
+}
+
+.province-filter-toggle {
+    width: 100%;
+    height: 31px;
+    padding: 0 9px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border: 1px solid #dce3ed;
+    background: #fff;
+    border-radius: 6px;
+    text-align: left
+}
+
+.province-filter-toggle span:first-child {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis
+}
+
+.province-filter-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 20;
+    padding: 6px;
+    border: 1px solid #dce3ed;
+    background: #fff;
+    border-radius: 7px;
+    box-shadow: 0 8px 24px #17263f26
+}
+
+.province-filter-menu[hidden] {
+    display: none
+}
+
+.province-filter-options {
+    max-height: 180px;
+    overflow-y: auto
+}
+
+.province-filter-options label {
+    min-height: 28px;
+    padding: 5px 6px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 5px;
+    cursor: pointer
+}
+
+.province-filter-options label:hover {
+    background: var(--blue-soft)
+}
+
+.province-filter-options input {
+    accent-color: var(--blue)
+}
+
+.province-filter-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line)
+}
+
+.province-filter-actions button {
+    padding: 5px 9px;
+    border: 1px solid #dce3ed;
+    background: #fff;
+    border-radius: 5px
+}
+
+.province-filter-actions button:last-child {
+    border-color: var(--blue);
+    background: var(--blue);
+    color: #fff
 }
 
 .file-badge {

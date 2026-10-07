@@ -1,5 +1,4 @@
 export const CONFIG = Object.freeze({
-  DEFAULT_DATA_URL: new URL("../gadm41_VNM_0.json", import.meta.url).href,
   DEFAULT_RESOLUTION: 5,
   WEATHER_RESOLUTION: 3,
   REQUEST_INTERVAL_MS: 1100,

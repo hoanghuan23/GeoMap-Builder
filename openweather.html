@@ -18,15 +18,16 @@
   <main class="workspace">
     <aside class="sidebar">
       <section class="panel-section">
-        <div class="section-title"><span class="step">1</span><div><h2>Chọn kiểu bản đồ</h2><p>Chọn hình học để trực quan hóa</p></div></div>
-        <div id="map-type-grid" class="map-type-grid"><button class="map-type active" data-type="H3 Hexagon"><span>⬡</span>H3 Hexagon</button><button class="map-type" data-type="Point"><span>●</span>Point</button><button class="map-type" data-type="Line"><span>╱</span>Line</button><button class="map-type" data-type="Polygon"><span>⬠</span>Polygon</button><button class="map-type" data-type="Rectangle"><span>▭</span>Rectangle</button><button class="map-type" data-type="Circle"><span>○</span>Circle</button><button class="map-type" data-type="Province"><span>⌖</span>Province</button><button class="map-type" data-type="Country"><span>◎</span>Country</button></div>
-      </section>
-      <section class="panel-section">
-        <div class="section-title"><span class="step">2</span><div><h2>Cung cấp dữ liệu không gian</h2><p>Tải lên hoặc nhập vùng cần phân tích</p></div></div>
+        <div class="section-title"><span class="step">1</span><div><h2>Cung cấp dữ liệu không gian</h2><p>Tải lên hoặc nhập vùng cần phân tích</p></div></div>
         <div class="tabs"><button class="tab active" data-tab="upload">Upload file</button><button class="tab" data-tab="draw">Vẽ trên bản đồ</button><button class="tab" data-tab="coordinates">Nhập tọa độ</button></div>
-        <div class="tab-panel active" data-panel="upload"><label class="drop-zone" for="spatial-file"><input id="spatial-file" type="file" accept=".geojson,.json,.csv,.zip"><span class="upload-icon">⇧</span><b>Kéo thả file vào đây</b><span>hoặc <u>chọn từ máy tính</u></span><small>GeoJSON, JSON, CSV hoặc ZIP/Shapefile</small></label><div class="selected-file"><span class="file-badge">GJ</span><div><b id="file-name">gadm41_VNM_0.json</b><small id="file-note">Dữ liệu mặc định · đang sử dụng</small></div><span class="success-check">✓</span></div><label id="province-filter-field" class="field province-filter" hidden>Tỉnh / thành phố<select id="province-filter"><option value="">-- Chọn tỉnh/thành --</option></select></label></div>
+        <div class="tab-panel active" data-panel="upload"><label class="drop-zone" for="spatial-file"><input id="spatial-file" type="file" accept=".geojson,.json,.csv,.zip"><span class="upload-icon">⇧</span><b>Kéo thả file vào đây</b><span>hoặc <u>chọn từ máy tính</u></span><small>GeoJSON, JSON, CSV hoặc ZIP/Shapefile</small></label><div id="selected-file" class="selected-file" hidden><span class="file-badge">GJ</span><div><b id="file-name"></b><small id="file-note"></small></div><span class="success-check">✓</span></div><div id="province-filter-field" class="field province-filter" hidden><span>Tỉnh / thành phố</span><div id="province-filter" class="province-multiselect"><button id="province-filter-toggle" class="province-filter-toggle" type="button" aria-expanded="false"><span id="province-filter-label">Tất cả tỉnh/thành</span><span>⌄</span></button><div id="province-filter-menu" class="province-filter-menu" hidden><div id="province-filter-options" class="province-filter-options"></div><div class="province-filter-actions"><button id="clear-provinces" type="button">Bỏ chọn</button><button id="apply-provinces" type="button">Áp dụng</button></div></div></div></div></div>
         <div class="tab-panel placeholder-panel" data-panel="draw">Chọn công cụ vẽ trên bản đồ để bắt đầu.</div>
         <div class="tab-panel" data-panel="coordinates"><textarea id="coordinate-input" rows="4" placeholder="Nhập GeoJSON Polygon hoặc danh sách lng,lat"></textarea><button id="apply-coordinates" class="secondary-button">Áp dụng tọa độ</button></div>
+      </section>
+      <section class="panel-section">
+        <div class="section-title"><span class="step">2</span><div><h2>Chọn kiểu bản đồ</h2><p>Chỉ hiển thị các kiểu phù hợp với dữ liệu</p></div></div>
+        <div id="map-type-grid" class="map-type-grid is-empty" aria-live="polite">Chưa có dữ liệu để phân tích.</div>
+        <p id="map-type-summary" class="map-type-summary" aria-live="polite">Danh sách sẽ tự cập nhật sau khi dữ liệu được đọc.</p>
       </section>
       <section class="panel-section">
         <div class="section-title"><span class="step">3</span><div><h2>Cấu hình hiển thị</h2><p>Điều chỉnh độ chi tiết và thuộc tính</p></div></div>
