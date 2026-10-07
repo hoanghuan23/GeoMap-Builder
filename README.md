@@ -1,258 +1,242 @@
 # GeoMap Builder
 
-GeoMap Builder là ứng dụng frontend trực quan hóa dữ liệu không gian Việt Nam bằng lưới H3, MapLibre GL và dữ liệu thời tiết thật từ OpenWeather.
+## 1. Mục tiêu dự án
 
-Ứng dụng hiện tập trung vào chế độ **H3 Hexagon**: chuyển polygon thành các H3 cell, lấy nhiệt độ/độ ẩm theo vùng H3 cha, hiển thị dữ liệu trên bản đồ và đồng bộ với bảng thuộc tính.
+Xây dựng một công cụ cho phép người dùng tải dữ liệu không gian lên hệ thống, sau đó phân tích dữ liệu và lựa chọn kiểu trực quan hóa phù hợp để hiển thị trên bản đồ.
 
-## Chức năng hiện có
+Hệ thống hướng tới việc hỗ trợ nhiều loại dữ liệu, nhiều kiểu hiển thị và có khả năng tích hợp AI để hỗ trợ lựa chọn cấu hình bản đồ.
 
-- Bản đồ tương tác bằng MapLibre GL với basemap OpenFreeMap Dark.
-- Hiển thị ranh giới Việt Nam từ `gadm41_VNM_0.json`.
-- Chuyển `Polygon` và `MultiPolygon` sang lưới H3.
-- Thay đổi H3 resolution mà không tải lại trang.
-- Lấy nhiệt độ và độ ẩm thật từ OpenWeather.
-- Gom các cell hiển thị về H3 resolution 3 trước khi gọi API để giảm số request.
-- Cache dữ liệu thời tiết trong `localStorage` với TTL 15 phút.
-- Delay giữa các request và thông báo khi OpenWeather trả về HTTP 429.
-- Tô màu theo nhiệt độ, độ ẩm hoặc màu cố định.
-- Thay đổi palette, opacity, màu viền, độ dày và trạng thái hiển thị viền theo thời gian thực.
-- Popup thông tin khi chọn H3 cell.
-- Legend và thống kê tự cập nhật khi dữ liệu thời tiết được tải.
-- Bảng dữ liệu có tìm kiếm, phân trang và xuất CSV.
-- Nhập dữ liệu bằng GeoJSON, JSON, CSV hoặc tọa độ trực tiếp.
-- Giao diện responsive cho desktop và màn hình nhỏ.
-
-Các lựa chọn Point, Line, Polygon, Rectangle, Circle, Province và Country hiện mới có UI/state. Các công cụ vẽ cũng đang ở trạng thái chuẩn bị để mở rộng.
-
-## Công nghệ
-
-- Vite 6
-- JavaScript ES Modules
-- MapLibre GL JS 4.7.1
-- h3-js 4.1.0
-- OpenFreeMap
-- OpenWeather Current Weather API
-- HTML5 và CSS thuần
-
-## Yêu cầu môi trường
-
-- Node.js 18 trở lên
-- npm
-- Trình duyệt hỗ trợ WebGL và ES Modules
-- OpenWeather API key
-- Kết nối Internet để tải basemap, MapLibre, h3-js và dữ liệu OpenWeather
-
-## Cài đặt
-
-```bash
-npm install
-```
-
-Tạo file `.env` từ file mẫu:
-
-```bash
-cp .env.example .env
-```
-
-Cập nhật API key:
-
-```env
-VITE_OPENWEATHER_API_KEY=your_openweather_api_key
-```
-
-Không commit `.env`. File này đã được khai báo trong `.gitignore`.
-
-> Đây là frontend prototype nên biến `VITE_*` sẽ được Vite đưa vào bundle phía trình duyệt. Khi triển khai production, nên gọi OpenWeather qua backend/proxy để không công khai API key.
-
-## Chạy môi trường phát triển
-
-```bash
-npm run dev
-```
-
-Mở địa chỉ:
+## 2. Luồng xử lý tổng quát
 
 ```text
-http://localhost:5173/index_openweather.html
+Upload dữ liệu
+→ Phân tích dữ liệu
+→ Xác định các kiểu bản đồ có thể sử dụng
+→ Đề xuất / lựa chọn kiểu hiển thị
+→ Chuẩn hóa dữ liệu
+→ Render lên bản đồ
 ```
 
-Không nên mở trực tiếp file HTML bằng `file://`, vì trình duyệt có thể chặn ES Modules, GeoJSON và các request mạng.
+## 3. Dữ liệu đầu vào
 
-## Build production
+Hệ thống dự kiến hỗ trợ các định dạng dữ liệu phổ biến như:
 
-```bash
-npm run build
-```
+- Excel
+- CSV
+- JSON
+- GeoJSON
+- Các định dạng dữ liệu không gian khác khi cần mở rộng
 
-Kết quả được tạo trong thư mục `dist/`. Chạy thử bản build bằng:
+Phần upload cần có khả năng đọc và nhận diện cấu trúc dữ liệu trước khi chuyển sang bước trực quan hóa.
 
-```bash
-npm run preview
-```
+Ứng dụng khởi động ở trạng thái trống và chỉ tạo bản đồ sau khi người dùng upload hoặc nhập dữ liệu; không tự nạp bộ ranh giới mặc định.
 
-## Cấu trúc dự án
+## 4. Phân tích và lọc dữ liệu
+
+Sau khi upload, hệ thống cần phân tích dữ liệu để xác định:
+
+- Loại dữ liệu không gian
+- Các trường tọa độ
+- Geometry
+- Các trường số
+- Các trường phân loại
+- Các thuộc tính có thể sử dụng để trực quan hóa
+
+Kết quả phân tích được dùng để lọc ra các kiểu bản đồ phù hợp.
+
+## 5. Các kiểu trực quan hóa
+
+Danh sách kiểu bản đồ không nên được cố định hoàn toàn trên giao diện.
+
+Các lựa chọn hiển thị cần phụ thuộc vào:
+
+- Những renderer mà hệ thống đang hỗ trợ
+- Cấu trúc dữ liệu người dùng upload
+- Khả năng của thư viện bản đồ đang sử dụng
+
+Một số nhóm visualization dự kiến:
+
+- Point
+- Line
+- Polygon
+- Circle
+- Hexagon
+- Column
+- Heatmap
+- Grid
+- Các loại khác có thể bổ sung sau
+
+## 6. Hệ thống thư viện
+
+Các thư viện có thể được kết hợp theo từng vai trò:
+
+- **MapLibre GL JS**: nền tảng hiển thị bản đồ
+- **H3**: phân chia và xử lý lưới địa lý
+- **Turf.js**: xử lý hình học và dữ liệu không gian
+- **deck.gl**: các lớp trực quan hóa nâng cao và dữ liệu lớn
+- Các thư viện khác có thể được bổ sung tùy nhu cầu
+
+Kiến trúc nên cho phép bổ sung thư viện mới mà không phải thay đổi toàn bộ hệ thống.
+
+## 7. Map Canvas và Renderer
+
+Khu vực bản đồ nên là một `Map Canvas` dùng chung.
+
+Không tạo một màn hình riêng cho từng kiểu bản đồ.
+
+Mỗi kiểu trực quan hóa nên được triển khai dưới dạng renderer/layer riêng, ví dụ:
 
 ```text
-.
-├── index_openweather.html       # Entry chính của GeoMap Builder
-├── gadm41_VNM_0.json            # Ranh giới quốc gia mặc định
-├── gadm41_VNM_1.json            # Dữ liệu hành chính cấp 1
-├── gadm41_VNM_2.json            # Dữ liệu hành chính cấp 2
-├── src/
-│   ├── app.js                    # State, MapLibre, UI và điều phối dữ liệu
-│   ├── cache.js                  # Đọc/ghi cache localStorage
-│   ├── config.js                 # Cấu hình hệ thống và palette
-│   ├── h3-utils.js               # Chuyển GeoJSON/CSV sang H3
-│   ├── weather-service.js        # Gọi OpenWeather tuần tự
-│   ├── styles.css                # Style giao diện chính
-│   └── reference-tweaks.css      # Tinh chỉnh layout theo thiết kế mẫu
-├── .env.example                  # Mẫu biến môi trường
-├── package.json                  # Scripts và dependency
-└── vite.config.js                # Cấu hình entry/build Vite
+Map Canvas
+├── Hexagon Renderer
+├── Point Renderer
+├── Line Renderer
+├── Polygon Renderer
+├── Column Renderer
+└── ...
 ```
 
-`index.html` và `index_temperature_openmeteo.html` là các prototype cũ, không phải entry chính của hệ thống hiện tại.
+Renderer được lựa chọn dựa trên cấu hình hiện tại.
 
-## Luồng xử lý dữ liệu
+## 8. Cấu hình hiển thị động
 
-```text
-GeoJSON Polygon/MultiPolygon
-          ↓
-polygonToCells(display resolution)
-          ↓
-H3 cell hiển thị
-          ↓
-cellToParent(..., 3)
-          ↓
-H3 weather cell resolution 3
-          ↓
-localStorage cache hoặc OpenWeather API
-          ↓
-nhiệt độ + độ ẩm dùng chung cho các cell con
-          ↓
-MapLibre + Statistics + Data Table
-```
+Phần cấu hình bên trái không nên cố định theo một loại bản đồ cụ thể.
 
-Khi display resolution nhỏ hơn 3, hệ thống dùng `cellToCenterChild()` để chọn một weather cell resolution 3 đại diện. Khi bằng 3, chính cell hiển thị được dùng làm weather cell.
-
-## Cấu hình hệ thống
-
-Các giá trị chính nằm trong `src/config.js`:
-
-| Cấu hình | Mặc định | Ý nghĩa |
-| --- | ---: | --- |
-| `DEFAULT_RESOLUTION` | `5` | H3 resolution ban đầu |
-| `WEATHER_RESOLUTION` | `3` | Resolution dùng để gom request thời tiết |
-| `REQUEST_INTERVAL_MS` | `1100` | Khoảng nghỉ giữa hai request OpenWeather |
-| `CACHE_TTL_MS` | `15 phút` | Thời gian cache còn hiệu lực |
-| `CACHE_KEY` | `openweather-h3-weather-v2` | Khóa lưu trong `localStorage` |
-| `MAX_RENDER_CELLS` | `120000` | Giới hạn cell để bảo vệ trình duyệt |
-
-Thanh resolution vẫn hiển thị phạm vi 0–15. Nếu số cell ước tính vượt `MAX_RENDER_CELLS`, ứng dụng sẽ trở về mức an toàn thay vì tạo hàng trăm nghìn hoặc hàng triệu polygon làm treo trình duyệt.
-
-## Dữ liệu đầu vào
-
-### GeoJSON và JSON
-
-Hỗ trợ:
-
-- `FeatureCollection`
-- `Feature`
-- `Polygon`
-- `MultiPolygon`
-
-Nếu người dùng chưa upload file, hệ thống sử dụng `gadm41_VNM_0.json`.
-
-### CSV
-
-CSV phải có cột tọa độ với một trong các tên:
-
-- Latitude: `lat`, `latitude` hoặc `vĩ độ`
-- Longitude: `lng`, `lon`, `longitude` hoặc `kinh độ`
-
-Các điểm được nối theo thứ tự dòng để tạo thành một polygon. CSV cần ít nhất ba tọa độ hợp lệ.
+Mỗi visualization có thể có bộ cấu hình riêng.
 
 Ví dụ:
 
-```csv
-lat,lng
-21.02,105.80
-20.90,106.10
-20.70,105.95
+```text
+Hexagon → Resolution, Metric, Aggregation
+Column  → Height Field, Scale, Color
+Line    → Width, Color, Geometry
+Polygon → Fill, Border, Opacity
 ```
 
-### Nhập tọa độ
+Giao diện cấu hình cần thay đổi theo renderer được chọn.
 
-Tab **Nhập tọa độ** chấp nhận:
+## 9. Data Preview
 
-- Một đối tượng GeoJSON hợp lệ; hoặc
-- Mỗi dòng là một cặp `lng,lat`.
+Bảng dữ liệu phía dưới bản đồ cũng cần thay đổi theo loại visualization.
 
-### ZIP/Shapefile
+Không nên cố định theo cấu trúc H3.
 
-Giao diện chọn ZIP đã có nhưng chức năng đọc Shapefile chưa được triển khai.
+Bảng nên hiển thị dữ liệu hoặc kết quả xử lý tương ứng với renderer hiện tại.
 
-## Cache OpenWeather
+## 10. Chuẩn hóa dữ liệu
 
-Mỗi weather cell lưu:
+Nên có một tầng dữ liệu trung gian để các renderer sử dụng chung.
 
-```js
+Luồng xử lý:
+
+```text
+Excel / CSV / JSON / GeoJSON
+            ↓
+         Parser
+            ↓
+   Dữ liệu chuẩn hóa
+            ↓
+        Renderer
+```
+
+Việc chuẩn hóa giúp tránh để mỗi renderer phải tự xử lý từng định dạng file.
+
+## 11. Template / Renderer Registry
+
+Nên có một nơi quản lý các visualization mà hệ thống hỗ trợ.
+
+Registry có thể lưu các thông tin như:
+
+- Tên visualization
+- Loại dữ liệu yêu cầu
+- Renderer tương ứng
+- Các thuộc tính cấu hình
+- Điều kiện có thể sử dụng
+
+Registry sẽ là cơ sở để hệ thống lọc và lựa chọn visualization.
+
+## 12. Rule-based Recommendation
+
+Giai đoạn đầu nên sử dụng các rule để xác định những kiểu bản đồ phù hợp với dữ liệu.
+
+Ví dụ tổng quát:
+
+```text
+Point data
+→ Point / Hexagon / Column / Heatmap
+
+Line geometry
+→ Line
+
+Polygon geometry
+→ Polygon
+```
+
+Rule engine giúp hệ thống hoạt động ổn định ngay cả khi chưa tích hợp AI.
+
+## 13. AI Recommendation
+
+AI nên được tích hợp sau khi pipeline cơ bản đã hoạt động.
+
+Vai trò chính của AI:
+
+- Hiểu ý nghĩa các trường dữ liệu
+- Hỗ trợ lựa chọn visualization
+- Đề xuất cách mapping dữ liệu vào renderer
+- Đề xuất cấu hình ban đầu
+
+AI không nên trực tiếp sinh code render bản đồ.
+
+Thay vào đó AI nên trả về cấu hình có cấu trúc, ví dụ:
+
+```json
 {
-  temperature: 28.4,
-  humidity: 78,
-  updatedAt: 1791266400000
+  "visualization": "column",
+  "mapping": {
+    "latitude": "lat",
+    "longitude": "lon",
+    "value": "population"
+  }
 }
 ```
 
-Khi cache còn hạn, ứng dụng không gọi lại OpenWeather cho cell đó. Có thể xóa cache thủ công trong DevTools:
+Renderer có sẵn trong hệ thống sẽ sử dụng cấu hình này để hiển thị bản đồ.
 
-```js
-localStorage.removeItem("openweather-h3-weather-v2");
+## 14. Quyền lựa chọn của người dùng
+
+AI hoặc rule engine chỉ nên đóng vai trò đề xuất.
+
+Người dùng vẫn có thể:
+
+- Thay đổi visualization
+- Thay đổi thuộc tính dữ liệu
+- Điều chỉnh style
+- Điều chỉnh các tham số hiển thị
+
+## 15. Hướng phát triển
+
+Thứ tự triển khai đề xuất:
+
+```text
+1. Upload và đọc dữ liệu
+2. Data Profiler
+3. Chuẩn hóa dữ liệu
+4. Renderer Registry
+5. Map Canvas dùng chung
+6. Dynamic Config Panel
+7. Data Preview
+8. Rule-based Recommendation
+9. Mở rộng renderer
+10. Tích hợp AI Recommendation
 ```
 
-## Scripts
+## 16. Nguyên tắc kiến trúc
 
-| Lệnh | Chức năng |
-| --- | --- |
-| `npm run dev` | Chạy Vite development server |
-| `npm run build` | Tạo production build trong `dist/` |
-| `npm run preview` | Xem thử production build |
+Hệ thống nên hướng tới:
 
-## Xử lý sự cố
-
-### Bản đồ không hiển thị
-
-- Kiểm tra kết nối tới `tiles.openfreemap.org`.
-- Kiểm tra trình duyệt đã bật WebGL.
-- Mở DevTools Console để xem lỗi MapLibre hoặc CORS.
-- Chạy qua Vite thay vì mở file HTML trực tiếp.
-
-### Không có nhiệt độ hoặc độ ẩm
-
-- Kiểm tra `VITE_OPENWEATHER_API_KEY` trong `.env`.
-- Khởi động lại Vite sau khi thay đổi `.env`.
-- Kiểm tra quota và trạng thái API key trên OpenWeather.
-- Nếu gặp HTTP 429, chờ hết giới hạn tốc độ rồi tải lại.
-
-### Resolution cao không được áp dụng
-
-Đây là cơ chế bảo vệ theo `MAX_RENDER_CELLS`. H3 tăng số cell rất nhanh, trung bình khoảng bảy lần sau mỗi cấp resolution.
-
-## Giới hạn hiện tại
-
-- Chỉ H3 Hexagon có đầy đủ logic xử lý.
-- Công cụ vẽ Rectangle, Circle, Line, Polygon và Delete mới có giao diện.
-- Chưa đọc trực tiếp ZIP/Shapefile.
-- Chưa có backend bảo vệ OpenWeather API key.
-- Weather request đang chạy tuần tự để hạn chế rate limit nên lần tải đầu có thể mất thời gian.
-- Chưa có test tự động.
-
-## Hướng phát triển
-
-- Thêm MapLibre Draw hoặc Terra Draw cho bộ công cụ vẽ.
-- Hỗ trợ Shapefile, KML và GeoPackage.
-- Chuyển OpenWeather sang backend proxy.
-- Lưu dự án và cấu hình style.
-- Hỗ trợ thêm Point, Line, Polygon, Province và Country.
-- Bổ sung worker cho H3 resolution cao.
-- Thêm unit test và end-to-end test.
+- Tách biệt dữ liệu và hiển thị
+- Renderer có thể thay thế hoặc bổ sung
+- Không phụ thuộc cứng vào H3
+- Không để AI sinh trực tiếp logic render
+- Các visualization dùng chung một Map Canvas
+- Có thể mở rộng thêm thư viện và kiểu bản đồ trong tương lai
