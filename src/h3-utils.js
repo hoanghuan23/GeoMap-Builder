@@ -1,15 +1,23 @@
-import { polygonToCells, cellToBoundary, cellToLatLng, cellToParent, cellToCenterChild, getResolution } from "https://cdn.jsdelivr.net/npm/h3-js@4.1.0/+esm";
+import { polygonToCells, latLngToCell, cellToBoundary, cellToLatLng, cellToParent, cellToCenterChild, getResolution } from "https://cdn.jsdelivr.net/npm/h3-js@4.1.0/+esm";
 
-function polygonsFromGeoJSON(data) {
-  const geometries = data.type === "FeatureCollection" ? data.features.map(f => f.geometry) : data.type === "Feature" ? [data.geometry] : [data];
-  return geometries.flatMap(g => g?.type === "Polygon" ? [g.coordinates] : g?.type === "MultiPolygon" ? g.coordinates : []);
+function geometriesFromGeoJSON(data) {
+  if (!data) return [];
+  if (data.type === "FeatureCollection") return data.features?.flatMap(geometriesFromGeoJSON) || [];
+  if (data.type === "Feature") return geometriesFromGeoJSON(data.geometry);
+  if (data.type === "GeometryCollection") return data.geometries?.flatMap(geometriesFromGeoJSON) || [];
+  return [data];
 }
 
 function toH3Polygon(polygon) { return polygon.map(ring => ring.map(([lng, lat]) => [lat, lng])); }
 
 export function geoJSONToCells(data, resolution) {
   const cells = [];
-  for (const polygon of polygonsFromGeoJSON(data)) cells.push(...polygonToCells(toH3Polygon(polygon), resolution));
+  for (const geometry of geometriesFromGeoJSON(data)) {
+    if (geometry?.type === "Polygon") cells.push(...polygonToCells(toH3Polygon(geometry.coordinates), resolution));
+    if (geometry?.type === "MultiPolygon") geometry.coordinates.forEach(polygon => cells.push(...polygonToCells(toH3Polygon(polygon), resolution)));
+    if (geometry?.type === "Point") cells.push(latLngToCell(geometry.coordinates[1], geometry.coordinates[0], resolution));
+    if (geometry?.type === "MultiPoint") geometry.coordinates.forEach(([lng, lat]) => cells.push(latLngToCell(lat, lng, resolution)));
+  }
   return [...new Set(cells)];
 }
 
@@ -29,10 +37,14 @@ export function cellsToFeatureCollection(cells, weatherResolution, weatherRecord
 }
 
 export function csvPointsToGeoJSON(text) {
-  const lines = text.trim().split(/\r?\n/); const headers = lines.shift().split(",").map(x => x.trim().toLowerCase());
+  const lines = text.trim().split(/\r?\n/); const originalHeaders = lines.shift().split(",").map(x => x.trim()); const headers = originalHeaders.map(x => x.toLowerCase());
   const latIndex = headers.findIndex(x => ["lat","latitude","vĩ độ"].includes(x)); const lngIndex = headers.findIndex(x => ["lng","lon","longitude","kinh độ"].includes(x));
   if (latIndex < 0 || lngIndex < 0) throw new Error("CSV cần có cột lat và lng.");
-  const points = lines.map(line => line.split(",").map(Number)).filter(row => Number.isFinite(row[latIndex]) && Number.isFinite(row[lngIndex])).map(row => [row[lngIndex],row[latIndex]]);
-  if (points.length < 3) throw new Error("CSV cần ít nhất 3 tọa độ để tạo vùng."); points.push(points[0]);
-  return {type:"FeatureCollection",features:[{type:"Feature",properties:{},geometry:{type:"Polygon",coordinates:[points]}}]};
+  const features = lines.map(line => line.split(",").map(value => value.trim())).filter(row => Number.isFinite(Number(row[latIndex])) && Number.isFinite(Number(row[lngIndex]))).map(row => ({
+    type: "Feature",
+    properties: Object.fromEntries(originalHeaders.map((header, index) => [header, Number.isFinite(Number(row[index])) && row[index] !== "" ? Number(row[index]) : row[index] ?? ""])),
+    geometry: { type: "Point", coordinates: [Number(row[lngIndex]), Number(row[latIndex])] }
+  }));
+  if (!features.length) throw new Error("CSV không có tọa độ hợp lệ.");
+  return { type: "FeatureCollection", features };
 }

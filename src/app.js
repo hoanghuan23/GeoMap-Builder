@@ -3,6 +3,7 @@ import { loadWeatherCache, saveWeatherCache } from "./cache.js";
 import { geoJSONToCells, cellsToFeatureCollection, csvPointsToGeoJSON } from "./h3-utils.js";
 import { loadWeather } from "./weather-service.js";
 import { loadTraffic, loadTrafficCache, saveTrafficCache } from "./traffic-service.js";
+import { analyzeSpatialData, analyzeCsvData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -10,7 +11,7 @@ const state = {
   weather: loadWeatherCache(CONFIG.CACHE_KEY, CONFIG.CACHE_TTL_MS),
   traffic: loadTrafficCache(CONFIG.TRAFFIC_CACHE_KEY, CONFIG.TRAFFIC_CACHE_TTL_MS), palette: "thermal", displayMode: "data",
   property: "temperature", page: 1, pageSize: 10, query: "", weatherController: null, trafficController: null, baselineCount: null,
-  trafficApplied: false, weatherApplied: false
+  trafficApplied: false, weatherApplied: false, mapType: null, dataProfile: null
 };
 let map; let toastTimer; let renderTimer;
 
@@ -228,15 +229,25 @@ function formatProvinceName(name) {
 }
 
 function setupProvinceFilter(data) {
-  const names = provinceNames(data); const field = $("province-filter-field"); const select = $("province-filter");
-  select.innerHTML = '<option value="">-- Chọn tỉnh/thành --</option>';
-  for (const name of names) select.add(new Option(formatProvinceName(name), name));
-  select.value = ""; field.hidden = names.length === 0;
+  const names = provinceNames(data); const field = $("province-filter-field"); const options = $("province-filter-options");
+  options.replaceChildren(...names.map(name => {
+    const label = document.createElement("label"); const input = document.createElement("input"); const text = document.createElement("span");
+    input.type = "checkbox"; input.value = name; text.textContent = formatProvinceName(name); label.append(input, text); return label;
+  }));
+  $("province-filter-label").textContent = "Tất cả tỉnh/thành"; $("province-filter-menu").hidden = true; $("province-filter-toggle").setAttribute("aria-expanded", "false"); field.hidden = names.length === 0;
 }
 
-function boundaryForProvince(data, name) {
-  if (!name || data?.type !== "FeatureCollection") return data;
-  return { ...data, features: data.features.filter(feature => feature?.properties?.NAME_1 === name) };
+function selectedProvinceNames() {
+  return [...document.querySelectorAll('#province-filter-options input:checked')].map(input => input.value);
+}
+
+function updateProvinceFilterLabel(names = selectedProvinceNames()) {
+  $("province-filter-label").textContent = names.length === 0 ? "Tất cả tỉnh/thành" : names.length === 1 ? formatProvinceName(names[0]) : `${names.length} tỉnh/thành đã chọn`;
+}
+
+function boundaryForProvinces(data, names) {
+  if (!names.length || data?.type !== "FeatureCollection") return data;
+  const selected = new Set(names); return { ...data, features: data.features.filter(feature => selected.has(feature?.properties?.NAME_1)) };
 }
 
 function fitBoundary() {
@@ -278,12 +289,31 @@ function fitBoundary() {
   });
 }
 
+function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
+  const types = compatibleMapTypes(profile); const grid = $("map-type-grid"); state.dataProfile = profile;
+  if (!types.some(type => type.id === state.mapType)) state.mapType = types.find(type => type.id === "h3")?.id || types[0]?.id || null;
+  grid.replaceChildren(...types.map(type => {
+    const button = document.createElement("button"); const icon = document.createElement("span");
+    button.type = "button"; button.className = `map-type${type.id === state.mapType ? " active" : ""}`; button.dataset.type = type.id; button.dataset.label = type.label;
+    button.title = `${type.label} · ${type.renderer}`; icon.textContent = type.icon; button.append(icon, type.label); return button;
+  }));
+  grid.classList.toggle("is-empty", types.length === 0);
+  if (!types.length) grid.textContent = "Dữ liệu này chưa phù hợp với renderer hiện có.";
+  $("map-type-summary").textContent = types.length
+    ? `Phát hiện ${describeDataProfile(profile)} · ${types.length} kiểu bản đồ phù hợp`
+    : `Phát hiện ${describeDataProfile(profile)} · chưa có kiểu bản đồ phù hợp`;
+}
+
 async function readSpatialFile(file) {
   if (file.name.toLowerCase().endsWith(".zip")) throw new Error("ZIP/Shapefile sẽ được hỗ trợ ở phiên bản tiếp theo.");
-  const text = await file.text(); return file.name.toLowerCase().endsWith(".csv") ? csvPointsToGeoJSON(text) : JSON.parse(text);
+  const text = await file.text();
+  return file.name.toLowerCase().endsWith(".csv")
+    ? { data: csvPointsToGeoJSON(text), profile: analyzeCsvData(text) }
+    : { data: JSON.parse(text), profile: null };
 }
-async function replaceBoundary(data, name) {
+async function replaceBoundary(data, name, profile = null) {
   if (!data) throw new Error("Không tìm thấy dữ liệu."); geoJSONToCells(data, Math.min(state.resolution, 3)); state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
+  renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));
   map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; state.baselineCount = null; await rebuildGrid({ fit: true });
 }
 
@@ -295,14 +325,20 @@ function bindUI() {
   $("data-property").addEventListener("change", e => { state.property = e.target.value; applyStyle(); updateDashboard(); });
   document.querySelectorAll(".palette").forEach(el => el.addEventListener("click", () => { document.querySelectorAll(".palette").forEach(x => x.classList.remove("active")); el.classList.add("active"); state.palette = el.dataset.palette; applyStyle(); updateLegend(); }));
   document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => { document.querySelectorAll(".tab,.tab-panel").forEach(x => x.classList.remove("active")); tab.classList.add("active"); document.querySelector(`[data-panel="${tab.dataset.tab}"]`).classList.add("active"); }));
-  document.querySelectorAll(".map-type").forEach(button => button.addEventListener("click", () => { document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); if (button.dataset.type !== "H3 Hexagon") showToast(`${button.dataset.type}: UI đã sẵn sàng, công cụ xử lý sẽ được bổ sung sau.`); }));
-  $("spatial-file").addEventListener("change", async e => { const file = e.target.files[0]; if (!file) return; try { setStatus(`Đang đọc ${file.name}…`); await replaceBoundary(await readSpatialFile(file), file.name); } catch (error) { showToast(error.message); setStatus("Không thể đọc file.", true); } });
-  $("province-filter").addEventListener("change", async e => {
-    const name = e.target.value; state.boundary = boundaryForProvince(state.sourceBoundary, name); state.baselineCount = null;
-    map.getSource("vietnam-boundary")?.setData(state.boundary); $("file-note").textContent = name ? `Đang lọc: ${formatProvinceName(name)}` : "Dữ liệu đã tải · đang sử dụng";
-    e.target.disabled = true;
-    try { await rebuildGrid({ fit: true }); } finally { e.target.disabled = false; }
+  $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; if (state.mapType !== "h3") showToast(`${button.dataset.label}: renderer đã nhận diện, phần hiển thị đang được chuẩn bị.`); });
+  $("spatial-file").addEventListener("change", async e => { const file = e.target.files[0]; if (!file) return; try { setStatus(`Đang đọc ${file.name}…`); const result = await readSpatialFile(file); await replaceBoundary(result.data, file.name, result.profile); } catch (error) { showToast(error.message); setStatus("Không thể đọc file.", true); } });
+  $("province-filter-toggle").addEventListener("click", () => {
+    const menu = $("province-filter-menu"); const open = menu.hidden; menu.hidden = !open; $("province-filter-toggle").setAttribute("aria-expanded", String(open));
   });
+  $("province-filter-options").addEventListener("change", () => updateProvinceFilterLabel());
+  $("clear-provinces").addEventListener("click", () => { document.querySelectorAll('#province-filter-options input:checked').forEach(input => input.checked = false); updateProvinceFilterLabel([]); });
+  $("apply-provinces").addEventListener("click", async () => {
+    const names = selectedProvinceNames(); const toggle = $("province-filter-toggle"); state.boundary = boundaryForProvinces(state.sourceBoundary, names); state.baselineCount = null;
+    map.getSource("vietnam-boundary")?.setData(state.boundary); $("file-note").textContent = names.length ? `Đang lọc: ${names.map(formatProvinceName).join(", ")}` : "Dữ liệu đã tải · đang sử dụng";
+    $("province-filter-menu").hidden = true; toggle.setAttribute("aria-expanded", "false"); toggle.disabled = true;
+    try { await rebuildGrid({ fit: true }); } finally { toggle.disabled = false; }
+  });
+  document.addEventListener("click", event => { if (!event.target.closest("#province-filter")) { $("province-filter-menu").hidden = true; $("province-filter-toggle").setAttribute("aria-expanded", "false"); } });
   $("apply-coordinates").addEventListener("click", async () => { try { const raw = $("coordinate-input").value.trim(); let data; if (raw.startsWith("{")) data = JSON.parse(raw); else { const ring = raw.split(/\n/).map(line => line.split(",").map(Number)); if (ring.length < 3 || ring.some(p => p.length < 2 || p.some(Number.isNaN))) throw new Error("Cần ít nhất 3 dòng lng,lat."); ring.push(ring[0]); data = { type: "Polygon", coordinates: [ring] }; } await replaceBoundary(data, "Tọa độ nhập trực tiếp"); } catch (error) { showToast(error.message); } });
   for (const [toggleId, controlsId] of [["feature-toggle", "feature-controls"], ["style-toggle", "style-controls"]]) {
     $(toggleId).addEventListener("click", () => { const open = $(toggleId).getAttribute("aria-expanded") === "true"; $(toggleId).setAttribute("aria-expanded", String(!open)); $(controlsId).style.display = open ? "none" : ""; });
@@ -335,7 +371,7 @@ function bindUI() {
       applyStyle(); applyMapLayerVisibility(); updateDashboard();
     } catch (error) { console.error(error); invalidateTrafficApplication(); setStatus(error.message); showToast(error.message); }
   });
-  $("reset-map").addEventListener("click", async () => { const response = await fetch(CONFIG.DEFAULT_DATA_URL); state.boundary = await response.json(); state.sourceBoundary = state.boundary; setupProvinceFilter(state.boundary); state.resolution = CONFIG.DEFAULT_RESOLUTION; state.palette = "thermal"; state.displayMode = "data"; state.property = "temperature"; state.baselineCount = null; state.weatherApplied = false; invalidateTrafficApplication(); $("resolution").value = 5; $("resolution-value").value = 5; $("display-mode").value = "data"; $("data-property").value = "temperature"; $("opacity").value = .72; $("opacity-value").value = "72%"; $("show-map-layers").checked = false; $("show-map-layers-status").textContent = "Đang tắt"; $("fetch-weather").checked = false; $("fetch-weather-status").textContent = "Đang tắt"; $("fetch-traffic").checked = false; $("fetch-traffic-status").textContent = "Đang tắt"; $("file-name").textContent = "gadm41_VNM_0.json"; $("file-note").textContent = "Dữ liệu mặc định · đang sử dụng"; document.querySelectorAll(".palette").forEach(x => x.classList.toggle("active", x.dataset.palette === "thermal")); map.getSource("vietnam-boundary")?.setData(state.boundary); await rebuildGrid({ fit: true }); applyStyle(); });
+  $("reset-map").addEventListener("click", async () => { const response = await fetch(CONFIG.DEFAULT_DATA_URL); state.boundary = await response.json(); state.sourceBoundary = state.boundary; setupProvinceFilter(state.boundary); renderCompatibleMapTypes(state.boundary); state.resolution = CONFIG.DEFAULT_RESOLUTION; state.palette = "thermal"; state.displayMode = "data"; state.property = "temperature"; state.baselineCount = null; state.weatherApplied = false; invalidateTrafficApplication(); $("resolution").value = 5; $("resolution-value").value = 5; $("display-mode").value = "data"; $("data-property").value = "temperature"; $("opacity").value = .72; $("opacity-value").value = "72%"; $("show-map-layers").checked = false; $("show-map-layers-status").textContent = "Đang tắt"; $("fetch-weather").checked = false; $("fetch-weather-status").textContent = "Đang tắt"; $("fetch-traffic").checked = false; $("fetch-traffic-status").textContent = "Đang tắt"; $("file-name").textContent = "gadm41_VNM_0.json"; $("file-note").textContent = "Dữ liệu mặc định · đang sử dụng"; document.querySelectorAll(".palette").forEach(x => x.classList.toggle("active", x.dataset.palette === "thermal")); map.getSource("vietnam-boundary")?.setData(state.boundary); await rebuildGrid({ fit: true }); applyStyle(); });
   $("table-search").addEventListener("input", e => { state.query = e.target.value; state.page = 1; renderTable(); }); $("page-size").addEventListener("change", e => { state.pageSize = Number(e.target.value); state.page = 1; renderTable(); });
   $("prev-page").addEventListener("click", () => { state.page--; renderTable(); }); $("next-page").addEventListener("click", () => { state.page++; renderTable(); }); $("page-buttons").addEventListener("click", e => { if (e.target.dataset.page) { state.page = Number(e.target.dataset.page); renderTable(); } });
   $("zoom-in").addEventListener("click", () => map.zoomIn()); $("zoom-out").addEventListener("click", () => map.zoomOut()); $("fullscreen").addEventListener("click", () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector(".map-panel").requestFullscreen());
@@ -353,7 +389,7 @@ function exportCSV() {
 
 async function init() {
   bindUI(); map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/dark", center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
-  map.once("style.load", async () => { try { const response = await fetch(CONFIG.DEFAULT_DATA_URL); if (!response.ok) throw new Error(`HTTP ${response.status}`); state.boundary = await response.json(); state.sourceBoundary = state.boundary; setupProvinceFilter(state.boundary); addMapLayers(); await rebuildGrid({ fit: true }); } catch (error) { console.error(error); setStatus("Không tải được dữ liệu ranh giới Việt Nam."); } });
+  map.once("style.load", async () => { try { const response = await fetch(CONFIG.DEFAULT_DATA_URL); if (!response.ok) throw new Error(`HTTP ${response.status}`); state.boundary = await response.json(); state.sourceBoundary = state.boundary; setupProvinceFilter(state.boundary); renderCompatibleMapTypes(state.boundary); addMapLayers(); await rebuildGrid({ fit: true }); } catch (error) { console.error(error); setStatus("Không tải được dữ liệu ranh giới Việt Nam."); } });
   map.on("error", event => console.warn("MapLibre:", event.error?.message || event.error));
 }
 init();
