@@ -48,3 +48,32 @@ export function csvPointsToGeoJSON(text) {
   if (!features.length) throw new Error("CSV không có tọa độ hợp lệ.");
   return { type: "FeatureCollection", features };
 }
+
+const LATITUDE_FIELDS = new Set(["lat", "latitude", "vĩ độ", "vi do"]);
+const LONGITUDE_FIELDS = new Set(["lng", "lon", "long", "longitude", "kinh độ", "kinh do"]);
+
+function coordinateField(headers, aliases) {
+  return headers.find(header => aliases.has(String(header).trim().toLowerCase()));
+}
+
+export function recordsToPointGeoJSON(records) {
+  if (!Array.isArray(records) || !records.length) throw new Error("File không có bản ghi dữ liệu.");
+  const headers = [...new Set(records.flatMap(record => record && typeof record === "object" ? Object.keys(record) : []))];
+  const latitudeField = coordinateField(headers, LATITUDE_FIELDS);
+  const longitudeField = coordinateField(headers, LONGITUDE_FIELDS);
+  if (!latitudeField || !longitudeField) throw new Error("Dữ liệu cần có cột latitude/longitude hoặc lat/lng.");
+
+  const features = records.flatMap(record => {
+    if (!record || typeof record !== "object") return [];
+    const latitude = Number(record[latitudeField]); const longitude = Number(record[longitudeField]);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return [];
+    const properties = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (key === latitudeField || key === longitudeField) continue;
+      properties[key] = typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : value;
+    }
+    return [{ type: "Feature", properties, geometry: { type: "Point", coordinates: [longitude, latitude] } }];
+  });
+  if (!features.length) throw new Error("Không tìm thấy tọa độ hợp lệ trong file.");
+  return { type: "FeatureCollection", features };
+}

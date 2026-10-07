@@ -2,3 +2,6 @@ node_modules/
 dist/
 .env
 .env.local
+
+# dữ liệu test
+geomap_test_samples/

@@ -1,6 +1,6 @@
 import { CONFIG, PALETTES } from "./config.js";
 import { loadWeatherCache, saveWeatherCache } from "./cache.js";
-import { geoJSONToCells, cellsToFeatureCollection, csvPointsToGeoJSON } from "./h3-utils.js";
+import { geoJSONToCells, cellsToFeatureCollection, csvPointsToGeoJSON, recordsToPointGeoJSON } from "./h3-utils.js";
 import { loadWeather } from "./weather-service.js";
 import { loadTraffic, loadTrafficCache, saveTrafficCache } from "./traffic-service.js";
 import { analyzeSpatialData, analyzeCsvData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
@@ -12,7 +12,8 @@ const state = {
   weather: loadWeatherCache(CONFIG.CACHE_KEY, CONFIG.CACHE_TTL_MS),
   traffic: loadTrafficCache(CONFIG.TRAFFIC_CACHE_KEY, CONFIG.TRAFFIC_CACHE_TTL_MS), palette: "thermal", displayMode: "data",
   property: "temperature", page: 1, pageSize: 10, query: "", weatherController: null, trafficController: null, baselineCount: null,
-  trafficApplied: false, weatherApplied: false, mapType: null, dataProfile: null
+  trafficApplied: false, weatherApplied: false, mapType: null, dataProfile: null,
+  pointData: { type: "FeatureCollection", features: [] }
 };
 let map; let toastTimer; let renderTimer;
 
@@ -42,8 +43,12 @@ function applyStyle() {
 function applyMapLayerVisibility() {
   if (!map) return;
   const showLayers = $("show-map-layers")?.checked ?? false;
-  if (map.getLayer("h3-fill")) map.setLayoutProperty("h3-fill", "visibility", showLayers ? "visible" : "none");
-  if (map.getLayer("h3-border")) map.setLayoutProperty("h3-border", "visibility", showLayers && $("show-border").checked ? "visible" : "none");
+  const showH3 = showLayers && state.mapType === "h3";
+  if (map.getLayer("h3-fill")) map.setLayoutProperty("h3-fill", "visibility", showH3 ? "visible" : "none");
+  if (map.getLayer("h3-border")) map.setLayoutProperty("h3-border", "visibility", showH3 && $("show-border").checked ? "visible" : "none");
+  if (map.getLayer("point-marker")) map.setLayoutProperty("point-marker", "visibility", showLayers && state.mapType === "point" ? "visible" : "none");
+  if (map.getLayer("point-circle")) map.setLayoutProperty("point-circle", "visibility", showLayers && state.mapType === "circle" ? "visible" : "none");
+  if (map.getLayer("point-heatmap")) map.setLayoutProperty("point-heatmap", "visibility", showLayers && state.mapType === "heatmap" ? "visible" : "none");
   if (map.getLayer("vietnam-border")) map.setLayoutProperty("vietnam-border", "visibility", "visible");
   if (map.getLayer("tomtom-traffic-layer")) map.setLayoutProperty("tomtom-traffic-layer", "visibility", state.trafficApplied ? "visible" : "none");
   if (map.getLayer("tomtom-traffic-mask")) map.setLayoutProperty("tomtom-traffic-mask", "visibility", state.trafficApplied ? "visible" : "none");
@@ -107,6 +112,14 @@ function addMapLayers() {
   map.addSource("h3-grid", { type: "geojson", data: state.h3Data });
   map.addLayer({ id: "h3-fill", type: "fill", source: "h3-grid", paint: { "fill-color": fillExpression(), "fill-opacity": .72 } });
   map.addLayer({ id: "h3-border", type: "line", source: "h3-grid", paint: { "line-color": "#ffffff", "line-width": .5, "line-opacity": .75 } });
+  map.addSource("point-data", { type: "geojson", data: state.pointData });
+  map.addLayer({ id: "point-heatmap", type: "heatmap", source: "point-data", maxzoom: 16, paint: {
+    "heatmap-weight": 1, "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, .7, 12, 2.5],
+    "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(33,102,172,0)", .2, "#2c7bb6", .4, "#00a6ca", .6, "#fdae61", .8, "#f46d43", 1, "#d73027"],
+    "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 12, 28], "heatmap-opacity": .82
+  } });
+  map.addLayer({ id: "point-circle", type: "circle", source: "point-data", paint: { "circle-radius": 7, "circle-color": "#7c5cff", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.25, "circle-opacity": .86 } });
+  map.addLayer({ id: "point-marker", type: "circle", source: "point-data", paint: { "circle-radius": 4, "circle-color": "#00d084", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1, "circle-opacity": .95 } });
   map.addSource("vietnam-boundary", { type: "geojson", data: state.boundary || EMPTY_FEATURE_COLLECTION });
   map.addLayer({ id: "vietnam-border", type: "line", source: "vietnam-boundary", paint: { "line-color": "#00e65c", "line-width": 2 } });
   applyMapLayerVisibility();
@@ -116,6 +129,43 @@ function addMapLayers() {
     new maplibregl.Popup({ offset: 8 }).setLngLat(event.lngLat).setHTML(`<div style="font:12px Inter;line-height:1.8"><b>H3:</b> ${p.h3}<br><b>Mật độ giao thông:</b> ${traffic}<br><b>Tốc độ hiện tại:</b> ${p.current_speed == null ? "--" : fmt(Number(p.current_speed), 0) + " km/h"}<br><b>Tốc độ thông thoáng:</b> ${p.free_flow_speed == null ? "--" : fmt(Number(p.free_flow_speed), 0) + " km/h"}<br><b>Nhiệt độ:</b> ${p.temperature == null ? "Không có dữ liệu" : fmt(Number(p.temperature)) + " °C"}<br><b>Độ ẩm:</b> ${p.humidity == null ? "Không có dữ liệu" : fmt(Number(p.humidity), 0) + "%"}<br><b>Tâm ô:</b> ${fmt(Number(p.center_lat), 5)}, ${fmt(Number(p.center_lng), 5)}</div>`).addTo(map);
   });
   map.on("mouseenter", "h3-fill", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "h3-fill", () => map.getCanvas().style.cursor = "");
+  map.on("click", "point-circle", event => {
+    const feature = event.features?.[0]; if (!feature) return;
+    const rows = Object.entries(feature.properties || {}).map(([key, value]) => `<b>${key}:</b> ${String(value)}`).join("<br>");
+    new maplibregl.Popup({ offset: 9 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
+  });
+  map.on("mouseenter", "point-circle", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "point-circle", () => map.getCanvas().style.cursor = "");
+  map.on("click", "point-marker", event => {
+    const feature = event.features?.[0]; if (!feature) return;
+    const rows = Object.entries(feature.properties || {}).map(([key, value]) => `<b>${key}:</b> ${String(value)}`).join("<br>");
+    new maplibregl.Popup({ offset: 7 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
+  });
+  map.on("mouseenter", "point-marker", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "point-marker", () => map.getCanvas().style.cursor = "");
+}
+
+function pointFeatureCollection(data) {
+  const features = [];
+  const collect = feature => {
+    const geometry = feature?.geometry;
+    if (geometry?.type === "Point") features.push(feature);
+    else if (geometry?.type === "MultiPoint") geometry.coordinates?.forEach(coordinates => features.push({ type: "Feature", properties: { ...(feature.properties || {}) }, geometry: { type: "Point", coordinates } }));
+  };
+  if (data?.type === "FeatureCollection") data.features?.forEach(collect);
+  else if (data?.type === "Feature") collect(data);
+  return { type: "FeatureCollection", features };
+}
+
+function applyPointStyle() {
+  if (!map?.getLayer("point-circle")) return;
+  const field = state.dataProfile?.numericFields?.[0];
+  const values = field ? state.pointData.features.map(feature => Number(feature.properties?.[field])).filter(Number.isFinite) : [];
+  const min = values.length ? Math.min(...values) : 0; const max = values.length ? Math.max(...values) : 0;
+  if (field && max > min) {
+    map.setPaintProperty("point-circle", "circle-radius", ["interpolate", ["linear"], ["to-number", ["get", field], min], min, 5, max, 16]);
+    map.setPaintProperty("point-heatmap", "heatmap-weight", ["interpolate", ["linear"], ["to-number", ["get", field], min], min, .15, max, 1]);
+  } else {
+    map.setPaintProperty("point-circle", "circle-radius", 7); map.setPaintProperty("point-heatmap", "heatmap-weight", 1);
+  }
 }
 
 function estimateCellCount(resolution) {
@@ -293,7 +343,7 @@ function fitBoundary() {
 
 function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
   const types = compatibleMapTypes(profile); const grid = $("map-type-grid"); state.dataProfile = profile;
-  if (!types.some(type => type.id === state.mapType)) state.mapType = types.find(type => type.id === "h3")?.id || types[0]?.id || null;
+  if (!types.some(type => type.id === state.mapType)) state.mapType = types[0]?.id || null;
   grid.replaceChildren(...types.map(type => {
     const button = document.createElement("button"); const icon = document.createElement("span");
     button.type = "button"; button.className = `map-type${type.id === state.mapType ? " active" : ""}`; button.dataset.type = type.id; button.dataset.label = type.label;
@@ -308,24 +358,37 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 
 function clearUploadedData() {
   state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
+  state.pointData = { type: "FeatureCollection", features: [] };
   state.mapType = null; state.dataProfile = null; state.baselineCount = null; state.page = 1;
   $("map-type-grid").className = "map-type-grid is-empty"; $("map-type-grid").textContent = "Chưa có dữ liệu để phân tích.";
   $("map-type-summary").textContent = "Danh sách sẽ tự cập nhật sau khi dữ liệu được đọc.";
   $("selected-file").hidden = true; $("spatial-file").value = ""; setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
   map?.getSource("h3-grid")?.setData(state.h3Data); map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+  map?.getSource("point-data")?.setData(state.pointData);
 }
 
 async function readSpatialFile(file) {
-  if (file.name.toLowerCase().endsWith(".zip")) throw new Error("ZIP/Shapefile sẽ được hỗ trợ ở phiên bản tiếp theo.");
+  const extension = file.name.toLowerCase().split(".").pop();
+  if (extension === "zip") throw new Error("ZIP/Shapefile sẽ được hỗ trợ ở phiên bản tiếp theo.");
+  if (["xlsx", "xls"].includes(extension)) {
+    if (!globalThis.XLSX) throw new Error("Không tải được thư viện đọc Excel. Vui lòng kiểm tra kết nối mạng.");
+    const workbook = globalThis.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+    const records = globalThis.XLSX.utils.sheet_to_json(firstSheet, { defval: "", raw: true });
+    const data = recordsToPointGeoJSON(records);
+    return { data, profile: analyzeSpatialData(data) };
+  }
   const text = await file.text();
-  return file.name.toLowerCase().endsWith(".csv")
-    ? { data: csvPointsToGeoJSON(text), profile: analyzeCsvData(text) }
-    : { data: JSON.parse(text), profile: null };
+  if (extension === "csv") return { data: csvPointsToGeoJSON(text), profile: analyzeCsvData(text) };
+  const parsed = JSON.parse(text);
+  const data = Array.isArray(parsed) ? recordsToPointGeoJSON(parsed) : Array.isArray(parsed?.data) ? recordsToPointGeoJSON(parsed.data) : parsed;
+  return { data, profile: analyzeSpatialData(data) };
 }
 async function replaceBoundary(data, name, profile = null) {
   if (!data) throw new Error("Không tìm thấy dữ liệu."); geoJSONToCells(data, Math.min(state.resolution, 3)); state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
   renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));
-  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("selected-file").hidden = false; state.baselineCount = null; await rebuildGrid({ fit: true });
+  state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData); applyPointStyle();
+  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("selected-file").hidden = false; state.baselineCount = null; await rebuildGrid({ fit: true }); applyMapLayerVisibility();
 }
 
 function bindUI() {
@@ -336,7 +399,7 @@ function bindUI() {
   $("data-property").addEventListener("change", e => { state.property = e.target.value; applyStyle(); updateDashboard(); });
   document.querySelectorAll(".palette").forEach(el => el.addEventListener("click", () => { document.querySelectorAll(".palette").forEach(x => x.classList.remove("active")); el.classList.add("active"); state.palette = el.dataset.palette; applyStyle(); updateLegend(); }));
   document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => { document.querySelectorAll(".tab,.tab-panel").forEach(x => x.classList.remove("active")); tab.classList.add("active"); document.querySelector(`[data-panel="${tab.dataset.tab}"]`).classList.add("active"); }));
-  $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; if (state.mapType !== "h3") showToast(`${button.dataset.label}: renderer đã nhận diện, phần hiển thị đang được chuẩn bị.`); });
+  $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; applyMapLayerVisibility(); setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true); });
   $("spatial-file").addEventListener("change", async e => { const file = e.target.files[0]; if (!file) return; try { setStatus(`Đang đọc ${file.name}…`); const result = await readSpatialFile(file); await replaceBoundary(result.data, file.name, result.profile); } catch (error) { showToast(error.message); setStatus("Không thể đọc file.", true); } });
   $("province-filter-toggle").addEventListener("click", () => {
     const menu = $("province-filter-menu"); const open = menu.hidden; menu.hidden = !open; $("province-filter-toggle").setAttribute("aria-expanded", String(open));
