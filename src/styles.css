@@ -338,7 +338,14 @@ button {
     justify-content: center;
     gap: 3px;
     color: #6c788b;
-    cursor: pointer
+    cursor: pointer;
+    transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease
+}
+
+.drop-zone.is-dragging {
+    border-color: var(--blue);
+    background: #eef6ff;
+    box-shadow: 0 0 0 3px #2f80ed1f
 }
 
 .drop-zone input {

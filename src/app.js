@@ -489,6 +489,54 @@ async function replaceBoundary(data, name, profile = null) {
   map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("selected-file").hidden = false; state.baselineCount = null; await rebuildGrid({ fit: true }); applyMapLayerVisibility();
 }
 
+async function processSpatialFile(file) {
+  if (!file) return;
+  try {
+    setStatus(`Đang đọc ${file.name}…`);
+    const result = await readSpatialFile(file);
+    if (result.kind === "chart") replaceChartData(result.analysis, file.name);
+    else await replaceBoundary(result.data, file.name, result.profile);
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Không thể đọc file.");
+    setStatus("Không thể đọc file.", true);
+  }
+}
+
+function bindFileDropZone() {
+  const input = $("spatial-file");
+  const dropZone = document.querySelector(".drop-zone");
+  let dragDepth = 0;
+
+  input.addEventListener("change", event => processSpatialFile(event.target.files?.[0]));
+
+  dropZone.addEventListener("dragenter", event => {
+    event.preventDefault();
+    dragDepth += 1;
+    dropZone.classList.add("is-dragging");
+  });
+  dropZone.addEventListener("dragover", event => {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  });
+  dropZone.addEventListener("dragleave", () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dropZone.classList.remove("is-dragging");
+  });
+  dropZone.addEventListener("drop", event => {
+    event.preventDefault();
+    dragDepth = 0;
+    dropZone.classList.remove("is-dragging");
+    const files = [...(event.dataTransfer?.files || [])];
+    if (!files.length) {
+      showToast("Không tìm thấy file để tải lên.");
+      return;
+    }
+    if (files.length > 1) showToast("Chỉ có thể tải một file mỗi lần; đang đọc file đầu tiên.");
+    processSpatialFile(files[0]);
+  });
+}
+
 function bindUI() {
   $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
   $("opacity").addEventListener("input", e => { $("opacity-value").value = `${Math.round(e.target.value * 100)}%`; applyStyle(); }); $("line-width").addEventListener("input", e => { $("line-width-value").value = `${e.target.value} px`; applyStyle(); });
@@ -496,7 +544,7 @@ function bindUI() {
   $("show-border").addEventListener("change", applyStyle);
   document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => { document.querySelectorAll(".tab,.tab-panel").forEach(x => x.classList.remove("active")); tab.classList.add("active"); document.querySelector(`[data-panel="${tab.dataset.tab}"]`).classList.add("active"); }));
   $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; if (selectChartOption(button.dataset.type)) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; updateModelSections(); applyMapLayerVisibility(); setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true); });
-  $("spatial-file").addEventListener("change", async e => { const file = e.target.files[0]; if (!file) return; try { setStatus(`Đang đọc ${file.name}…`); const result = await readSpatialFile(file); if (result.kind === "chart") replaceChartData(result.analysis, file.name); else await replaceBoundary(result.data, file.name, result.profile); } catch (error) { console.error(error); showToast(error.message); setStatus("Không thể đọc file.", true); } });
+  bindFileDropZone();
   $("province-filter-toggle").addEventListener("click", () => {
     const menu = $("province-filter-menu"); const open = menu.hidden; menu.hidden = !open; $("province-filter-toggle").setAttribute("aria-expanded", String(open));
   });
