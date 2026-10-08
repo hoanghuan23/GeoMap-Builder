@@ -22,7 +22,19 @@ function CheckControl({ label, checked, onChange }) {
   );
 }
 
-export function BarStylePanel({ config, rowCount, onChange }) {
+function ColorControl({ label, color, onChange }) {
+  return (
+    <label className="bar-color-row">
+      <span title={label}>{label}</span>
+      <span className="color-control">
+        <input type="color" value={color} aria-label={`Màu ${label}`} onChange={event => onChange(event.target.value)} />
+        <code>{color.toUpperCase()}</code>
+      </span>
+    </label>
+  );
+}
+
+export function BarStylePanel({ config, rowCount, series = [], onChange, onSeriesChange }) {
   const value = mergeBarConfig(config);
   const update = patch => onChange({ ...value, ...patch });
 
@@ -63,7 +75,21 @@ export function BarStylePanel({ config, rowCount, onChange }) {
       </section>
 
       <section>
-        <h3>3. Nhãn và trục tọa độ</h3>
+        <h3>3. Màu sắc</h3>
+        <div className="bar-color-list">
+          {series.map((item, index) => (
+            <ColorControl
+              key={item.key}
+              label={item.label}
+              color={item.color}
+              onChange={color => onSeriesChange(index, color)}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3>4. Nhãn và trục tọa độ</h3>
         <CheckControl label="Hiển thị giá trị trên cột" checked={value.showDataLabels} onChange={showDataLabels => update({ showDataLabels })} />
         <CheckControl label="Hiển thị đường lưới" checked={value.showGrid} onChange={showGrid => update({ showGrid })} />
         <CheckControl label="Hiển thị chú giải" checked={value.showLegend} onChange={showLegend => update({ showLegend })} />

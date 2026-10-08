@@ -271,7 +271,12 @@ async function resetConfiguration() {
   $("show-map-layers-status").textContent = "Đang tắt";
 
   if (state.chartConfig) {
-    state.chartConfig = { ...state.chartConfig, ...state.barStyle };
+    const defaultSeries = state.chartOptions.find(option => option.id === state.mapType)?.config.series;
+    state.chartConfig = {
+      ...state.chartConfig,
+      ...state.barStyle,
+      ...(defaultSeries ? { series: defaultSeries.map(item => ({ ...item })) } : {})
+    };
     BarRenderer.render($("chart-canvas"), state.chartConfig);
     renderChartStyleControls();
   } else if (state.boundary) {
@@ -300,9 +305,18 @@ function renderChartStyleControls() {
   renderBarStylePanel($("bar-style-controls"), {
     config: state.barStyle,
     rowCount: state.chartConfig.data.length,
+    series: state.chartConfig.series,
     onChange(nextConfig) {
       state.barStyle = mergeBarConfig(nextConfig);
       state.chartConfig = { ...state.chartConfig, ...state.barStyle };
+      BarRenderer.render($("chart-canvas"), state.chartConfig);
+      renderChartStyleControls();
+    },
+    onSeriesChange(index, color) {
+      state.chartConfig = {
+        ...state.chartConfig,
+        series: state.chartConfig.series.map((item, itemIndex) => itemIndex === index ? { ...item, color } : item)
+      };
       BarRenderer.render($("chart-canvas"), state.chartConfig);
       renderChartStyleControls();
     }
@@ -312,7 +326,7 @@ function renderChartStyleControls() {
 function showChartStyleControls(show) {
   $("map-style-controls").hidden = show;
   $("bar-style-controls").hidden = !show;
-  $("style-description").textContent = show ? "Dữ liệu, kích thước cột, nhãn và trục" : "Màu sắc, độ mờ và đường viền";
+  $("style-description").textContent = show ? "Dữ liệu, màu sắc, kích thước cột, nhãn và trục" : "Màu sắc, độ mờ và đường viền";
   if (show) renderChartStyleControls();
   else clearBarStylePanel($("bar-style-controls"));
 }

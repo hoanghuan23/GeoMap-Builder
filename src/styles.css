@@ -707,6 +707,32 @@ input[type=range] {
     accent-color: #20242b
 }
 
+.bar-color-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px
+}
+
+.bar-color-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: #435069;
+    font-size: 10px
+}
+
+.bar-color-row>span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap
+}
+
+.bar-color-row .color-control {
+    flex: none
+}
+
 .feature-controls {
     padding-left: 31px;
     display: flex;
