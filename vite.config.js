@@ -5,7 +5,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        geomap: resolve(__dirname, "openweather.html")
+        geomap: resolve(__dirname, "index.html")
       }
     }
   }

@@ -1,6 +1,9 @@
 import { CONFIG } from "./config.js";
-import { geoJSONToCells, cellsToFeatureCollection, csvPointsToGeoJSON, recordsToPointGeoJSON } from "./h3-utils.js";
-import { analyzeSpatialData, analyzeCsvData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
+import { geoJSONToCells, cellsToFeatureCollection, recordsToPointGeoJSON } from "./h3-utils.js";
+import { analyzeSpatialData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
+import { BarRenderer, analyzeBarData } from "./charts/bar-renderer.js";
+import { DEFAULT_BAR_CONFIG, mergeBarConfig } from "./charts/configs/bar-config.js";
+import { clearBarStylePanel, renderBarStylePanel } from "./charts/components/bar-style-panel.jsx";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -8,7 +11,8 @@ const state = {
   resolution: CONFIG.DEFAULT_RESOLUTION, boundary: null, sourceBoundary: null, h3Data: { type: "FeatureCollection", features: [] },
   page: 1, pageSize: 10, query: "", baselineCount: null,
   mapType: null, dataProfile: null,
-  pointData: { type: "FeatureCollection", features: [] }
+  pointData: { type: "FeatureCollection", features: [] },
+  chartConfig: null, chartOptions: [], barStyle: { ...DEFAULT_BAR_CONFIG }
 };
 let map; let toastTimer;
 
@@ -227,12 +231,79 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 function clearUploadedData() {
   state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
   state.pointData = { type: "FeatureCollection", features: [] };
-  state.mapType = null; state.dataProfile = null; state.baselineCount = null; state.page = 1;
+  state.mapType = null; state.dataProfile = null; state.chartConfig = null; state.chartOptions = []; state.baselineCount = null; state.page = 1;
+  BarRenderer.clear($("chart-canvas")); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
+  showChartStyleControls(false);
   $("map-type-grid").className = "map-type-grid is-empty"; $("map-type-grid").textContent = "Chưa có dữ liệu để phân tích.";
   $("map-type-summary").textContent = "Danh sách sẽ tự cập nhật sau khi dữ liệu được đọc.";
   $("selected-file").hidden = true; $("spatial-file").value = ""; setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
   map?.getSource("h3-grid")?.setData(state.h3Data); map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   map?.getSource("point-data")?.setData(state.pointData);
+}
+
+async function resetConfiguration() {
+  state.resolution = CONFIG.DEFAULT_RESOLUTION;
+  state.barStyle = { ...DEFAULT_BAR_CONFIG };
+
+  $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
+  $("resolution-value").value = CONFIG.DEFAULT_RESOLUTION;
+  $("fixed-color").value = "#6c5ce7";
+  $("fixed-color-value").textContent = "#6C5CE7";
+  $("opacity").value = .72;
+  $("opacity-value").value = "72%";
+  $("show-border").checked = true;
+  $("border-color").value = "#ffffff";
+  $("border-color-value").textContent = "#FFFFFF";
+  $("line-width").value = .5;
+  $("line-width-value").value = "0.5 px";
+  $("show-map-layers").checked = false;
+  $("show-map-layers-status").textContent = "Đang tắt";
+
+  if (state.chartConfig) {
+    state.chartConfig = { ...state.chartConfig, ...state.barStyle };
+    BarRenderer.render($("chart-canvas"), state.chartConfig);
+    renderChartStyleControls();
+  } else if (state.boundary) {
+    await rebuildGrid();
+  }
+
+  applyStyle();
+  applyMapLayerVisibility();
+  updateDashboard();
+}
+
+function deleteData() {
+  clearUploadedData();
+  setDataPanelVisible(false);
+  state.query = "";
+  $("table-search").value = "";
+  $("coordinate-input").value = "";
+  $("cell-count").textContent = "0";
+  $("cell-label").textContent = `Tổng số cell (res ${state.resolution})`;
+  applyMapLayerVisibility();
+  updateDashboard();
+}
+
+function renderChartStyleControls() {
+  if (!state.chartConfig) return;
+  renderBarStylePanel($("bar-style-controls"), {
+    config: state.barStyle,
+    rowCount: state.chartConfig.data.length,
+    onChange(nextConfig) {
+      state.barStyle = mergeBarConfig(nextConfig);
+      state.chartConfig = { ...state.chartConfig, ...state.barStyle };
+      BarRenderer.render($("chart-canvas"), state.chartConfig);
+      renderChartStyleControls();
+    }
+  });
+}
+
+function showChartStyleControls(show) {
+  $("map-style-controls").hidden = show;
+  $("bar-style-controls").hidden = !show;
+  $("style-description").textContent = show ? "Dữ liệu, kích thước cột, nhãn và trục" : "Màu sắc, độ mờ và đường viền";
+  if (show) renderChartStyleControls();
+  else clearBarStylePanel($("bar-style-controls"));
 }
 
 async function readSpatialFile(file) {
@@ -243,16 +314,66 @@ async function readSpatialFile(file) {
     const workbook = globalThis.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const records = globalThis.XLSX.utils.sheet_to_json(firstSheet, { defval: "", raw: true });
-    const data = recordsToPointGeoJSON(records);
-    return { data, profile: analyzeSpatialData(data) };
+    try {
+      const data = recordsToPointGeoJSON(records);
+      return { data, profile: analyzeSpatialData(data) };
+    } catch {
+      return { kind: "chart", analysis: analyzeBarData(records) };
+    }
   }
   const text = await file.text();
-  if (extension === "csv") return { data: csvPointsToGeoJSON(text), profile: analyzeCsvData(text) };
+  if (extension === "csv") {
+    if (!globalThis.XLSX) throw new Error("Không tải được thư viện đọc CSV. Vui lòng kiểm tra kết nối mạng.");
+    const workbook = globalThis.XLSX.read(text, { type: "string", raw: true });
+    const records = globalThis.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: true });
+    try {
+      const data = recordsToPointGeoJSON(records);
+      return { data, profile: analyzeSpatialData(data) };
+    } catch {
+      return { kind: "chart", analysis: analyzeBarData(records) };
+    }
+  }
   const parsed = JSON.parse(text);
-  const data = Array.isArray(parsed) ? recordsToPointGeoJSON(parsed) : Array.isArray(parsed?.data) ? recordsToPointGeoJSON(parsed.data) : parsed;
-  return { data, profile: analyzeSpatialData(data) };
+  if (typeof parsed?.type === "string") return { data: parsed, profile: analyzeSpatialData(parsed) };
+  const records = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : null;
+  if (records) {
+    try {
+      const data = recordsToPointGeoJSON(records);
+      return { data, profile: analyzeSpatialData(data) };
+    } catch { /* Không có tọa độ: tiếp tục phân tích như dữ liệu biểu đồ. */ }
+  }
+  return { kind: "chart", analysis: analyzeBarData(parsed) };
+}
+
+function selectChartOption(type) {
+  const option = state.chartOptions.find(item => item.id === type);
+  if (!option) return false;
+  state.mapType = option.id; state.chartConfig = { ...option.config, ...state.barStyle };
+  document.querySelectorAll("#map-type-grid .map-type").forEach(button => button.classList.toggle("active", button.dataset.type === type));
+  BarRenderer.render($("chart-canvas"), state.chartConfig); renderChartStyleControls();
+  setStatus(`Đang hiển thị kiểu ${option.label}.`, true);
+  return true;
+}
+
+function replaceChartData(analysis, name) {
+  state.chartOptions = analysis.options; state.boundary = null; state.sourceBoundary = null; state.dataProfile = null;
+  state.h3Data = { type: "FeatureCollection", features: [] }; state.pointData = { type: "FeatureCollection", features: [] };
+  map.getSource("h3-grid")?.setData(state.h3Data); map.getSource("point-data")?.setData(state.pointData); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+  setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
+  $("map-type-grid").className = "map-type-grid";
+  $("map-type-grid").replaceChildren(...analysis.options.map(option => {
+    const button = document.createElement("button"); const icon = document.createElement("span");
+    button.type = "button"; button.className = "map-type"; button.dataset.type = option.id; button.dataset.label = option.label;
+    button.title = `${option.label} · Recharts`; icon.textContent = option.icon; button.append(icon, option.label); return button;
+  }));
+  $("map-type-summary").textContent = `Tìm thấy ${analysis.rowCount} bản ghi tại ${analysis.sourcePath} · ${analysis.numericFields.length} trường số · ${analysis.options.length} kiểu biểu đồ phù hợp`;
+  $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu biểu đồ đã tải · đang sử dụng"; $("selected-file").hidden = false;
+  const canvas = $("chart-canvas"); canvas.hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
+  setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(analysis.options[0].id);
 }
 async function replaceBoundary(data, name, profile = null) {
+  state.chartConfig = null; state.chartOptions = []; BarRenderer.clear($("chart-canvas")); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
+  showChartStyleControls(false);
   if (!data) throw new Error("Không tìm thấy dữ liệu."); geoJSONToCells(data, Math.min(state.resolution, 3)); state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
   renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));
   state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData); applyPointStyle();
@@ -265,8 +386,8 @@ function bindUI() {
   for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); applyStyle(); }); }
   $("show-border").addEventListener("change", applyStyle);
   document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => { document.querySelectorAll(".tab,.tab-panel").forEach(x => x.classList.remove("active")); tab.classList.add("active"); document.querySelector(`[data-panel="${tab.dataset.tab}"]`).classList.add("active"); }));
-  $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; applyMapLayerVisibility(); setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true); });
-  $("spatial-file").addEventListener("change", async e => { const file = e.target.files[0]; if (!file) return; try { setStatus(`Đang đọc ${file.name}…`); const result = await readSpatialFile(file); await replaceBoundary(result.data, file.name, result.profile); } catch (error) { showToast(error.message); setStatus("Không thể đọc file.", true); } });
+  $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; if (selectChartOption(button.dataset.type)) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; applyMapLayerVisibility(); setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true); });
+  $("spatial-file").addEventListener("change", async e => { const file = e.target.files[0]; if (!file) return; try { setStatus(`Đang đọc ${file.name}…`); const result = await readSpatialFile(file); if (result.kind === "chart") replaceChartData(result.analysis, file.name); else await replaceBoundary(result.data, file.name, result.profile); } catch (error) { console.error(error); showToast(error.message); setStatus("Không thể đọc file.", true); } });
   $("province-filter-toggle").addEventListener("click", () => {
     const menu = $("province-filter-menu"); const open = menu.hidden; menu.hidden = !open; $("province-filter-toggle").setAttribute("aria-expanded", String(open));
   });
@@ -284,15 +405,16 @@ function bindUI() {
     $(toggleId).addEventListener("click", () => { const open = $(toggleId).getAttribute("aria-expanded") === "true"; $(toggleId).setAttribute("aria-expanded", String(!open)); $(controlsId).style.display = open ? "none" : ""; });
   }
   $("show-map-layers").addEventListener("change", e => { $("show-map-layers-status").textContent = e.target.checked ? "Đang bật" : "Đang tắt"; applyMapLayerVisibility(); });
-  $("build-map").addEventListener("click", async () => {
+  $("reset-config").addEventListener("click", async () => {
     try {
-      if (!state.boundary) throw new Error("Vui lòng upload dữ liệu không gian trước khi tạo bản đồ.");
-      await rebuildGrid();
-      applyStyle(); applyMapLayerVisibility(); updateDashboard();
-      setDataPanelVisible(true);
-    } catch (error) { console.error(error); setStatus(error.message); showToast(error.message); }
+      await resetConfiguration();
+      setStatus("Đã đặt lại cấu hình mặc định.", true);
+    } catch (error) { console.error(error); setStatus("Không thể đặt lại cấu hình."); showToast(error.message); }
   });
-  $("reset-map").addEventListener("click", () => { state.resolution = CONFIG.DEFAULT_RESOLUTION; clearUploadedData(); setDataPanelVisible(false); $("resolution").value = 5; $("resolution-value").value = 5; $("opacity").value = .72; $("opacity-value").value = "72%"; $("show-map-layers").checked = false; $("show-map-layers-status").textContent = "Đang tắt"; applyStyle(); updateDashboard(); setStatus("Đã làm lại. Hãy upload dữ liệu để bắt đầu.", true); });
+  $("clear-data").addEventListener("click", () => {
+    deleteData();
+    setStatus("Đã xóa dữ liệu. Hãy upload dữ liệu để bắt đầu.", true);
+  });
   $("close-data-panel").addEventListener("click", () => setDataPanelVisible(false));
   $("table-search").addEventListener("input", e => { state.query = e.target.value; state.page = 1; renderTable(); }); $("page-size").addEventListener("change", e => { state.pageSize = Number(e.target.value); state.page = 1; renderTable(); });
   $("prev-page").addEventListener("click", () => { state.page--; renderTable(); }); $("next-page").addEventListener("click", () => { state.page++; renderTable(); }); $("page-buttons").addEventListener("click", e => { if (e.target.dataset.page) { state.page = Number(e.target.dataset.page); renderTable(); } });

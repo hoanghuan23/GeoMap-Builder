@@ -1,140 +1,56 @@
-<!DOCTYPE html>
-<html lang="en">
-
+<!doctype html>
+<html lang="vi">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vietnam H3 Grid</title>
-
-    <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="GeoMap Builder - trực quan hoá dữ liệu không gian bằng H3">
+  <title>GeoMap Builder</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="./src/styles.css">
+  <link rel="stylesheet" href="./src/reference-tweaks.css">
 </head>
-
-<style>
-    html,
-    body,
-    #map {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-    }
-</style>
-
-
 <body>
-    <div id="map"></div>
-    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-
-    <script type="module">
-        import { polygonToCells, cellToBoundary } from "https://cdn.jsdelivr.net/npm/h3-js@4.1.0/+esm";
-        const map = new maplibregl.Map({
-            container: "map",
-
-            style: "https://tiles.openfreemap.org/styles/dark",
-            center: [108.2, 16.2],
-            zoom: 5
-        });
-
-        map.on("load", async () => {
-            const response = await fetch("./gadm41_VNM_0.json");
-            const vietnamGeoJSON = await response.json();
-
-            const geometry = vietnamGeoJSON.features[0].geometry;
-
-            const resolution = 3;
-
-            let h3Cells = [];
-            if (geometry.type === "Polygon") {
-                h3Cells = polygonToCells(
-                    convertPolygonToH3Format(geometry.coordinates),
-                    resolution
-                );
-            }
-
-            if (geometry.type === "MultiPolygon") {
-                geometry.coordinates.forEach((polygon) => {
-                    const cells = polygonToCells(
-                        convertPolygonToH3Format(polygon),
-                        resolution
-                    );
-                    h3Cells.push(...cells);
-                });
-            }
-
-            h3Cells = [...new Set(h3Cells)];
-            console.log("Số H3 cells:", h3Cells.length);
-
-            const h3Features = h3Cells.map((cell) => {
-                const boundary = cellToBoundary(cell);
-
-                const coordinates = boundary.map(([lat, lng]) => [
-                    lng,
-                    lat
-                ]);
-
-                // đóng polygon
-                coordinates.push(coordinates[0]);
-
-                return {
-                    type: "Feature",
-                    properties: { h3: cell },
-                    geometry: {
-                        type: "Polygon",
-                        coordinates: [coordinates]
-                    }
-                };
-            });
-
-            const h3GeoJSON = {
-                type: "FeatureCollection",
-                features: h3Features
-            };
-
-            map.addSource("h3-grid", {
-                type: "geojson",
-                data: h3GeoJSON
-            });
-
-            // Hai lớp dưới đây cùng tạo nên layer lục giác H3.
-            map.addLayer({
-                id: "h3-fill",
-                type: "fill",
-                source: "h3-grid",
-                paint: {
-                    "fill-color": "#22c55e",
-                    "fill-opacity": 0.45
-                }
-            });
-
-            map.addLayer({
-                id: "h3-border",
-                type: "line",
-                source: "h3-grid",
-                paint: {
-                    "line-color": "#ffffff",
-                    "line-width": 0.5,
-                    "line-opacity": 0.7
-                }
-            });
-        });
-
-        function convertPolygonToH3Format(coordinates) {
-            /*
-              GeoJSON:
-              [lng, lat]
-      
-              H3 polygonToCells:
-              [lat, lng]
-            */
-
-            return coordinates.map((ring) =>
-                ring.map(([lng, lat]) => [
-                    lat,
-                    lng
-                ])
-            );
-        }
-
-    </script>
-</body>
-
-</html>
+<div class="app-shell">
+  <header class="app-header">
+    <a class="brand" href="#"><span class="brand-mark">⬡</span><span>GeoMap <b>Builder</b></span></a>
+    <nav class="main-nav"><a class="active" href="#">Tạo bản đồ</a><a href="#">Dự án của tôi</a><a href="#">Dữ liệu mẫu</a><a href="#">Hướng dẫn</a></nav>
+    <div class="header-actions"><button class="icon-button" title="Trợ giúp">?</button><button class="icon-button notification" title="Thông báo">♢<i></i></button><button class="profile-button"><span class="avatar">HN</span><span><b>Hoàng Huấn</b><small>Workspace cá nhân</small></span><span>⌄</span></button></div>
+  </header>
+  <main class="workspace">
+    <aside class="sidebar">
+      <section class="panel-section">
+        <div class="section-title"><span class="step">1</span><div><h2>Cung cấp dữ liệu</h2><p>Tải lên hoặc nhập vùng cần phân tích</p></div></div>
+        <div class="tabs"><button class="tab active" data-tab="upload">Upload file</button><button class="tab" data-tab="draw">Vẽ trên bản đồ</button><button class="tab" data-tab="coordinates">Nhập tọa độ</button></div>
+        <div class="tab-panel active" data-panel="upload"><label class="drop-zone" for="spatial-file"><input id="spatial-file" type="file" accept=".geojson,.json,.csv,.xlsx,.xls,.zip"><span class="upload-icon">⇧</span><b>Kéo thả file vào đây</b><span>hoặc <u>chọn từ máy tính</u></span><small>Excel, GeoJSON, JSON, CSV hoặc ZIP/Shapefile</small></label><div id="selected-file" class="selected-file" hidden><span class="file-badge">GJ</span><div><b id="file-name"></b><small id="file-note"></small></div><span class="success-check">✓</span></div><div id="province-filter-field" class="field province-filter" hidden><span>Tỉnh / thành phố</span><div id="province-filter" class="province-multiselect"><button id="province-filter-toggle" class="province-filter-toggle" type="button" aria-expanded="false"><span id="province-filter-label">Tất cả tỉnh/thành</span><span>⌄</span></button><div id="province-filter-menu" class="province-filter-menu" hidden><div id="province-filter-options" class="province-filter-options"></div><div class="province-filter-actions"><button id="clear-provinces" type="button">Bỏ chọn</button><button id="apply-provinces" type="button">Áp dụng</button></div></div></div></div></div>
+        <div class="tab-panel placeholder-panel" data-panel="draw">Chọn công cụ vẽ trên bản đồ để bắt đầu.</div>
+        <div class="tab-panel" data-panel="coordinates"><textarea id="coordinate-input" rows="4" placeholder="Nhập GeoJSON Polygon hoặc danh sách lng,lat"></textarea><button id="apply-coordinates" class="secondary-button">Áp dụng tọa độ</button></div>
+      </section>
+      <section class="panel-section">
+        <div class="section-title"><span class="step">2</span><div><h2>Chọn kiểu bản đồ</h2><p>Chỉ hiển thị các kiểu phù hợp với dữ liệu</p></div></div>
+        <div id="map-type-grid" class="map-type-grid is-empty" aria-live="polite">Chưa có dữ liệu để đề xuất mô hình.</div>
+        <p id="map-type-summary" class="map-type-summary" aria-live="polite">Danh sách sẽ tự cập nhật sau khi dữ liệu được đọc.</p>
+      </section>
+      <section class="panel-section">
+        <div class="section-title"><span class="step">3</span><div><h2>Cấu hình hiển thị</h2><p>Điều chỉnh độ chi tiết và thuộc tính</p></div></div>
+        <div class="field range-field"><div class="field-label"><label for="resolution">Resolution (H3)</label><output id="resolution-value">5</output></div><input id="resolution" type="range" min="0" max="15" value="5"><div class="range-labels"><span>0</span><span>Độ chi tiết</span><span>15</span></div></div>
+      </section>
+      <section class="panel-section feature-section">
+        <button id="feature-toggle" class="section-title collapsible" aria-expanded="true"><span class="step">4</span><div><h2>Chức năng</h2><p>Bật/tắt tính năng bổ sung</p></div><span class="chevron">⌃</span></button>
+        <div id="feature-controls" class="feature-controls">
+          <label class="toggle-row feature-toggle-row"><span class="feature-copy"><b>Hiển thị lớp bản đồ</b><small>Bật để vẽ các đối tượng/lớp dữ liệu lên bản đồ</small></span><span class="switch-control"><input id="show-map-layers" type="checkbox"><i></i><em id="show-map-layers-status">Đang tắt</em></span></label>
+        </div>
+      </section>
+      <section class="panel-section style-section">
+        <button id="style-toggle" class="section-title collapsible" aria-expanded="true"><span class="step">5</span><div><h2>Tùy chỉnh style</h2><p id="style-description">Màu sắc, độ mờ và đường viền</p></div><span class="chevron">⌃</span></button>
+        <div id="style-controls" class="style-controls"><div id="map-style-controls"><label class="field inline-field">Màu cố định<span class="color-control"><input id="fixed-color" type="color" value="#6c5ce7"><code id="fixed-color-value">#6C5CE7</code></span></label><div class="field range-field compact"><div class="field-label"><label for="opacity">Opacity</label><output id="opacity-value">72%</output></div><input id="opacity" type="range" min="0" max="1" step=".01" value=".72"></div><label class="toggle-row"><span>Hiển thị đường viền</span><input id="show-border" type="checkbox" checked><i></i></label><label class="field inline-field">Màu viền<span class="color-control"><input id="border-color" type="color" value="#ffffff"><code id="border-color-value">#FFFFFF</code></span></label><div class="field range-field compact"><div class="field-label"><label for="line-width">Độ dày đường viền</label><output id="line-width-value">0.5 px</output></div><input id="line-width" type="range" min=".1" max="4" step=".1" value=".5"></div></div><div id="bar-style-controls" hidden></div><div class="builder-actions"><button id="reset-config">♙&nbsp; Đặt lại cấu hình</button><button id="clear-data">↻&nbsp; Xóa dữ liệu</button></div></div>
+      </section>
+    </aside>
+    <section class="content-area table-hidden">
+      <div class="map-panel"><div id="map"></div><div id="chart-canvas" class="chart-canvas" hidden></div><div id="status" class="status-pill">Đang khởi tạo bản đồ…</div><div class="map-toolbar" id="map-toolbar"><button class="active" data-tool="select" title="Chọn">↖</button><button data-tool="pan" title="Di chuyển">✥</button><i></i><button data-tool="rectangle" title="Hình chữ nhật">▭</button><button data-tool="circle" title="Hình tròn">○</button><button data-tool="line" title="Đường">╱</button><button data-tool="polygon" title="Đa giác">⬠</button><button data-tool="delete" title="Xóa">⌫</button></div><div class="map-controls"><button id="zoom-in">+</button><button id="zoom-out">−</button><button id="fullscreen">⛶</button></div>
+        <div class="right-cards"><article class="map-card stats-card"><div class="card-heading"><div><span class="card-icon purple">⌁</span><b>Thống kê</b></div><button>•••</button></div><div class="stat-primary"><span id="cell-count">0</span><small id="cell-label">Tổng số cell (res 5)</small></div></article></div><div class="map-attribution">© OpenFreeMap · © OpenMapTiles · © OpenStreetMap</div>
+      </div>
+      <section id="data-panel" class="data-panel" hidden><div class="table-header"><div><h2 id="table-title">Dữ liệu H3</h2><p id="table-summary">Hiển thị 0 / 0 bản ghi</p></div><div class="table-actions"><label class="search-box"><span>⌕</span><input id="table-search" type="search" placeholder="Tìm kiếm H3 Index..."></label><button id="export-data" class="export-button">⇩ <span>Export data</span></button><button class="more-button">•••</button><button id="close-data-panel" class="close-data-panel" type="button" aria-label="Đóng bảng dữ liệu" title="Đóng bảng dữ liệu">×</button></div></div><div class="table-wrap"><table><thead id="data-head"><tr><th>#</th><th>H3 INDEX</th><th>TÂM Ô (LAT, LNG)</th><th></th></tr></thead><tbody id="data-body"><tr><td colspan="4" class="empty-row">Đang chuẩn bị dữ liệu…</td></tr></tbody></table></div><div class="pagination"><span id="pagination-info">0–0 của 0</span><div><button id="prev-page" disabled>‹</button><span id="page-buttons"></span><button id="next-page" disabled>›</button></div><label>Hiển thị <select id="page-size"><option>10</option><option>25</option><option>50</option></select> bản ghi</label></div></section>
+    </section>
+  </main>
+</div><div id="toast" class="toast" role="status"></div>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script><script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script><script type="module" src="./src/app.js"></script>
+</body></html>

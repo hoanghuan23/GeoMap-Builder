@@ -597,6 +597,116 @@ input[type=range] {
     padding-left: 31px
 }
 
+[hidden] {
+    display: none !important
+}
+
+.bar-style-panel {
+    color: #172033
+}
+
+.bar-style-panel section {
+    padding: 0 0 14px;
+    margin: 0 0 14px;
+    border-bottom: 1px solid #e7ebf0
+}
+
+.bar-style-panel section:last-child {
+    margin-bottom: 4px
+}
+
+.bar-style-panel h3 {
+    margin: 0 0 10px;
+    font-size: 11px;
+    font-weight: 600
+}
+
+.bar-style-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px
+}
+
+.bar-style-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: #435069;
+    font-size: 10px
+}
+
+.bar-style-field select {
+    width: 100%;
+    height: 31px;
+    padding: 0 8px;
+    border: 1px solid #d8dee8;
+    border-radius: 16px;
+    background: #fff
+}
+
+.bar-style-caption {
+    display: block;
+    margin: 11px 0 7px;
+    color: #607087;
+    font-size: 10px
+}
+
+.bar-segmented {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 2px;
+    border-radius: 16px;
+    background: #f7f8fa
+}
+
+.bar-segmented button {
+    height: 27px;
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    color: #8a929f
+}
+
+.bar-segmented button.active {
+    background: #fff;
+    color: #222b3a;
+    box-shadow: 0 1px 4px #18233a12
+}
+
+.bar-range-field {
+    margin-top: 11px
+}
+
+.bar-range-field>div {
+    display: flex;
+    justify-content: space-between;
+    align-items: center
+}
+
+.bar-range-field output {
+    color: #526174;
+    font-size: 9px
+}
+
+.bar-range-field input {
+    accent-color: #1c2028
+}
+
+.bar-check-row {
+    min-height: 27px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    cursor: pointer
+}
+
+.bar-check-row input {
+    width: 17px;
+    height: 17px;
+    margin: 0;
+    accent-color: #20242b
+}
+
 .feature-controls {
     padding-left: 31px;
     display: flex;
@@ -757,6 +867,96 @@ input[type=range] {
 #map {
     position: absolute;
     inset: 0
+}
+
+.chart-canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    padding: clamp(16px, 3vw, 40px);
+    background: #f7f9fc
+}
+
+.chart-canvas[hidden] {
+    display: none
+}
+
+.bar-chart-card {
+    width: 100%;
+    height: 100%;
+    min-height: 300px;
+    padding: 24px 26px 18px;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border: 1px solid #e3e8ef;
+    border-radius: 12px;
+    box-shadow: 0 8px 26px #17263f12
+}
+
+.bar-chart-heading h2 {
+    margin: 0;
+    font-size: 17px;
+    color: #1d2939
+}
+
+.bar-chart-heading {
+    min-height: 38px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px
+}
+
+.chart-zoom-controls {
+    display: flex;
+    overflow: hidden;
+    flex: none;
+    border: 1px solid #dce3ed;
+    border-radius: 7px;
+    background: #fff
+}
+
+.chart-zoom-controls button {
+    width: 31px;
+    height: 29px;
+    border: 0;
+    border-right: 1px solid #e5e9ef;
+    background: #fff;
+    color: #42526a;
+    font-size: 15px
+}
+
+.chart-zoom-controls button:last-child {
+    border-right: 0
+}
+
+.chart-zoom-controls button:hover {
+    background: #f1f6fd;
+    color: var(--blue)
+}
+
+.bar-chart-heading p {
+    margin: 5px 0 0;
+    color: #7a8699;
+    font-size: 10px
+}
+
+.bar-chart-plot {
+    flex: 1;
+    min-height: 240px;
+    margin-top: 10px
+}
+
+.map-panel.chart-mode .map-toolbar,
+.map-panel.chart-mode .map-controls,
+.map-panel.chart-mode .right-cards,
+.map-panel.chart-mode .map-attribution {
+    display: none
+}
+
+.map-panel.chart-mode .status-pill {
+    z-index: 7
 }
 
 .maplibregl-ctrl-bottom-left,
@@ -1266,6 +1466,14 @@ th:last-child {
 
     .map-panel {
         height: 480px
+    }
+
+    .chart-canvas {
+        padding: 10px
+    }
+
+    .bar-chart-card {
+        padding: 18px 10px 12px
     }
 
     .right-cards {
