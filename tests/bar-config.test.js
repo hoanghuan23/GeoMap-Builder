@@ -8,6 +8,7 @@ test("chuẩn hóa giới hạn và kích thước biểu đồ cột", () => {
   assert.equal(config.barWidth, 100);
   assert.equal(config.barGap, 0);
   assert.equal(config.orientation, "horizontal");
+  assert.equal(config.sort, "none");
 });
 
 test("sắp xếp và giới hạn dữ liệu theo chỉ số đang hiển thị", () => {

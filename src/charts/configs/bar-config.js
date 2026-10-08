@@ -1,6 +1,6 @@
 export const DEFAULT_BAR_CONFIG = Object.freeze({
   limit: 20,
-  sort: "desc",
+  sort: "none",
   orientation: "vertical",
   barWidth: 32,
   barGap: 20,
