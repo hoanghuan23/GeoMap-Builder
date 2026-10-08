@@ -34,13 +34,14 @@ function ColorControl({ label, color, onChange }) {
   );
 }
 
-export function BarStylePanel({ config, rowCount, series = [], onChange, onSeriesChange }) {
+export function BarStylePanel({ config, chartKind = "bar", rowCount, series = [], onChange, onSeriesChange }) {
   const value = mergeBarConfig(config);
   const update = patch => onChange({ ...value, ...patch });
+  const isLine = chartKind === "line";
 
   return (
     <div className="bar-style-panel">
-      <section>
+      {!isLine && <section>
         <h3>1. Cấu hình dữ liệu</h3>
         <div className="bar-style-grid">
           <label className="bar-style-field">
@@ -66,16 +67,16 @@ export function BarStylePanel({ config, rowCount, series = [], onChange, onSerie
           <button type="button" className={value.orientation === "vertical" ? "active" : ""} onClick={() => update({ orientation: "vertical" })}>Cột dọc</button>
           <button type="button" className={value.orientation === "horizontal" ? "active" : ""} onClick={() => update({ orientation: "horizontal" })}>Thanh ngang</button>
         </div>
-      </section>
+      </section>}
 
-      <section>
+      {!isLine && <section>
         <h3>2. Tùy chỉnh cột</h3>
         <RangeControl label="Độ rộng cột" value={value.barWidth} min={5} max={100} suffix="px" onChange={barWidth => update({ barWidth })} />
         <RangeControl label="Khoảng cách nhóm cột" value={value.barGap} min={0} max={60} suffix="%" onChange={barGap => update({ barGap })} />
-      </section>
+      </section>}
 
       <section>
-        <h3>3. Màu sắc</h3>
+        <h3>{isLine ? "1" : "3"}. Màu sắc</h3>
         <div className="bar-color-list">
           {series.map((item, index) => (
             <ColorControl
@@ -89,8 +90,8 @@ export function BarStylePanel({ config, rowCount, series = [], onChange, onSerie
       </section>
 
       <section>
-        <h3>4. Nhãn và trục tọa độ</h3>
-        <CheckControl label="Hiển thị giá trị trên cột" checked={value.showDataLabels} onChange={showDataLabels => update({ showDataLabels })} />
+        <h3>{isLine ? "2" : "4"}. Nhãn và trục tọa độ</h3>
+        <CheckControl label={isLine ? "Hiển thị giá trị trên điểm" : "Hiển thị giá trị trên cột"} checked={value.showDataLabels} onChange={showDataLabels => update({ showDataLabels })} />
         <CheckControl label="Hiển thị đường lưới" checked={value.showGrid} onChange={showGrid => update({ showGrid })} />
         <CheckControl label="Hiển thị chú giải" checked={value.showLegend} onChange={showLegend => update({ showLegend })} />
         <CheckControl label="Hiển thị tooltip" checked={value.showTooltip} onChange={showTooltip => update({ showTooltip })} />

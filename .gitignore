@@ -5,3 +5,6 @@ dist/
 
 # dữ liệu test
 geomap_test_samples/
+
+# logic test
+test/

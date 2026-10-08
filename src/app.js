@@ -1,9 +1,12 @@
 import { CONFIG } from "./config.js";
 import { geoJSONToCells, cellsToFeatureCollection, recordsToPointGeoJSON } from "./h3-utils.js";
 import { analyzeSpatialData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
-import { BarRenderer, analyzeBarData } from "./charts/bar-renderer.js";
+import { BarRenderer, analyzeBarData } from "./charts/bar-chart.js";
+import { createLineOption, LINE_COLORS, lineSeriesFromFields, LineRenderer } from "./charts/line-chart.js";
 import { DEFAULT_BAR_CONFIG, mergeBarConfig } from "./charts/configs/bar-config.js";
 import { clearBarStylePanel, renderBarStylePanel } from "./charts/components/bar-style-panel.jsx";
+import { clearDataMappingPanel, renderDataMappingPanel } from "./charts/components/data-mapping-panel.jsx";
+import { BAR_COLORS, dataForBarMapping, humanizeField, reconcileSeriesColors, seriesFromFields, validateBarMapping } from "./charts/data-transformers.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -12,9 +15,27 @@ const state = {
   page: 1, pageSize: 10, query: "", baselineCount: null,
   mapType: null, dataProfile: null,
   pointData: { type: "FeatureCollection", features: [] },
-  chartConfig: null, chartOptions: [], barStyle: { ...DEFAULT_BAR_CONFIG }
+  chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null, barStyle: { ...DEFAULT_BAR_CONFIG }
 };
 let map; let toastTimer;
+
+function chartRenderer(kind = state.chartConfig?.chartKind) {
+  return kind === "line" ? LineRenderer : BarRenderer;
+}
+
+function renderChartCanvas() {
+  if (!state.chartConfig) return;
+  const nextKind = state.chartConfig.chartKind === "line" ? "line" : "bar";
+  if (state.activeChartKind && state.activeChartKind !== nextKind) chartRenderer(state.activeChartKind).clear($("chart-canvas"));
+  chartRenderer(nextKind).render($("chart-canvas"), state.chartConfig);
+  state.activeChartKind = nextKind;
+}
+
+function clearChartCanvas() {
+  if (state.activeChartKind) chartRenderer(state.activeChartKind).clear($("chart-canvas"));
+  else $("chart-canvas")?.replaceChildren();
+  state.activeChartKind = null;
+}
 
 function showToast(message) { const el = $("toast"); el.textContent = message; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2800); }
 function setStatus(message, hide = false) { const el = $("status"); el.textContent = message; el.style.display = "block"; if (hide) setTimeout(() => el.style.display = "none", 2200); }
@@ -25,6 +46,7 @@ function updateModelSections() {
   const hasModel = Boolean(state.mapType);
   const isChart = Boolean(state.chartConfig);
   $("display-config-section").hidden = !hasModel || isChart || state.mapType !== "h3";
+  $("chart-data-mapping-section").hidden = !isChart;
   $("feature-section").hidden = !hasModel || isChart;
   $("style-section").hidden = !hasModel || (!isChart && state.mapType !== "h3");
   $("cell-stats-card").hidden = !hasModel || isChart || state.mapType !== "h3";
@@ -241,10 +263,11 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 function clearUploadedData() {
   state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
   state.pointData = { type: "FeatureCollection", features: [] };
-  state.mapType = null; state.dataProfile = null; state.chartConfig = null; state.chartOptions = []; state.baselineCount = null; state.page = 1;
+  state.mapType = null; state.dataProfile = null; state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; state.baselineCount = null; state.page = 1;
   updateModelSections();
-  BarRenderer.clear($("chart-canvas")); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
+  clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
   showChartStyleControls(false);
+  clearDataMappingPanel($("data-mapping-controls"));
   $("map-type-grid").className = "map-type-grid is-empty"; $("map-type-grid").textContent = "Chưa có dữ liệu để phân tích.";
   $("map-type-summary").textContent = "Danh sách sẽ tự cập nhật sau khi dữ liệu được đọc.";
   $("selected-file").hidden = true; $("spatial-file").value = ""; setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
@@ -271,13 +294,20 @@ async function resetConfiguration() {
   $("show-map-layers-status").textContent = "Đang tắt";
 
   if (state.chartConfig) {
-    const defaultSeries = state.chartOptions.find(option => option.id === state.mapType)?.config.series;
+    const defaultOption = state.chartOptions.find(option => option.id === state.mapType);
+    const defaultSeries = defaultOption?.config.series;
     state.chartConfig = {
       ...state.chartConfig,
       ...state.barStyle,
       ...(defaultSeries ? { series: defaultSeries.map(item => ({ ...item })) } : {})
     };
-    BarRenderer.render($("chart-canvas"), state.chartConfig);
+    if (defaultOption) {
+      state.chartConfig = { ...defaultOption.config, ...state.barStyle };
+      state.chartMapping = { datasetPath: defaultOption.config.sourcePath, xField: defaultOption.config.xField, metrics: defaultSeries.map(item => item.key) };
+      state.mappingWarning = "";
+    }
+    renderChartCanvas();
+    renderChartDataMapping();
     renderChartStyleControls();
   } else if (state.boundary) {
     await rebuildGrid();
@@ -302,14 +332,18 @@ function deleteData() {
 
 function renderChartStyleControls() {
   if (!state.chartConfig) return;
+  $("style-description").textContent = state.chartConfig.chartKind === "line"
+    ? "Màu đường, nhãn, chú giải và tooltip"
+    : "Dữ liệu, màu sắc, kích thước cột, nhãn và trục";
   renderBarStylePanel($("bar-style-controls"), {
     config: state.barStyle,
+    chartKind: state.chartConfig.chartKind || "bar",
     rowCount: state.chartConfig.data.length,
     series: state.chartConfig.series,
     onChange(nextConfig) {
       state.barStyle = mergeBarConfig(nextConfig);
       state.chartConfig = { ...state.chartConfig, ...state.barStyle };
-      BarRenderer.render($("chart-canvas"), state.chartConfig);
+      renderChartCanvas();
       renderChartStyleControls();
     },
     onSeriesChange(index, color) {
@@ -317,16 +351,60 @@ function renderChartStyleControls() {
         ...state.chartConfig,
         series: state.chartConfig.series.map((item, itemIndex) => itemIndex === index ? { ...item, color } : item)
       };
-      BarRenderer.render($("chart-canvas"), state.chartConfig);
+      renderChartCanvas();
       renderChartStyleControls();
     }
   });
 }
 
+function renderChartDataMapping() {
+  if (!state.chartAnalysis || !state.chartMapping || !state.chartConfig) return;
+  renderDataMappingPanel($("data-mapping-controls"), {
+    analysis: state.chartAnalysis,
+    ...state.chartMapping,
+    variant: state.chartConfig.variant,
+    warning: state.mappingWarning,
+    onChange: applyChartMappingChange
+  });
+}
+
+function applyChartMappingChange(change) {
+  let mapping = { ...state.chartMapping, ...change };
+  if (change.datasetPath) {
+    const nextDataset = state.chartAnalysis.datasets.find(dataset => dataset.path === change.datasetPath);
+    const count = state.chartConfig.variant === "single" ? 1 : state.chartConfig.variant === "double" ? 2 : state.chartConfig.variant === "line" ? Math.min(3, nextDataset.suggestedMetrics.length) : Math.min(4, nextDataset.suggestedMetrics.length);
+    mapping = { datasetPath: nextDataset.path, xField: nextDataset.suggestedCategory, metrics: nextDataset.suggestedMetrics.slice(0, count) };
+  }
+  state.chartMapping = mapping;
+  const dataset = state.chartAnalysis.datasets.find(item => item.path === mapping.datasetPath);
+  const validation = validateBarMapping(dataset, mapping, state.chartConfig.variant);
+  state.mappingWarning = validation.message;
+  if (validation.valid) {
+    const defaultSeries = state.chartConfig.chartKind === "line" ? lineSeriesFromFields(mapping.metrics) : seriesFromFields(mapping.metrics);
+    const palette = state.chartConfig.chartKind === "line" ? LINE_COLORS : BAR_COLORS;
+    const series = reconcileSeriesColors(defaultSeries, state.chartConfig.series, palette);
+    state.chartConfig = {
+      ...state.chartConfig,
+      data: dataForBarMapping(dataset, mapping),
+      sourcePath: dataset.path,
+      xField: mapping.xField,
+      series,
+      title: state.chartConfig.variant === "line"
+        ? `Xu hướng theo ${humanizeField(mapping.xField).toLowerCase()}`
+        : state.chartConfig.variant === "single"
+        ? `${humanizeField(mapping.metrics[0])} theo ${humanizeField(mapping.xField).toLowerCase()}`
+        : `${state.chartConfig.variant === "double" ? "So sánh hai chỉ số" : "So sánh nhiều chỉ số"} · ${dataset.label}`
+    };
+    renderChartCanvas();
+    renderChartStyleControls();
+  }
+  renderChartDataMapping();
+}
+
 function showChartStyleControls(show) {
   $("map-style-controls").hidden = show;
   $("bar-style-controls").hidden = !show;
-  $("style-description").textContent = show ? "Dữ liệu, màu sắc, kích thước cột, nhãn và trục" : "Màu sắc, độ mờ và đường viền";
+  $("style-description").textContent = show ? "Tùy chỉnh biểu đồ" : "Màu sắc, độ mờ và đường viền";
   if (show) renderChartStyleControls();
   else clearBarStylePanel($("bar-style-controls"));
 }
@@ -374,31 +452,36 @@ function selectChartOption(type) {
   const option = state.chartOptions.find(item => item.id === type);
   if (!option) return false;
   state.mapType = option.id; state.chartConfig = { ...option.config, ...state.barStyle };
+  state.chartMapping = { datasetPath: option.config.sourcePath, xField: option.config.xField, metrics: option.config.series.map(item => item.key) };
+  state.mappingWarning = "";
   document.querySelectorAll("#map-type-grid .map-type").forEach(button => button.classList.toggle("active", button.dataset.type === type));
-  BarRenderer.render($("chart-canvas"), state.chartConfig); renderChartStyleControls();
+  renderChartCanvas(); renderChartDataMapping(); renderChartStyleControls();
   updateModelSections();
   setStatus(`Đang hiển thị kiểu ${option.label}.`, true);
   return true;
 }
 
 function replaceChartData(analysis, name) {
-  state.chartOptions = analysis.options; state.boundary = null; state.sourceBoundary = null; state.dataProfile = null;
+  const primaryDataset = analysis.datasets.find(dataset => dataset.path === analysis.sourcePath) || analysis.datasets[0];
+  const lineOption = createLineOption(primaryDataset, analysis.titlePrefix);
+  const options = [...analysis.options, ...(lineOption ? [lineOption] : [])];
+  state.chartAnalysis = { ...analysis, options }; state.chartOptions = options; state.boundary = null; state.sourceBoundary = null; state.dataProfile = null;
   state.h3Data = { type: "FeatureCollection", features: [] }; state.pointData = { type: "FeatureCollection", features: [] };
   map.getSource("h3-grid")?.setData(state.h3Data); map.getSource("point-data")?.setData(state.pointData); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
   $("map-type-grid").className = "map-type-grid";
-  $("map-type-grid").replaceChildren(...analysis.options.map(option => {
+  $("map-type-grid").replaceChildren(...options.map(option => {
     const button = document.createElement("button"); const icon = document.createElement("span");
     button.type = "button"; button.className = "map-type"; button.dataset.type = option.id; button.dataset.label = option.label;
     button.title = `${option.label} · Recharts`; icon.textContent = option.icon; button.append(icon, option.label); return button;
   }));
-  $("map-type-summary").textContent = `Tìm thấy ${analysis.rowCount} bản ghi tại ${analysis.sourcePath} · ${analysis.numericFields.length} trường số · ${analysis.options.length} kiểu biểu đồ phù hợp`;
+  $("map-type-summary").textContent = `Tìm thấy ${analysis.rowCount} bản ghi tại ${analysis.sourcePath} · ${analysis.numericFields.length} trường số · ${options.length} kiểu biểu đồ phù hợp`;
   $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu biểu đồ đã tải · đang sử dụng"; $("selected-file").hidden = false;
   const canvas = $("chart-canvas"); canvas.hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
-  setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(analysis.options[0].id);
+  setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(options[0].id);
 }
 async function replaceBoundary(data, name, profile = null) {
-  state.chartConfig = null; state.chartOptions = []; BarRenderer.clear($("chart-canvas")); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
+  state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; clearDataMappingPanel($("data-mapping-controls")); clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
   showChartStyleControls(false);
   if (!data) throw new Error("Không tìm thấy dữ liệu."); geoJSONToCells(data, Math.min(state.resolution, 3)); state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
   renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));

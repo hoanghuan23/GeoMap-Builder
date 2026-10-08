@@ -13,14 +13,11 @@ import {
   YAxis
 } from "recharts";
 import { mergeBarConfig, prepareBarData } from "./configs/bar-config.js";
+import { analyzeDataSets, createBarOptions } from "./data-transformers.js";
 
 const roots = new WeakMap();
-const DEFAULT_COLORS = ["#63c785", "#f58b61", "#5b8ff9", "#f6bd16", "#9270ca", "#6dc8ec"];
+const DEFAULT_COLORS = ["#5470C6", "#91CC75", "#FAC858", "#EE6666", "#73C0DE", "#9A60B4"];
 const h = React.createElement;
-const CATEGORY_HINTS = ["country", "province", "region", "category", "name", "label", "city", "state"];
-const SINGLE_VALUE_HINTS = ["score", "happiness_score", "value", "average_score", "total", "amount"];
-const MULTI_VALUE_HINTS = ["gdp_per_capita", "social_support", "freedom", "healthy_life_expectancy"];
-const NON_METRIC_PATTERN = /(^|_)(id|rank|index|code|year|edition|latitude|longitude|lat|lng|lon)($|_)/i;
 
 function requireString(value, field) {
   if (typeof value !== "string" || !value.trim()) {
@@ -29,105 +26,22 @@ function requireString(value, field) {
   return value.trim();
 }
 
-function normalizedName(value) {
-  return String(value).trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_|_$/g, "");
-}
-
-function humanize(value) {
-  const text = String(value).replaceAll("_", " ").replace(/([a-z])([A-Z])/g, "$1 $2");
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function flattenRecord(record, output = {}, prefix = "") {
-  for (const [key, value] of Object.entries(record || {})) {
-    if (value && typeof value === "object" && !Array.isArray(value)) flattenRecord(value, output, prefix ? `${prefix}.${key}` : key);
-    else if (!Array.isArray(value)) {
-      const leaf = key;
-      const target = Object.hasOwn(output, leaf) ? `${prefix}.${key}` : leaf;
-      output[target] = value;
-    }
-  }
-  return output;
-}
-
-function fieldsFrom(records) {
-  const keys = [...new Set(records.flatMap(record => Object.keys(record)))];
-  const numericFields = []; const textFields = [];
-  for (const key of keys) {
-    const values = records.map(record => record[key]).filter(value => value != null && value !== "");
-    if (values.length < Math.max(1, Math.ceil(records.length * .6))) continue;
-    if (values.every(value => Number.isFinite(Number(value)))) numericFields.push(key);
-    else if (values.every(value => typeof value === "string" || typeof value === "boolean")) textFields.push(key);
-  }
-  return { numericFields, textFields };
-}
-
-function collectRecordArrays(value, path = "$", candidates = [], seen = new Set()) {
-  if (!value || typeof value !== "object" || seen.has(value)) return candidates;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    const objects = value.filter(item => item && typeof item === "object" && !Array.isArray(item));
-    if (objects.length && objects.length === value.length) {
-      const records = objects.map(item => flattenRecord(item));
-      const fields = fieldsFrom(records);
-      if (fields.textFields.length && fields.numericFields.length) {
-        const score = fields.numericFields.length * 4 + fields.textFields.length * 2 + Math.min(records.length, 10);
-        candidates.push({ path, records, ...fields, score });
-      }
-    }
-    value.forEach((item, index) => collectRecordArrays(item, `${path}[${index}]`, candidates, seen));
-  } else {
-    for (const [key, child] of Object.entries(value)) collectRecordArrays(child, path === "$" ? key : `${path}.${key}`, candidates, seen);
-  }
-  return candidates;
-}
-
-function hintedField(fields, hints) {
-  return hints.map(hint => fields.find(field => normalizedName(field) === hint)).find(Boolean);
-}
-
-function seriesFor(fields) {
-  return fields.map((key, index) => ({ key, label: humanize(key), color: DEFAULT_COLORS[index % DEFAULT_COLORS.length] }));
-}
-
 export function analyzeBarData(input) {
-  const candidates = collectRecordArrays(input);
-  const best = candidates.sort((a, b) => b.score - a.score || b.records.length - a.records.length)[0];
+  const datasets = analyzeDataSets(input).filter(dataset => dataset.suggestedCategory && dataset.numericFields.length);
+  const best = datasets.find(dataset => createBarOptions(dataset).length);
   if (!best) throw new Error("Không tìm thấy bảng dữ liệu có trường phân loại và trường số để dựng biểu đồ.");
-
-  const xField = hintedField(best.textFields, CATEGORY_HINTS) || best.textFields[0];
-  const metrics = best.numericFields.filter(field => !NON_METRIC_PATTERN.test(normalizedName(field)));
-  if (!metrics.length) throw new Error("Không tìm thấy trường số phù hợp cho trục Y.");
-
-  const singleField = hintedField(metrics, SINGLE_VALUE_HINTS) || metrics[0];
-  const comparisonMetrics = [
-    ...MULTI_VALUE_HINTS.map(hint => metrics.find(field => normalizedName(field) === hint)).filter(Boolean),
-    ...metrics.filter(field => field !== singleField && !MULTI_VALUE_HINTS.includes(normalizedName(field)))
-  ].filter((field, index, all) => all.indexOf(field) === index);
-  const doubleMetrics = comparisonMetrics.length >= 2 ? comparisonMetrics : metrics;
-  const groupedMetrics = comparisonMetrics.length >= 3 ? comparisonMetrics : metrics;
-  const titlePrefix = typeof input?.report_name === "string" ? input.report_name : humanize(best.path.split(".").pop());
-  const base = { data: best.records, xField, unit: "", sourcePath: best.path };
-  const options = [{
-    id: "single_bar",
-    label: "Cột đơn",
-    icon: "▥",
-    config: { ...base, variant: "single", title: `${humanize(singleField)} theo ${humanize(xField).toLowerCase()}`, series: seriesFor([singleField]) }
-  }];
-  if (doubleMetrics.length >= 2) options.push({
-    id: "double_bar",
-    label: "Cột đôi",
-    icon: "▥▥",
-    config: { ...base, variant: "double", title: `So sánh hai chỉ số · ${titlePrefix}`, series: seriesFor(doubleMetrics.slice(0, 2)) }
-  });
-  if (groupedMetrics.length >= 3) options.push({
-    id: "grouped_bar",
-    label: "Cột ghép",
-    icon: "▥▥▥",
-    config: { ...base, variant: "grouped", title: `So sánh nhiều chỉ số · ${titlePrefix}`, series: seriesFor(groupedMetrics.slice(0, 4)) }
-  });
-
-  return { sourcePath: best.path, rowCount: best.records.length, xField, numericFields: metrics, options };
+  const titlePrefix = typeof input?.report_name === "string" ? input.report_name : best.label;
+  const options = createBarOptions(best, titlePrefix);
+  return {
+    datasets,
+    sourcePath: best.path,
+    rowCount: best.rowCount,
+    xField: best.suggestedCategory,
+    numericFields: best.numericFields.map(field => field.path),
+    schema: best.fields,
+    titlePrefix,
+    options
+  };
 }
 
 export function normalizeBarChartConfig(input) {
