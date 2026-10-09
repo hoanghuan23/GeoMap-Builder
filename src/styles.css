@@ -900,7 +900,20 @@ input[type=range] {
 }
 
 .palette.active {
+    border-color: var(--blue);
     outline: 2px solid #bed7fd
+}
+
+.palette:disabled {
+    cursor: not-allowed;
+    opacity: .35
+}
+
+.palette-help,
+#polygon-color-field {
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 400
 }
 
 .color-control {

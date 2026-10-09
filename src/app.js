@@ -9,6 +9,8 @@ import { clearDataMappingPanel, renderDataMappingPanel } from "./charts/componen
 import { BAR_COLORS, dataForBarMapping, humanizeField, reconcileSeriesColors, seriesFromFields, validateBarMapping } from "./charts/data-transformers.js";
 import { renderChartIcon } from "./charts/chart-icons.js";
 import { renderMapIcon } from "./renderers/map-icons.js";
+import { PolygonRenderer } from "./renderers/polygon-renderer.js";
+import { polygonColorField, polygonFillExpression } from "./renderers/polygon-style.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -17,7 +19,7 @@ const state = {
   page: 1, pageSize: 10, query: "", baselineCount: null,
   mapType: null, dataProfile: null,
   pointData: { type: "FeatureCollection", features: [] },
-  chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null, barStyle: { ...DEFAULT_BAR_CONFIG }
+  chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null, barStyle: { ...DEFAULT_BAR_CONFIG }, polygonPalette: null
 };
 let map; let toastTimer;
 
@@ -50,20 +52,50 @@ function updateModelSections() {
   $("display-config-section").hidden = !hasModel || isChart || state.mapType !== "h3";
   $("chart-data-mapping-section").hidden = !isChart;
   $("feature-section").hidden = !hasModel || isChart;
-  $("style-section").hidden = !hasModel || (!isChart && state.mapType !== "h3");
+  $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon"].includes(state.mapType));
   $("cell-stats-card").hidden = !hasModel || isChart || state.mapType !== "h3";
+  if (!isChart) {
+    const isPolygon = state.mapType === "polygon";
+    $("style-description").textContent = isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
+    $("polygon-color-ramp").hidden = !isPolygon;
+    $("border-color-field").hidden = isPolygon;
+    $("show-border-field").hidden = false;
+    $("line-width-field").hidden = false;
+    if (isPolygon) syncPolygonPaletteControls();
+  }
 }
 
 function fillExpression() {
   return $("fixed-color").value;
 }
 
+function syncPolygonPaletteControls() {
+  const colorField = polygonColorField(state.boundary, state.dataProfile);
+  $("polygon-color-field").textContent = colorField ? `Theo ${humanizeField(colorField.field)}` : "Cần thuộc tính dữ liệu";
+  document.querySelectorAll("#polygon-color-ramp .palette").forEach(button => {
+    button.disabled = !colorField;
+    button.classList.toggle("active", button.dataset.palette === state.polygonPalette);
+  });
+}
+
 function applyStyle() {
-  if (!map?.getLayer("h3-fill")) return;
-  map.setPaintProperty("h3-fill", "fill-color", fillExpression());
-  map.setPaintProperty("h3-fill", "fill-opacity", Number($("opacity").value));
-  map.setPaintProperty("h3-border", "line-color", $("border-color").value);
-  map.setPaintProperty("h3-border", "line-width", Number($("line-width").value));
+  if (!map) return;
+  const color = fillExpression();
+  const opacity = Number($("opacity").value);
+  const borderColor = $("border-color").value;
+  const borderWidth = Number($("line-width").value);
+  if (map.getLayer("h3-fill")) {
+    map.setPaintProperty("h3-fill", "fill-color", color);
+    map.setPaintProperty("h3-fill", "fill-opacity", opacity);
+    map.setPaintProperty("h3-border", "line-color", borderColor);
+    map.setPaintProperty("h3-border", "line-width", borderWidth);
+  }
+  if (map.getLayer("polygon-fill")) {
+    map.setPaintProperty("polygon-fill", "fill-color", polygonFillExpression(state.boundary, state.dataProfile, state.polygonPalette, color));
+    map.setPaintProperty("polygon-fill", "fill-opacity", opacity);
+    map.setPaintProperty("polygon-border", "line-color", borderColor);
+    map.setPaintProperty("polygon-border", "line-width", borderWidth);
+  }
   applyMapLayerVisibility();
 }
 
@@ -71,11 +103,14 @@ function applyMapLayerVisibility() {
   if (!map) return;
   const showLayers = $("show-map-layers")?.checked ?? false;
   const showH3 = showLayers && state.mapType === "h3";
+  const showPolygon = showLayers && state.mapType === "polygon";
   if (map.getLayer("h3-fill")) map.setLayoutProperty("h3-fill", "visibility", showH3 ? "visible" : "none");
   if (map.getLayer("h3-border")) map.setLayoutProperty("h3-border", "visibility", showH3 && $("show-border").checked ? "visible" : "none");
   if (map.getLayer("point-marker")) map.setLayoutProperty("point-marker", "visibility", showLayers && state.mapType === "point" ? "visible" : "none");
   if (map.getLayer("point-circle")) map.setLayoutProperty("point-circle", "visibility", showLayers && state.mapType === "circle" ? "visible" : "none");
   if (map.getLayer("point-heatmap")) map.setLayoutProperty("point-heatmap", "visibility", showLayers && state.mapType === "heatmap" ? "visible" : "none");
+  if (map.getLayer("polygon-fill")) map.setLayoutProperty("polygon-fill", "visibility", showPolygon ? "visible" : "none");
+  if (map.getLayer("polygon-border")) map.setLayoutProperty("polygon-border", "visibility", showPolygon && $("show-border").checked ? "visible" : "none");
   if (map.getLayer("vietnam-border")) map.setLayoutProperty("vietnam-border", "visibility", "visible");
 }
 
@@ -93,6 +128,13 @@ function addMapLayers() {
   map.addLayer({ id: "point-marker", type: "circle", source: "point-data", paint: { "circle-radius": 4, "circle-color": "#00d084", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1, "circle-opacity": .95 } });
   map.addSource("vietnam-boundary", { type: "geojson", data: state.boundary || EMPTY_FEATURE_COLLECTION });
   map.addLayer({ id: "vietnam-border", type: "line", source: "vietnam-boundary", paint: { "line-color": "#00e65c", "line-width": 2 } });
+  PolygonRenderer.render(map, state.boundary || EMPTY_FEATURE_COLLECTION, {
+    sourceId: "vietnam-boundary",
+    fillLayerId: "polygon-fill",
+    borderLayerId: "polygon-border",
+    fillPaint: { "fill-color": "#389e55", "fill-opacity": .32 },
+    borderPaint: { "line-color": "#00e65c", "line-width": 2 }
+  });
   applyMapLayerVisibility();
   map.on("click", "h3-fill", event => {
     const p = event.features?.[0]?.properties; if (!p) return;
@@ -280,6 +322,7 @@ function clearUploadedData() {
 async function resetConfiguration() {
   state.resolution = CONFIG.DEFAULT_RESOLUTION;
   state.barStyle = { ...DEFAULT_BAR_CONFIG };
+  state.polygonPalette = null;
 
   $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
   $("resolution-value").value = CONFIG.DEFAULT_RESOLUTION;
@@ -292,8 +335,9 @@ async function resetConfiguration() {
   $("border-color-value").textContent = "#FFFFFF";
   $("line-width").value = .5;
   $("line-width-value").value = "0.5 px";
-  $("show-map-layers").checked = false;
-  $("show-map-layers-status").textContent = "Đang tắt";
+  syncPolygonPaletteControls();
+  $("show-map-layers").checked = true;
+  $("show-map-layers-status").textContent = "Đang bật";
 
   if (state.chartConfig) {
     const defaultOption = state.chartOptions.find(option => option.id === state.mapType);
@@ -488,7 +532,7 @@ async function replaceBoundary(data, name, profile = null) {
   if (!data) throw new Error("Không tìm thấy dữ liệu."); geoJSONToCells(data, Math.min(state.resolution, 3)); state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
   renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));
   state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData); applyPointStyle();
-  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("selected-file").hidden = false; state.baselineCount = null; await rebuildGrid({ fit: true }); applyMapLayerVisibility();
+  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("selected-file").hidden = false; state.baselineCount = null; await rebuildGrid({ fit: true }); applyStyle();
 }
 
 async function processSpatialFile(file) {
@@ -542,10 +586,17 @@ function bindFileDropZone() {
 function bindUI() {
   $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
   $("opacity").addEventListener("input", e => { $("opacity-value").value = `${Math.round(e.target.value * 100)}%`; applyStyle(); }); $("line-width").addEventListener("input", e => { $("line-width-value").value = `${e.target.value} px`; applyStyle(); });
-  for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); applyStyle(); }); }
+  for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); if (id === "fixed-color" && state.mapType === "polygon") { state.polygonPalette = null; syncPolygonPaletteControls(); } applyStyle(); }); }
+  $("polygon-color-ramp").addEventListener("click", event => {
+    const button = event.target.closest(".palette");
+    if (!button || button.disabled) return;
+    state.polygonPalette = button.dataset.palette;
+    syncPolygonPaletteControls();
+    applyStyle();
+  });
   $("show-border").addEventListener("change", applyStyle);
   document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => { document.querySelectorAll(".tab,.tab-panel").forEach(x => x.classList.remove("active")); tab.classList.add("active"); document.querySelector(`[data-panel="${tab.dataset.tab}"]`).classList.add("active"); }));
-  $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; if (selectChartOption(button.dataset.type)) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; updateModelSections(); applyMapLayerVisibility(); setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true); });
+  $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; if (selectChartOption(button.dataset.type)) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; updateModelSections(); applyStyle(); setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true); });
   bindFileDropZone();
   $("province-filter-toggle").addEventListener("click", () => {
     const menu = $("province-filter-menu"); const open = menu.hidden; menu.hidden = !open; $("province-filter-toggle").setAttribute("aria-expanded", String(open));
