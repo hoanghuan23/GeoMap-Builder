@@ -73,12 +73,9 @@ button {
 .brand-mark {
     width: 28px;
     height: 28px;
-    display: grid;
-    place-items: center;
-    background: linear-gradient(145deg, #0778f9, #2249d9);
-    color: #fff;
-    clip-path: polygon(25% 6%, 75% 6%, 100% 50%, 75% 94%, 25% 94%, 0 50%);
-    font-size: 22px
+    display: block;
+    object-fit: contain;
+    flex: 0 0 auto
 }
 
 .main-nav {
@@ -262,6 +259,77 @@ button {
     color: var(--muted);
     font-size: 9px;
     line-height: 1.4
+}
+
+.map-type-summary:empty {
+    display: none
+}
+
+.supported-chart-catalog {
+    margin-top: 17px;
+    padding-top: 15px;
+    border-top: 1px solid #e5e7eb
+}
+
+.supported-chart-catalog[hidden] {
+    display: none
+}
+
+.supported-chart-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px
+}
+
+.supported-chart-heading h3 {
+    margin: 0;
+    color: var(--ink);
+    font-size: 11px;
+    font-weight: 600
+}
+
+.supported-chart-heading span {
+    color: #7b8493;
+    font-size: 12px
+}
+
+.supported-chart-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px
+}
+
+.supported-chart-type {
+    min-width: 0;
+    height: 62px;
+    border: 1px solid #dce3ed;
+    border-radius: 7px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink);
+    font-size: 9px;
+    font-weight: 500;
+    cursor: default;
+    user-select: none
+}
+
+.supported-chart-type .chart-type-icon,
+.supported-chart-type .renderer-type-icon {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    line-height: 0
+}
+
+.supported-chart-type .chart-type-icon svg,
+.supported-chart-type .renderer-type-icon svg {
+    display: block
 }
 
 .map-type {

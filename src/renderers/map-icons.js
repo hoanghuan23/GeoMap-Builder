@@ -17,11 +17,11 @@ export const mapIcons = Object.freeze({
       <circle cx="12" cy="12" r="6.6" fill="#389e55" fill-opacity="0.75" />
     </svg>`,
   line: `
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#389e55" strokeWidth = "2" strokeLinecap="round">
-      <path d="M4 20L20 4">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#389e55" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <path d="M4 20L20 4" />
     </svg>`,
   polygon: `
-    <svg width="24" height="24"viewBox="0 0 24 24" fill="none" stroke="#389e55" strokeWidth="1.8" strokeLinejoin="round">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#389e55" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
       <path d="M12 3L20 9L17 20H7L4 9Z" />
     </svg>`
 });

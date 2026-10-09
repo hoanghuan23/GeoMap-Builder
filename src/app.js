@@ -24,6 +24,20 @@ import { polygonColorField, polygonFillExpression } from "./renderers/polygon-st
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
+const SUPPORTED_VIEW_TYPES = Object.freeze([
+  { label: "Point", icon: "point", kind: "map" },
+  { label: "Circle", icon: "circle", kind: "map" },
+  { label: "H3 Hexagon", icon: "hexagon", kind: "map" },
+  { label: "Heatmap", icon: "heatmap", kind: "map" },
+  { label: "Line", icon: "line", kind: "map" },
+  { label: "Polygon", icon: "polygon", kind: "map" },
+  { label: "Cột đơn", icon: "singleBar", kind: "chart" },
+  { label: "Cột đôi", icon: "doubleBar", kind: "chart" },
+  { label: "Cột ghép", icon: "groupedBar", kind: "chart" },
+  { label: "Biểu đồ đường", icon: "line", kind: "chart" },
+  { label: "Pie chart", icon: "pieChart", kind: "chart" },
+  { label: "Half pie", icon: "halfPie", kind: "chart" }
+]);
 const state = {
   resolution: CONFIG.DEFAULT_RESOLUTION, boundary: null, sourceBoundary: null, h3Data: { type: "FeatureCollection", features: [] },
   page: 1, pageSize: 10, query: "", baselineCount: null,
@@ -56,6 +70,26 @@ function showToast(message) { const el = $("toast"); el.textContent = message; e
 function setStatus(message, hide = false) { const el = $("status"); el.textContent = message; el.style.display = "block"; if (hide) setTimeout(() => el.style.display = "none", 2200); }
 function setDataPanelVisible(visible) { $("data-panel").hidden = !visible; document.querySelector(".content-area").classList.toggle("table-hidden", !visible); map?.resize(); }
 function fmt(value, digits = 1) { return Number.isFinite(value) ? value.toFixed(digits) : "--"; }
+
+function renderSupportedChartCatalog() {
+  const grid = $("supported-chart-grid");
+  grid.replaceChildren(...SUPPORTED_VIEW_TYPES.map(type => {
+    const item = document.createElement("div");
+    const icon = document.createElement("span");
+    const label = document.createElement("span");
+    item.className = "supported-chart-type";
+    item.setAttribute("role", "listitem");
+    if (type.kind === "map") renderMapIcon(icon, type.icon);
+    else renderChartIcon(icon, type.icon);
+    label.textContent = type.label;
+    item.append(icon, label);
+    return item;
+  }));
+}
+
+function showSupportedChartCatalog(visible) {
+  $("supported-chart-catalog").hidden = !visible;
+}
 
 function updateModelSections() {
   const hasModel = Boolean(state.mapType);
@@ -301,6 +335,7 @@ function fitBoundary() {
 
 function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
   const types = compatibleMapTypes(profile); const grid = $("map-type-grid"); state.dataProfile = profile;
+  showSupportedChartCatalog(false);
   if (!types.some(type => type.id === state.mapType)) state.mapType = types[0]?.id || null;
   grid.replaceChildren(...types.map(type => {
     const button = document.createElement("button"); const icon = document.createElement("span");
@@ -323,8 +358,9 @@ function clearUploadedData() {
   clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
   showChartStyleControls(false);
   clearDataMappingPanel($("data-mapping-controls"));
-  $("map-type-grid").className = "map-type-grid is-empty"; $("map-type-grid").textContent = "Chưa có dữ liệu để phân tích.";
-  $("map-type-summary").textContent = "Danh sách sẽ tự cập nhật sau khi dữ liệu được đọc.";
+  $("map-type-grid").className = "map-type-grid is-empty"; $("map-type-grid").textContent = "Chưa có dữ liệu để đề xuất mô hình.";
+  $("map-type-summary").textContent = "";
+  showSupportedChartCatalog(true);
   $("selected-file").hidden = true; $("spatial-file").value = ""; setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
   map?.getSource("h3-grid")?.setData(state.h3Data); map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   map?.getSource("point-data")?.setData(state.pointData);
@@ -579,6 +615,7 @@ function replaceChartData(analysis, name) {
   state.h3Data = { type: "FeatureCollection", features: [] }; state.pointData = { type: "FeatureCollection", features: [] };
   map.getSource("h3-grid")?.setData(state.h3Data); map.getSource("point-data")?.setData(state.pointData); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
+  showSupportedChartCatalog(false);
   $("map-type-grid").className = "map-type-grid";
   $("map-type-grid").replaceChildren(...options.map(option => {
     const button = document.createElement("button"); const icon = document.createElement("span");
@@ -703,6 +740,7 @@ function exportCSV() {
 }
 
 async function init() {
+  renderSupportedChartCatalog();
   bindUI(); map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/dark", center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
   map.once("style.load", () => { addMapLayers(); setupProvinceFilter(EMPTY_FEATURE_COLLECTION); updateDashboard(); setStatus("Hãy upload dữ liệu không gian để bắt đầu."); });
   map.on("error", event => console.warn("MapLibre:", event.error?.message || event.error));
