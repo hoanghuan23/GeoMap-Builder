@@ -28,3 +28,8 @@ test("dùng trường danh mục khi polygon không có trường số", () => {
 test("giữ màu cố định khi chưa chọn dải màu", () => {
   assert.equal(polygonFillExpression(numericData, {}, null, "#6c5ce7"), "#6c5ce7");
 });
+
+test("không lỗi khi hồ sơ dữ liệu đang là null", () => {
+  assert.equal(polygonColorField(null, null), null);
+  assert.equal(polygonFillExpression(null, null, "blue", "#6c5ce7"), "#6c5ce7");
+});

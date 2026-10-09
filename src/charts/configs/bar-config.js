@@ -7,7 +7,7 @@ export const DEFAULT_BAR_CONFIG = Object.freeze({
   showGrid: true,
   showLegend: true,
   showTooltip: true,
-  showDataLabels: false,
+  showDataLabels: true,
 });
 
 const BOOLEAN_KEYS = ["showGrid", "showLegend", "showTooltip", "showDataLabels"];

@@ -321,7 +321,7 @@ function clearUploadedData() {
 
 async function resetConfiguration() {
   state.resolution = CONFIG.DEFAULT_RESOLUTION;
-  state.barStyle = { ...DEFAULT_BAR_CONFIG };
+  state.barStyle = mergeBarConfig();
   state.polygonPalette = null;
 
   $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
@@ -335,22 +335,25 @@ async function resetConfiguration() {
   $("border-color-value").textContent = "#FFFFFF";
   $("line-width").value = .5;
   $("line-width-value").value = "0.5 px";
-  syncPolygonPaletteControls();
+  if (!state.chartConfig) syncPolygonPaletteControls();
   $("show-map-layers").checked = true;
   $("show-map-layers-status").textContent = "Đang bật";
 
   if (state.chartConfig) {
     const defaultOption = state.chartOptions.find(option => option.id === state.mapType);
-    const defaultSeries = defaultOption?.config.series;
-    state.chartConfig = {
-      ...state.chartConfig,
-      ...state.barStyle,
-      ...(defaultSeries ? { series: defaultSeries.map(item => ({ ...item })) } : {})
-    };
     if (defaultOption) {
-      state.chartConfig = { ...defaultOption.config, ...state.barStyle };
-      state.chartMapping = { datasetPath: defaultOption.config.sourcePath, xField: defaultOption.config.xField, metrics: defaultSeries.map(item => item.key) };
+      const defaultSeries = Array.isArray(defaultOption.config.series)
+        ? defaultOption.config.series.map(item => ({ ...item }))
+        : [];
+      state.chartConfig = { ...defaultOption.config, ...state.barStyle, series: defaultSeries };
+      state.chartMapping = {
+        datasetPath: defaultOption.config.sourcePath,
+        xField: defaultOption.config.xField,
+        metrics: defaultSeries.map(item => item.key)
+      };
       state.mappingWarning = "";
+    } else {
+      state.chartConfig = { ...state.chartConfig, ...state.barStyle };
     }
     renderChartCanvas();
     renderChartDataMapping();

@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeBarConfig, prepareBarData } from "../src/charts/configs/bar-config.js";
+import { DEFAULT_BAR_CONFIG, mergeBarConfig, prepareBarData } from "../src/charts/configs/bar-config.js";
+
+test("nhãn dữ liệu được bật trong cấu hình mặc định và khi đặt lại", () => {
+  assert.equal(DEFAULT_BAR_CONFIG.showDataLabels, true);
+  assert.equal(mergeBarConfig({ showDataLabels: false }).showDataLabels, false);
+  assert.equal(mergeBarConfig().showDataLabels, true);
+});
 
 test("chuẩn hóa giới hạn và kích thước biểu đồ cột", () => {
   const config = mergeBarConfig({ limit: 0, barWidth: 500, barGap: -1, orientation: "horizontal" });

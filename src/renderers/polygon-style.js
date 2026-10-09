@@ -21,7 +21,7 @@ function categoricalField(records, fields) {
 
 export function polygonColorField(data, profile = {}) {
   const records = featureProperties(data);
-  for (const field of profile.numericFields || []) {
+  for (const field of profile?.numericFields || []) {
     const values = records
       .map(record => record[field])
       .filter(value => value != null && value !== "")
@@ -29,7 +29,7 @@ export function polygonColorField(data, profile = {}) {
       .filter(Number.isFinite);
     if (values.length && Math.min(...values) !== Math.max(...values)) return { field, type: "number", values };
   }
-  const category = categoricalField(records, profile.textFields || []);
+  const category = categoricalField(records, profile?.textFields || []);
   return category ? { ...category, type: "category" } : null;
 }
 
