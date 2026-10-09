@@ -413,8 +413,20 @@ function renderChartDataMapping() {
     ...state.chartMapping,
     variant: state.chartConfig.variant,
     warning: state.mappingWarning,
-    onChange: applyChartMappingChange
+    onChange: applyChartMappingChange,
+    onResetMetrics: resetDisplayedMetrics
   });
+}
+
+function resetDisplayedMetrics() {
+  const dataset = state.chartAnalysis?.datasets.find(item => item.path === state.chartMapping?.datasetPath);
+  if (!dataset) return;
+  const variant = state.chartConfig?.variant;
+  const count = variant === "single" ? 1 : variant === "double" ? 2 : variant === "line"
+    ? Math.min(3, dataset.suggestedMetrics.length)
+    : Math.min(4, dataset.suggestedMetrics.length);
+  applyChartMappingChange({ metrics: dataset.suggestedMetrics.slice(0, count) });
+  showToast("Đã đặt lại chỉ số hiển thị.");
 }
 
 function applyChartMappingChange(change) {

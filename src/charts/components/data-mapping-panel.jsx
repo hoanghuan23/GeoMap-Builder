@@ -4,7 +4,7 @@ import { nextMetricSelection, requiredMetricCount } from "../data-transformers.j
 
 const roots = new WeakMap();
 
-function Panel({ analysis, datasetPath, xField, metrics, variant, warning, onChange }) {
+function Panel({ analysis, datasetPath, xField, metrics, variant, warning, onChange, onResetMetrics }) {
   const dataset = analysis.datasets.find(item => item.path === datasetPath) || analysis.datasets[0];
   const rule = requiredMetricCount(variant);
   const metricHint = rule.max === Infinity ? `Tối thiểu ${rule.min}` : `Chọn ${rule.min}`;
@@ -23,7 +23,19 @@ function Panel({ analysis, datasetPath, xField, metrics, variant, warning, onCha
       </select>
     </label>
     <fieldset className="mapping-metrics">
-      <legend><b>3. Chỉ số hiển thị (Trục Y)</b><span>{metrics.length} đã chọn · {metricHint}</span></legend>
+      <legend>
+        <b>3. Chỉ số hiển thị (Trục Y)</b>
+        <span className="mapping-metrics-actions">
+          <span>{metrics.length} đã chọn · {metricHint}</span>
+          <button
+            type="button"
+            className="mapping-metrics-reset"
+            aria-label="Đặt lại chỉ số hiển thị"
+            title="Đặt lại chỉ số hiển thị"
+            onClick={onResetMetrics}
+          >↻</button>
+        </span>
+      </legend>
       <div className="mapping-metric-list">
         {(dataset?.numericFields || []).map(field => <label key={field.path}>
           <input

@@ -669,6 +669,38 @@ input[type=range] {
     font-weight: 400
 }
 
+.mapping-metrics .mapping-metrics-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap
+}
+
+.mapping-metrics .mapping-metrics-reset {
+    width: 20px;
+    height: 20px;
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: #697386;
+    font: 600 15px/1 Arial, sans-serif;
+    cursor: pointer
+}
+
+.mapping-metrics .mapping-metrics-reset:hover {
+    background: #eef2f7;
+    color: var(--blue)
+}
+
+.mapping-metrics .mapping-metrics-reset:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 1px
+}
+
 .mapping-metric-list {
     max-height: 172px;
     overflow: auto;
