@@ -16,7 +16,7 @@ function Panel({ analysis, datasetPath, xField, metrics, variant, warning, onCha
       </select>
     </label>
     <label className="mapping-field">
-      <b>2. Trường danh mục (Trục X)</b>
+      <b>2. Trường danh mục</b>
       <select value={xField || ""} onChange={event => onChange({ xField: event.target.value })}>
         <option value="" disabled>Chọn trường danh mục</option>
         {(dataset?.categoryFields || []).map(field => <option key={field.path} value={field.path}>{field.label} · {field.type}</option>)}
@@ -24,7 +24,7 @@ function Panel({ analysis, datasetPath, xField, metrics, variant, warning, onCha
     </label>
     <fieldset className="mapping-metrics">
       <legend>
-        <b>3. Chỉ số hiển thị (Trục Y)</b>
+        <b>3. Chỉ số hiển thị</b>
         <span className="mapping-metrics-actions">
           <span>{metrics.length} đã chọn · {metricHint}</span>
           <button

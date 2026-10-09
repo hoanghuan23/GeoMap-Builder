@@ -90,8 +90,8 @@ export function BarStylePanel({ config, chartKind = "bar", rowCount, series = []
       </section>
 
       <section>
-        <h3>{isLine ? "2" : "4"}. Nhãn và trục tọa độ</h3>
-        <CheckControl label={isLine ? "Hiển thị giá trị trên điểm" : "Hiển thị giá trị trên cột"} checked={value.showDataLabels} onChange={showDataLabels => update({ showDataLabels })} />
+        <h3>{isLine ? "2" : "4"}. Nhãn và chú giải</h3>
+        <CheckControl label={isLine ? "Hiển thị giá trị trên điểm" : "Hiển thị giá trị"} checked={value.showDataLabels} onChange={showDataLabels => update({ showDataLabels })} />
         <CheckControl label="Hiển thị đường lưới" checked={value.showGrid} onChange={showGrid => update({ showGrid })} />
         <CheckControl label="Hiển thị chú giải" checked={value.showLegend} onChange={showLegend => update({ showLegend })} />
         <CheckControl label="Hiển thị tooltip" checked={value.showTooltip} onChange={showTooltip => update({ showTooltip })} />

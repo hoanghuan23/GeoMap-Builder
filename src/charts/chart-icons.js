@@ -22,6 +22,17 @@ export const chartIcons = Object.freeze({
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#389e55" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M2 14L9 7L14 11L22 3" />
       <path d="M3 20V17M8 20V14M13 20V16M18 20V11" />
+    </svg>`,
+  pieChart: `
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#389e55" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 3V12H21" />
+      <path d="M9 4A9 9 0 1 0 20 15" />
+      <path d="M14 3A8 8 0 0 1 21 10H14Z" fill="#389e55" />
+    </svg>`,
+  halfPie: `
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#389e55" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3 16A9 9 0 0 1 21 16Z" />
+      <path d="M12 7V16H21" fill="#389e55" />
     </svg>`
 });
 

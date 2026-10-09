@@ -132,6 +132,7 @@ export function requiredMetricCount(variant) {
   if (variant === "single") return { min: 1, max: 1, message: "Cột đơn cần đúng 1 chỉ số." };
   if (variant === "double") return { min: 2, max: 2, message: "Cột đôi cần đúng 2 chỉ số." };
   if (variant === "line") return { min: 1, max: Infinity, message: "Biểu đồ đường cần ít nhất 1 chỉ số." };
+  if (["pie", "halfPie"].includes(variant)) return { min: 1, max: Infinity, message: "Biểu đồ tròn cần ít nhất 1 chỉ số." };
   return { min: 2, max: Infinity, message: "Cột ghép cần từ 2 chỉ số trở lên." };
 }
 

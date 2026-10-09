@@ -1126,6 +1126,35 @@ input[type=range] {
     margin-top: 10px
 }
 
+.pie-chart-plot {
+    min-height: 280px;
+    margin-top: 0
+}
+
+.pie-chart-plot.is-half {
+    min-height: 245px
+}
+
+.pie-chart-empty {
+    height: 100%;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    color: #7a8699;
+    font-size: 12px
+}
+
+.pie-chart-card .recharts-legend-item {
+    display: inline-flex !important;
+    align-items: center;
+    margin: 0 8px 2px 0 !important
+}
+
+.pie-chart-card .recharts-default-legend {
+    max-width: 720px;
+    margin: 0 auto !important
+}
+
 .map-panel.chart-mode .map-toolbar,
 .map-panel.chart-mode .map-controls,
 .map-panel.chart-mode .right-cards,

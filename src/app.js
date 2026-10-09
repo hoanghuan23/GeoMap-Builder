@@ -3,6 +3,16 @@ import { geoJSONToCells, cellsToFeatureCollection, recordsToPointGeoJSON } from 
 import { analyzeSpatialData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
 import { BarRenderer, analyzeBarData } from "./charts/bar-chart.js";
 import { createLineOption, LINE_COLORS, lineSeriesFromFields, LineRenderer } from "./charts/line-chart.js";
+import {
+  clearPieStylePanel,
+  createPieOptions,
+  DEFAULT_PIE_CONFIG,
+  mergePieConfig,
+  PIE_COLORS,
+  pieSeriesFromFields,
+  PieRenderer,
+  renderPieStylePanel
+} from "./charts/pie-chart.js";
 import { DEFAULT_BAR_CONFIG, mergeBarConfig } from "./charts/configs/bar-config.js";
 import { clearBarStylePanel, renderBarStylePanel } from "./charts/components/bar-style-panel.jsx";
 import { clearDataMappingPanel, renderDataMappingPanel } from "./charts/components/data-mapping-panel.jsx";
@@ -19,17 +29,18 @@ const state = {
   page: 1, pageSize: 10, query: "", baselineCount: null,
   mapType: null, dataProfile: null,
   pointData: { type: "FeatureCollection", features: [] },
-  chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null, barStyle: { ...DEFAULT_BAR_CONFIG }, polygonPalette: null
+  chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null,
+  barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, polygonPalette: null
 };
 let map; let toastTimer;
 
 function chartRenderer(kind = state.chartConfig?.chartKind) {
-  return kind === "line" ? LineRenderer : BarRenderer;
+  return kind === "line" ? LineRenderer : kind === "pie" ? PieRenderer : BarRenderer;
 }
 
 function renderChartCanvas() {
   if (!state.chartConfig) return;
-  const nextKind = state.chartConfig.chartKind === "line" ? "line" : "bar";
+  const nextKind = ["line", "pie"].includes(state.chartConfig.chartKind) ? state.chartConfig.chartKind : "bar";
   if (state.activeChartKind && state.activeChartKind !== nextKind) chartRenderer(state.activeChartKind).clear($("chart-canvas"));
   chartRenderer(nextKind).render($("chart-canvas"), state.chartConfig);
   state.activeChartKind = nextKind;
@@ -322,6 +333,7 @@ function clearUploadedData() {
 async function resetConfiguration() {
   state.resolution = CONFIG.DEFAULT_RESOLUTION;
   state.barStyle = mergeBarConfig();
+  state.pieStyle = mergePieConfig();
   state.polygonPalette = null;
 
   $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
@@ -345,7 +357,8 @@ async function resetConfiguration() {
       const defaultSeries = Array.isArray(defaultOption.config.series)
         ? defaultOption.config.series.map(item => ({ ...item }))
         : [];
-      state.chartConfig = { ...defaultOption.config, ...state.barStyle, series: defaultSeries };
+      const chartStyle = defaultOption.config.chartKind === "pie" ? state.pieStyle : state.barStyle;
+      state.chartConfig = { ...defaultOption.config, ...chartStyle, series: defaultSeries };
       state.chartMapping = {
         datasetPath: defaultOption.config.sourcePath,
         xField: defaultOption.config.xField,
@@ -381,6 +394,31 @@ function deleteData() {
 
 function renderChartStyleControls() {
   if (!state.chartConfig) return;
+  if (state.chartConfig.chartKind === "pie") {
+    clearBarStylePanel($("bar-style-controls"));
+    $("style-description").textContent = "Dữ liệu, kích thước hình tròn, màu sắc, nhãn và chú giải";
+    renderPieStylePanel($("bar-style-controls"), {
+      config: { ...state.pieStyle, variant: state.chartConfig.variant },
+      rowCount: state.chartConfig.data.length,
+      series: state.chartConfig.series,
+      onChange(nextConfig) {
+        state.pieStyle = mergePieConfig(nextConfig);
+        state.chartConfig = { ...state.chartConfig, ...state.pieStyle };
+        renderChartCanvas();
+        renderChartStyleControls();
+      },
+      onSeriesChange(index, color) {
+        state.chartConfig = {
+          ...state.chartConfig,
+          series: state.chartConfig.series.map((item, itemIndex) => itemIndex === index ? { ...item, color } : item)
+        };
+        renderChartCanvas();
+        renderChartStyleControls();
+      }
+    });
+    return;
+  }
+  clearPieStylePanel($("bar-style-controls"));
   $("style-description").textContent = state.chartConfig.chartKind === "line"
     ? "Màu đường, nhãn, chú giải và tooltip"
     : "Dữ liệu, màu sắc, kích thước cột, nhãn và trục";
@@ -424,6 +462,8 @@ function resetDisplayedMetrics() {
   const variant = state.chartConfig?.variant;
   const count = variant === "single" ? 1 : variant === "double" ? 2 : variant === "line"
     ? Math.min(3, dataset.suggestedMetrics.length)
+    : ["pie", "halfPie"].includes(variant)
+    ? Math.min(6, dataset.suggestedMetrics.length)
     : Math.min(4, dataset.suggestedMetrics.length);
   applyChartMappingChange({ metrics: dataset.suggestedMetrics.slice(0, count) });
   showToast("Đã đặt lại chỉ số hiển thị.");
@@ -433,7 +473,7 @@ function applyChartMappingChange(change) {
   let mapping = { ...state.chartMapping, ...change };
   if (change.datasetPath) {
     const nextDataset = state.chartAnalysis.datasets.find(dataset => dataset.path === change.datasetPath);
-    const count = state.chartConfig.variant === "single" ? 1 : state.chartConfig.variant === "double" ? 2 : state.chartConfig.variant === "line" ? Math.min(3, nextDataset.suggestedMetrics.length) : Math.min(4, nextDataset.suggestedMetrics.length);
+    const count = state.chartConfig.variant === "single" ? 1 : state.chartConfig.variant === "double" ? 2 : state.chartConfig.variant === "line" ? Math.min(3, nextDataset.suggestedMetrics.length) : ["pie", "halfPie"].includes(state.chartConfig.variant) ? Math.min(6, nextDataset.suggestedMetrics.length) : Math.min(4, nextDataset.suggestedMetrics.length);
     mapping = { datasetPath: nextDataset.path, xField: nextDataset.suggestedCategory, metrics: nextDataset.suggestedMetrics.slice(0, count) };
   }
   state.chartMapping = mapping;
@@ -441,8 +481,8 @@ function applyChartMappingChange(change) {
   const validation = validateBarMapping(dataset, mapping, state.chartConfig.variant);
   state.mappingWarning = validation.message;
   if (validation.valid) {
-    const defaultSeries = state.chartConfig.chartKind === "line" ? lineSeriesFromFields(mapping.metrics) : seriesFromFields(mapping.metrics);
-    const palette = state.chartConfig.chartKind === "line" ? LINE_COLORS : BAR_COLORS;
+    const defaultSeries = state.chartConfig.chartKind === "line" ? lineSeriesFromFields(mapping.metrics) : state.chartConfig.chartKind === "pie" ? pieSeriesFromFields(mapping.metrics) : seriesFromFields(mapping.metrics);
+    const palette = state.chartConfig.chartKind === "line" ? LINE_COLORS : state.chartConfig.chartKind === "pie" ? PIE_COLORS : BAR_COLORS;
     const series = reconcileSeriesColors(defaultSeries, state.chartConfig.series, palette);
     state.chartConfig = {
       ...state.chartConfig,
@@ -452,6 +492,10 @@ function applyChartMappingChange(change) {
       series,
       title: state.chartConfig.variant === "line"
         ? `Xu hướng theo ${humanizeField(mapping.xField).toLowerCase()}`
+        : state.chartConfig.chartKind === "pie"
+        ? mapping.metrics.length === 1
+          ? `${humanizeField(mapping.metrics[0])} theo ${humanizeField(mapping.xField).toLowerCase()}`
+          : `Cơ cấu các chỉ số theo ${humanizeField(mapping.xField).toLowerCase()}`
         : state.chartConfig.variant === "single"
         ? `${humanizeField(mapping.metrics[0])} theo ${humanizeField(mapping.xField).toLowerCase()}`
         : `${state.chartConfig.variant === "double" ? "So sánh hai chỉ số" : "So sánh nhiều chỉ số"} · ${dataset.label}`
@@ -467,7 +511,10 @@ function showChartStyleControls(show) {
   $("bar-style-controls").hidden = !show;
   $("style-description").textContent = show ? "Tùy chỉnh biểu đồ" : "Màu sắc, độ mờ và đường viền";
   if (show) renderChartStyleControls();
-  else clearBarStylePanel($("bar-style-controls"));
+  else {
+    clearBarStylePanel($("bar-style-controls"));
+    clearPieStylePanel($("bar-style-controls"));
+  }
 }
 
 async function readSpatialFile(file) {
@@ -512,7 +559,8 @@ async function readSpatialFile(file) {
 function selectChartOption(type) {
   const option = state.chartOptions.find(item => item.id === type);
   if (!option) return false;
-  state.mapType = option.id; state.chartConfig = { ...option.config, ...state.barStyle };
+  const chartStyle = option.config.chartKind === "pie" ? state.pieStyle : state.barStyle;
+  state.mapType = option.id; state.chartConfig = { ...option.config, ...chartStyle };
   state.chartMapping = { datasetPath: option.config.sourcePath, xField: option.config.xField, metrics: option.config.series.map(item => item.key) };
   state.mappingWarning = "";
   document.querySelectorAll("#map-type-grid .map-type").forEach(button => button.classList.toggle("active", button.dataset.type === type));
@@ -525,7 +573,8 @@ function selectChartOption(type) {
 function replaceChartData(analysis, name) {
   const primaryDataset = analysis.datasets.find(dataset => dataset.path === analysis.sourcePath) || analysis.datasets[0];
   const lineOption = createLineOption(primaryDataset, analysis.titlePrefix);
-  const options = [...analysis.options, ...(lineOption ? [lineOption] : [])];
+  const pieOptions = createPieOptions(primaryDataset, `Cơ cấu các chỉ số · ${analysis.titlePrefix}`);
+  const options = [...analysis.options, ...(lineOption ? [lineOption] : []), ...pieOptions];
   state.chartAnalysis = { ...analysis, options }; state.chartOptions = options; state.boundary = null; state.sourceBoundary = null; state.dataProfile = null;
   state.h3Data = { type: "FeatureCollection", features: [] }; state.pointData = { type: "FeatureCollection", features: [] };
   map.getSource("h3-grid")?.setData(state.h3Data); map.getSource("point-data")?.setData(state.pointData); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
