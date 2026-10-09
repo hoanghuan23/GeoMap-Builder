@@ -42,7 +42,7 @@ export function createLineOption(dataset, title = "Biểu đồ đường") {
   return {
     id: "line_chart",
     label: "Biểu đồ đường",
-    icon: "╱╲",
+    icon: "line",
     config: {
       chartKind: "line",
       variant: "line",

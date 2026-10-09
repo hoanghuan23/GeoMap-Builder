@@ -34,6 +34,7 @@ test("tạo đủ lựa chọn cột khi có hai chỉ số", () => {
   const dataset = analyzeDataSets(input)[0];
   const options = createBarOptions(dataset);
   assert.deepEqual(options.map(option => option.id), ["single_bar", "double_bar", "grouped_bar"]);
+  assert.deepEqual(options.map(option => option.icon), ["singleBar", "doubleBar", "groupedBar"]);
   assert.equal(options[2].config.series.length, 2);
 });
 

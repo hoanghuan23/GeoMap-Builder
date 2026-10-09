@@ -7,6 +7,8 @@ import { DEFAULT_BAR_CONFIG, mergeBarConfig } from "./charts/configs/bar-config.
 import { clearBarStylePanel, renderBarStylePanel } from "./charts/components/bar-style-panel.jsx";
 import { clearDataMappingPanel, renderDataMappingPanel } from "./charts/components/data-mapping-panel.jsx";
 import { BAR_COLORS, dataForBarMapping, humanizeField, reconcileSeriesColors, seriesFromFields, validateBarMapping } from "./charts/data-transformers.js";
+import { renderChartIcon } from "./charts/chart-icons.js";
+import { renderMapIcon } from "./renderers/map-icons.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -250,7 +252,7 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
   grid.replaceChildren(...types.map(type => {
     const button = document.createElement("button"); const icon = document.createElement("span");
     button.type = "button"; button.className = `map-type${type.id === state.mapType ? " active" : ""}`; button.dataset.type = type.id; button.dataset.label = type.label;
-    button.title = `${type.label} · ${type.renderer}`; icon.textContent = type.icon; button.append(icon, type.label); return button;
+    button.title = `${type.label} · ${type.renderer}`; renderMapIcon(icon, type.icon); button.append(icon, type.label); return button;
   }));
   grid.classList.toggle("is-empty", types.length === 0);
   if (!types.length) grid.textContent = "Dữ liệu này chưa phù hợp với renderer hiện có.";
@@ -473,7 +475,7 @@ function replaceChartData(analysis, name) {
   $("map-type-grid").replaceChildren(...options.map(option => {
     const button = document.createElement("button"); const icon = document.createElement("span");
     button.type = "button"; button.className = "map-type"; button.dataset.type = option.id; button.dataset.label = option.label;
-    button.title = `${option.label} · Recharts`; icon.textContent = option.icon; button.append(icon, option.label); return button;
+    button.title = `${option.label} · Recharts`; renderChartIcon(icon, option.icon); button.append(icon, option.label); return button;
   }));
   $("map-type-summary").textContent = `Tìm thấy ${analysis.rowCount} bản ghi tại ${analysis.sourcePath} · ${analysis.numericFields.length} trường số · ${options.length} kiểu biểu đồ phù hợp`;
   $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu biểu đồ đã tải · đang sử dụng"; $("selected-file").hidden = false;

@@ -13,6 +13,7 @@ test("tạo lựa chọn biểu đồ đường nhiều chuỗi từ dataset", (
   const dataset = analyzeDataSets(records)[0];
   const option = createLineOption(dataset, "Lượt truy cập website theo tháng năm 2025");
   assert.equal(option.id, "line_chart");
+  assert.equal(option.icon, "line");
   assert.equal(option.config.chartKind, "line");
   assert.equal(option.config.xField, "month");
   assert.deepEqual(option.config.series.map(series => series.key), ["desktop", "mobile", "tablet"]);

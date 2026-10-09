@@ -294,6 +294,20 @@ button {
     color: var(--blue)
 }
 
+.map-type .chart-type-icon,
+.map-type .renderer-type-icon {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    line-height: 0
+}
+
+.map-type .chart-type-icon svg,
+.map-type .renderer-type-icon svg {
+    display: block
+}
+
 .tabs {
     height: 31px;
     background: #f2f5f9;
