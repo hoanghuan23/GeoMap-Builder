@@ -1,5 +1,22 @@
 # GeoMap Builder
 
+## Chạy dự án
+
+```bash
+npm install
+npm run dev
+```
+
+Ô tìm kiếm khu vực dùng MapTiler Geocoding với key trong `.env`:
+
+```env
+MAPTILER_API_KEY=your_maptiler_api_key
+```
+
+Key được dùng từ trình duyệt cho Geocoding API; khi triển khai nên giới hạn key theo domain trong trang quản lý MapTiler.
+
+Kết quả ranh giới mới từ MapTiler được cắt bằng polygon GADM tương ứng trước khi hiển thị: cấp quốc gia dùng GADM 0, tỉnh/thành dùng GADM 1, quận/huyện và địa phương dùng GADM 2. Các polygon GADM chồng lấn được dùng như một mặt nạ đất liền, nhằm giữ biên giới hành chính mới từ MapTiler nhưng loại phần ranh giới ngoài biển.
+
 ## 1. Mục tiêu dự án
 
 Xây dựng một công cụ cho phép người dùng tải dữ liệu không gian lên hệ thống, sau đó phân tích dữ liệu và lựa chọn kiểu trực quan hóa phù hợp để hiển thị trên bản đồ.

@@ -21,6 +21,7 @@ import { renderChartIcon } from "./charts/chart-icons.js";
 import { renderMapIcon } from "./renderers/map-icons.js";
 import { PolygonRenderer } from "./renderers/polygon-renderer.js";
 import { polygonColorField, polygonFillExpression } from "./renderers/polygon-style.js";
+import { createMapSearch } from "./map-search.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -742,6 +743,7 @@ function exportCSV() {
 async function init() {
   renderSupportedChartCatalog();
   bindUI(); map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/dark", center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
+  createMapSearch({ map, apiKey: CONFIG.MAPTILER_API_KEY });
   map.once("style.load", () => { addMapLayers(); setupProvinceFilter(EMPTY_FEATURE_COLLECTION); updateDashboard(); });
   map.on("error", event => console.warn("MapLibre:", event.error?.message || event.error));
 }

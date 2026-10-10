@@ -13,8 +13,12 @@
     "vite": "^6.1.0"
   },
   "dependencies": {
+    "polygon-clipping": "^0.15.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "recharts": "^3.10.1"
+  },
+  "overrides": {
+    "splaytree": "3.1.2"
   }
 }

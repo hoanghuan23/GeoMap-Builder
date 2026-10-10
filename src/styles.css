@@ -1225,6 +1225,7 @@ input[type=range] {
 
 .map-panel.chart-mode .map-toolbar,
 .map-panel.chart-mode .map-controls,
+.map-panel.chart-mode .map-search,
 .map-panel.chart-mode .right-cards,
 .map-panel.chart-mode .map-attribution {
     display: none
@@ -1241,7 +1242,7 @@ input[type=range] {
 
 .status-pill {
     position: absolute;
-    top: 12px;
+    top: 66px;
     left: 50%;
     transform: translateX(-50%);
     background: #142136e8;
@@ -1251,6 +1252,192 @@ input[type=range] {
     z-index: 4;
     box-shadow: 0 4px 18px #0004;
     white-space: nowrap
+}
+
+.map-search {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(370px, calc(100% - 190px));
+    z-index: 6
+}
+
+.map-search-form {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 0 5px 0 7px;
+    overflow: hidden;
+    border: 1px solid #243146;
+    border-radius: 12px;
+    background: #0d1624f2;
+    box-shadow: 0 7px 24px #0208175c;
+    backdrop-filter: blur(9px)
+}
+
+.map-search:focus-within .map-search-form {
+    border-color: #168fc1;
+    box-shadow: 0 0 0 3px #0ea5e929, 0 7px 24px #0208175c
+}
+
+.map-search-location {
+    width: 31px;
+    height: 31px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    border-radius: 50%;
+    color: #fff;
+    background: #0799ca
+}
+
+.map-search-location svg,
+.map-search-submit svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round
+}
+
+.map-search-form input {
+    min-width: 0;
+    height: 100%;
+    flex: 1;
+    border: 0;
+    outline: 0;
+    padding: 0 10px;
+    color: #eef5ff;
+    background: transparent;
+    font-size: 12px
+}
+
+.map-search-form input::placeholder {
+    color: #8290a5
+}
+
+.map-search-form input::-webkit-search-cancel-button {
+    display: none
+}
+
+.map-search-clear,
+.map-search-submit {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    border: 0;
+    border-radius: 7px;
+    color: #8695aa;
+    background: transparent
+}
+
+.map-search-clear {
+    font-size: 19px
+}
+
+.map-search-clear:hover,
+.map-search-submit:hover {
+    color: #fff;
+    background: #ffffff12
+}
+
+.map-search-spinner {
+    width: 15px;
+    height: 15px;
+    flex: none;
+    border: 2px solid #64748b;
+    border-top-color: #22b9e8;
+    border-radius: 50%;
+    animation: map-search-spin .7s linear infinite
+}
+
+@keyframes map-search-spin {
+    to { transform: rotate(360deg) }
+}
+
+.map-search-results {
+    max-height: min(360px, calc(100vh - 155px));
+    margin-top: 7px;
+    overflow-y: auto;
+    border: 1px solid #dce3ed;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 12px 32px #17263f3d
+}
+
+.map-search-result {
+    width: 100%;
+    min-height: 57px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 11px;
+    border: 0;
+    border-bottom: 1px solid #edf1f5;
+    background: #fff;
+    text-align: left
+}
+
+.map-search-result:last-child {
+    border-bottom: 0
+}
+
+.map-search-result:hover,
+.map-search-result.active {
+    background: #eff7ff
+}
+
+.map-search-result-icon {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    border-radius: 50%;
+    color: #087ead;
+    background: #e2f5fc;
+    font-size: 17px
+}
+
+.map-search-result>span:last-child {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px
+}
+
+.map-search-result b,
+.map-search-result small {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis
+}
+
+.map-search-result b {
+    color: #17263f;
+    font-size: 11px
+}
+
+.map-search-result small {
+    color: #718096;
+    font-size: 9px
+}
+
+.map-search-message {
+    padding: 14px;
+    color: #68758a;
+    font-size: 10px;
+    line-height: 1.5
+}
+
+.map-search-message.error {
+    color: #b42318;
+    background: #fff8f7
 }
 
 .map-toolbar {
@@ -1460,6 +1647,10 @@ input[type=range] {
     background: #162638a8;
     padding: 3px 5px;
     font-size: 8px
+}
+
+.map-attribution a {
+    color: inherit
 }
 
 .data-panel {
@@ -1742,6 +1933,16 @@ th:last-child {
 
     .map-panel {
         height: 480px
+    }
+
+    .map-search {
+        top: 10px;
+        left: 50%;
+        width: calc(100% - 20px)
+    }
+
+    .map-search-form {
+        height: 41px
     }
 
     .chart-canvas {
