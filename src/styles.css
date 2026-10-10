@@ -1255,9 +1255,12 @@ input[type=range] {
 
 .map-toolbar {
     position: absolute;
-    top: 10px;
-    right: 140px;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
     display: flex;
+    flex-direction: column;
+    align-items: center;
     background: #fff;
     border: 1px solid #d9e1eb;
     border-radius: 7px;
@@ -1282,8 +1285,9 @@ input[type=range] {
 }
 
 .map-toolbar i {
-    border-left: 1px solid var(--line);
-    margin: 4px
+    width: 25px;
+    border-top: 1px solid var(--line);
+    margin: 4px 0
 }
 
 .map-controls {
@@ -1704,9 +1708,6 @@ th:last-child {
         width: 190px
     }
 
-    .map-toolbar {
-        right: 125px
-    }
 }
 
 @media(max-width:760px) {
