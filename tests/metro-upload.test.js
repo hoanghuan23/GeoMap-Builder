@@ -1,0 +1,134 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import * as metro from "../src/metro-data.js";
+import * as capabilities from "../src/data-capabilities.js";
+import * as polygonStyle from "../src/renderers/polygon-style.js";
+import { PolygonRenderer } from "../src/renderers/polygon-renderer.js";
+
+// Exercise the actual upload and UI handlers with a MapLibre/DOM adapter.
+function createHarness() {
+  const elements = new Map();
+  const element = () => ({
+    checked: true, hidden: false, value: "", textContent: "", style: {}, dataset: {}, children: [],
+    classList: { add() {}, remove() {}, toggle() {} },
+    replaceChildren(...children) { this.children = children; },
+    append(...children) { this.children.push(...children); },
+    setAttribute() {}, addEventListener() {}
+  });
+  const get = id => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
+  get("fixed-color").value = "#6c5ce7"; get("opacity").value = ".72";
+  get("border-color").value = "#ffffff"; get("line-width").value = ".5";
+  const sources = new Map(); const layers = new Map();
+  const map = {
+    getSource: id => sources.get(id), getLayer: id => layers.get(id),
+    addSource(id, config) { sources.set(id, { data: config.data, setData(data) { this.data = data; } }); },
+    addLayer(layer) { layers.set(layer.id, { ...layer, layout: { ...layer.layout }, paint: { ...layer.paint } }); },
+    setPaintProperty(id, key, value) { layers.get(id).paint[key] = value; },
+    getPaintProperty(id, key) { return layers.get(id).paint[key]; },
+    getContainer() { return get("map"); },
+    project(coordinates) { return { x: coordinates[0] * 10, y: coordinates[1] * 10 }; },
+    setLayoutProperty(id, key, value) { layers.get(id).layout[key] = value; },
+    moveLayer() {}, on() {}, resize() {}, fitBounds() {}
+  };
+  const context = vm.createContext({
+    ...metro, ...capabilities, ...polygonStyle, PolygonRenderer,
+    CONFIG: { DEFAULT_RESOLUTION: 5, MAX_RENDER_CELLS: 120000 },
+    DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
+    mergeBarConfig: () => ({}), mergePieConfig: () => ({}),
+    clearDataMappingPanel() {}, clearBarStylePanel() {}, clearPieStylePanel() {}, renderMapIcon() {},
+    humanizeField: field => field,
+    geoJSONToCells() { throw new Error("Metro polygons must not be regenerated as H3"); },
+    document: { getElementById: get, createElement: element, querySelector: () => element(), querySelectorAll: () => [] },
+    maplibregl: {
+      LngLatBounds: class { extend() { return this; } },
+      Popup: class {
+        constructor(options) { this.options = options; }
+        on(name, callback) { this[name] = callback; return this; }
+        setLngLat(coordinates) { this.coordinates = coordinates; return this; }
+        setDOMContent(card) { this.card = card; return this; }
+        addTo() { return this; }
+        remove() { this.close?.(); }
+      }
+    },
+    console, setTimeout: callback => { callback(); return 0; }, clearTimeout() {}
+  });
+  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
+    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "")
+    .replace(/\binit\(\);\s*$/, "");
+  vm.runInContext(source, context);
+  context.testMap = map;
+  vm.runInContext("map = testMap; addMapLayers();", context);
+  return { context, get, sources, layers };
+}
+
+test("upload displays independent Metro layers, changes departure, and clears all sources", async () => {
+  const { context, get, sources, layers } = createHarness();
+  context.file = { name: "metro.json", text: async () => readFileSync(new URL("../geomap_metro1_du_lieu_mo_phong.json", import.meta.url), "utf8") };
+  await vm.runInContext("processSpatialFile(file)", context);
+  assert.equal(sources.get("polygon-data").data.features.length, 3980);
+  assert.equal(sources.get("vietnam-boundary").data.features.length, 1);
+  assert.equal(sources.get("metro-station-data").data.features.length, 13);
+  assert.equal(sources.get("line-data").data.features.length, 1);
+  assert.equal(layers.get("polygon-fill").layout.visibility, "visible");
+  assert.equal(layers.get("data-lines").layout.visibility, "visible");
+  assert.equal(layers.get("metro-stations").layout.visibility, "visible");
+  assert.equal(get("metro-time-section").hidden, false);
+  assert.equal(get("metro-departure").children.length, 18);
+  assert.equal(get("display-config-section").hidden, true);
+  get("metro-departure").value = "17:30";
+  vm.runInContext("updateMetroTime()", context);
+  const cell = sources.get("polygon-data").data.features[0].properties;
+  assert.equal(cell.departure_time, "17:30");
+  assert.equal(cell.ratio, cell.bus_minutes / cell.motorbike_minutes);
+  get("show-map-lines").checked = false;
+  vm.runInContext("applyMapLayerVisibility()", context);
+  assert.equal(layers.get("data-lines").layout.visibility, "none");
+  assert.equal(layers.get("metro-stations").layout.visibility, "visible");
+  get("show-metro-boundary").checked = false;
+  vm.runInContext("applyMapLayerVisibility()", context);
+  assert.equal(layers.get("vietnam-border").layout.visibility, "none");
+  get("show-map-layers").checked = false;
+  vm.runInContext("applyMapLayerVisibility()", context);
+  for (const id of ["polygon-fill", "polygon-border", "metro-stations", "metro-station-labels", "data-lines", "vietnam-border"]) {
+    assert.equal(layers.get(id).layout.visibility, "none");
+  }
+  await vm.runInContext("resetConfiguration()", context);
+  assert.equal(sources.get("polygon-data").data.features[0].properties.departure_time, "05:30");
+  assert.equal(layers.get("data-lines").layout.visibility, "visible");
+  vm.runInContext("deleteData()", context);
+  for (const id of ["polygon-data", "vietnam-boundary", "metro-station-data", "line-data"]) assert.equal(sources.get(id).data.features.length, 0);
+  assert.equal(get("metro-time-section").hidden, true);
+  assert.equal(get("metro-legend").hidden, true);
+});
+
+test("clicks anywhere in a Metro cell focus its full geometry and anchor to the same center", async () => {
+  const { context, sources, layers } = createHarness();
+  context.file = { name: "metro.json", text: async () => readFileSync(new URL("../geomap_metro1_du_lieu_mo_phong.json", import.meta.url), "utf8") };
+  await vm.runInContext("processSpatialFile(file)", context);
+  const feature = sources.get("polygon-data").data.features[0];
+  context.clickedFeature = { ...feature, geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [0, 1], [0, 0]]] } };
+  context.clickLocation = [106, 10];
+  vm.runInContext("showMetroComparison({ features: [clickedFeature], lngLat: clickLocation })", context);
+  const firstCenter = vm.runInContext("state.metroPopup.coordinates", context);
+  assert.equal(vm.runInContext("state.metroPopup.options.className", context), "metro-comparison-popup");
+  assert.equal(vm.runInContext("state.metroPopup.options.anchor", context), "left");
+  const card = vm.runInContext("state.metroPopup.card", context);
+  assert.equal(card.children[0].textContent, "Xe buýt chậm hơn xe máy");
+  assert.equal(card.children[1].className, "metro-comparison-ratio");
+  assert.equal(card.children[1].children[0].textContent, (feature.properties.bus_minutes / feature.properties.motorbike_minutes).toFixed(2));
+  assert.equal(card.children[2].children[1].children[0].textContent, `${Number(feature.properties.bus_minutes.toFixed(1))}′`);
+  assert.deepEqual(sources.get("selected-cell").data.features[0].geometry, feature.geometry);
+  assert.equal(layers.get("cell-focus-fill").paint["fill-opacity"], 1);
+  assert.deepEqual(layers.get("cell-focus-fill").paint["fill-color"], layers.get("polygon-fill").paint["fill-color"]);
+  assert.equal(layers.get("cell-focus-border").paint["line-color"], "#ffffff");
+  context.clickLocation = [107, 11];
+  vm.runInContext("showMetroComparison({ features: [clickedFeature], lngLat: clickLocation })", context);
+  assert.deepEqual(vm.runInContext("state.metroPopup.coordinates", context), firstCenter);
+  assert.equal(layers.get("cell-focus-dim").layout.visibility, "visible");
+  vm.runInContext("state.metroPopup.remove()", context);
+  for (const id of ["cell-focus-dim", "cell-focus-fill", "cell-focus-border"]) assert.equal(layers.get(id).layout.visibility, "none");
+  assert.equal(sources.get("selected-cell").data.features.length, 0);
+  assert.equal(vm.runInContext("state.metroPopup", context), null);
+});

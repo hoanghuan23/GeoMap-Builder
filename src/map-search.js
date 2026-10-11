@@ -61,6 +61,20 @@ export function isBoundaryFeature(feature) {
   return ["Polygon", "MultiPolygon"].includes(feature?.geometry?.type);
 }
 
+export async function searchMapTilerBoundaries(query, options) {
+  const features = await searchMapTiler(query, options);
+  const details = await Promise.allSettled(features.map(async feature => {
+    if (isBoundaryFeature(feature)) return feature;
+    if (!feature.id) return null;
+    const detail = await getMapTilerFeature(feature.id, options);
+    return isBoundaryFeature(detail) ? { ...feature, ...detail } : null;
+  }));
+  if (options.signal?.aborted) throw new DOMException("Search aborted", "AbortError");
+  const failed = details.filter(result => result.status === "rejected");
+  if (failed.length && failed.length === details.length) throw failed[0].reason;
+  return details.flatMap(result => result.status === "fulfilled" && result.value ? [result.value] : []);
+}
+
 function asMultiPolygon(geometry) {
   if (geometry?.type === "Polygon") return [geometry.coordinates];
   if (geometry?.type === "MultiPolygon") return geometry.coordinates;
@@ -228,6 +242,12 @@ export function createMapSearch({ map, apiKey }) {
   let requestController;
   let detailController;
   let selectedBoundary = null;
+  let boundaryRenderPending = false;
+
+  const drawSelectedBoundary = () => {
+    boundaryRenderPending = !map?.isStyleLoaded?.();
+    if (!boundaryRenderPending) renderSearchBoundary(map, selectedBoundary);
+  };
 
   const setOpen = open => {
     results.hidden = !open;
@@ -261,19 +281,20 @@ export function createMapSearch({ map, apiKey }) {
     setOpen(false);
     detailController?.abort();
     selectedBoundary = null;
-    renderSearchBoundary(map, null);
+    boundaryRenderPending = false;
+    drawSelectedBoundary();
     if (!feature.id) return;
 
     const controller = new AbortController();
     detailController = controller;
     spinner.hidden = false;
     try {
-      const detailedFeature = await getMapTilerFeature(feature.id, { apiKey, signal: controller.signal });
+      const detailedFeature = isBoundaryFeature(feature) ? feature : await getMapTilerFeature(feature.id, { apiKey, signal: controller.signal });
       if (detailController !== controller || !isBoundaryFeature(detailedFeature)) return;
       const clippedBoundary = await landOnlyBoundary(detailedFeature, { signal: controller.signal, forceVietnam: true });
       if (detailController !== controller) return;
       selectedBoundary = clippedBoundary;
-      renderSearchBoundary(map, selectedBoundary);
+      drawSelectedBoundary();
       if (selectedBoundary) focusMapOnFeature(map, selectedBoundary);
       else console.warn("Ranh giới MapTiler không giao với mặt nạ đất liền GADM.");
     } catch (error) {
@@ -287,7 +308,7 @@ export function createMapSearch({ map, apiKey }) {
     activeIndex = -1;
     results.replaceChildren();
     if (!features.length) {
-      renderMessage("Không tìm thấy khu vực hành chính phù hợp tại Việt Nam.");
+      renderMessage("Không tìm thấy khu vực có dữ liệu ranh giới phù hợp tại Việt Nam.");
       return;
     }
     features.forEach((feature, index) => {
@@ -329,7 +350,9 @@ export function createMapSearch({ map, apiKey }) {
     requestController = controller;
     spinner.hidden = false;
     try {
-      renderFeatures(await searchMapTiler(query, { apiKey, center: map.getCenter(), signal: controller.signal }));
+      const boundaries = await searchMapTilerBoundaries(query, { apiKey, center: map.getCenter(), signal: controller.signal });
+      if (requestController !== controller || controller.signal.aborted) return;
+      renderFeatures(boundaries);
     } catch (error) {
       if (error.name === "AbortError") return;
       console.error(error);
@@ -378,7 +401,8 @@ export function createMapSearch({ map, apiKey }) {
     spinner.hidden = true;
     features = [];
     selectedBoundary = null;
-    renderSearchBoundary(map, null);
+    boundaryRenderPending = false;
+    drawSelectedBoundary();
     setOpen(false);
     input.focus();
   });
@@ -386,7 +410,10 @@ export function createMapSearch({ map, apiKey }) {
     if (!root.contains(event.target)) setOpen(false);
   });
   map.on("style.load", () => {
-    if (selectedBoundary) renderSearchBoundary(map, selectedBoundary);
+    if (selectedBoundary) drawSelectedBoundary();
+  });
+  map.on("idle", () => {
+    if (boundaryRenderPending) drawSelectedBoundary();
   });
 
   if (!apiKey) input.title = "Thêm MAPTILER_API_KEY vào file .env";
@@ -395,6 +422,7 @@ export function createMapSearch({ map, apiKey }) {
     requestController?.abort();
     detailController?.abort();
     selectedBoundary = null;
+    boundaryRenderPending = false;
     renderSearchBoundary(map, null);
   };
 }

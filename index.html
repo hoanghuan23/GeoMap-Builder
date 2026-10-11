@@ -42,10 +42,20 @@
         <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p>Chọn thông tin để vẽ biểu đồ</p></div></div>
         <div id="data-mapping-controls"></div>
       </section>
+      <section id="metro-time-section" class="panel-section" hidden>
+        <div class="section-title"><span class="step">3</span><div><h2>Cấu hình hiển thị</h2><p>So sánh thời gian xe buýt và xe máy</p></div></div>
+        <label class="field">Thời gian xuất phát<select id="metro-departure" aria-label="Thời gian xuất phát"></select></label>
+      </section>
       <section id="feature-section" class="panel-section feature-section" hidden>
         <button id="feature-toggle" class="section-title collapsible" aria-expanded="true"><span class="step">4</span><div><h2>Chức năng</h2><p>Bật/tắt tính năng bổ sung</p></div><span class="chevron">⌃</span></button>
         <div id="feature-controls" class="feature-controls">
           <label class="toggle-row feature-toggle-row"><span class="feature-copy"><b>Hiển thị lớp bản đồ</b><small>Bật để vẽ các đối tượng/lớp dữ liệu lên bản đồ</small></span><span class="switch-control"><input id="show-map-layers" type="checkbox" checked><i></i><em id="show-map-layers-status">Đang bật</em></span></label>
+          <div id="metro-layer-controls" hidden>
+            <label class="toggle-row"><span>Hiển thị vùng dữ liệu</span><input id="show-metro-cells" type="checkbox" checked><i></i></label>
+            <label class="toggle-row"><span>Hiển thị đường bao vùng</span><input id="show-metro-boundary" type="checkbox" checked><i></i></label>
+            <label class="toggle-row"><span>Hiển thị các điểm ga</span><input id="show-metro-stations" type="checkbox" checked><i></i></label>
+          </div>
+          <label id="line-toggle-field" class="toggle-row" hidden><span>Hiển thị đường nối giữa các điểm</span><input id="show-map-lines" type="checkbox" checked><i></i></label>
         </div>
       </section>
       <section id="style-section" class="panel-section style-section" hidden>
@@ -56,6 +66,7 @@
             <div id="polygon-color-ramp" class="field" hidden>
               <div class="field-label"><span>Dải màu</span><small id="polygon-color-field"></small></div>
               <div class="palette-row" role="group" aria-label="Chọn dải màu Polygon">
+                <button id="travel-palette" class="palette travel" type="button" data-palette="travel" aria-label="Dải màu tỷ lệ thời gian" title="Tỷ lệ thời gian xe buýt/xe máy" hidden></button>
                 <button class="palette" type="button" data-palette="diverging" aria-label="Dải màu phân kỳ" title="Dải màu phân kỳ"></button>
                 <button class="palette viridis" type="button" data-palette="viridis" aria-label="Dải màu Viridis" title="Dải màu Viridis"></button>
                 <button class="palette blue" type="button" data-palette="blue" aria-label="Dải màu xanh" title="Dải màu xanh"></button>
@@ -74,6 +85,7 @@
     </aside>
     <section class="content-area table-hidden">
       <div class="map-panel"><div id="map"></div><div id="chart-canvas" class="chart-canvas" hidden></div><div id="status" class="status-pill" hidden></div>
+        <div id="metro-legend" class="metro-legend" hidden aria-live="polite"></div>
         <div id="map-search" class="map-search">
           <form id="map-search-form" class="map-search-form" role="search">
             <span class="map-search-location" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/></svg></span>

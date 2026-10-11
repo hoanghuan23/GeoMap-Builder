@@ -22,6 +22,7 @@ import { renderMapIcon } from "./renderers/map-icons.js";
 import { PolygonRenderer } from "./renderers/polygon-renderer.js";
 import { polygonColorField, polygonFillExpression } from "./renderers/polygon-style.js";
 import { createMapSearch } from "./map-search.js";
+import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColors } from "./metro-data.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -45,9 +46,53 @@ const state = {
   mapType: null, dataProfile: null,
   pointData: { type: "FeatureCollection", features: [] },
   chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null,
-  barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, polygonPalette: null
+  barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, polygonPalette: null,
+  metroData: null, metroTime: null, metroPopup: null, lineData: EMPTY_FEATURE_COLLECTION
 };
-let map; let toastTimer;
+let map; let toastTimer; let cellPopup;
+
+function cellCenter(feature) {
+  const p = feature.properties || {};
+  if (Number.isFinite(p.center_lng) && Number.isFinite(p.center_lat)) return [p.center_lng, p.center_lat];
+  const polygons = feature.geometry.type === "Polygon" ? [feature.geometry.coordinates] : feature.geometry.coordinates;
+  const vertices = polygons.flatMap(polygon => polygon[0].slice(0, -1));
+  return vertices.reduce((center, point) => [center[0] + point[0] / vertices.length, center[1] + point[1] / vertices.length], [0, 0]);
+}
+
+function showCellFocus(feature, layerId) {
+  const data = { type: "FeatureCollection", features: [feature] };
+  if (!map.getSource("selected-cell")) {
+    map.addSource("selected-cell", { type: "geojson", data });
+    map.addLayer({ id: "cell-focus-dim", type: "background", paint: { "background-color": "#000000", "background-opacity": .55 } });
+    map.addLayer({ id: "cell-focus-fill", type: "fill", source: "selected-cell", paint: { "fill-color": "#168c50", "fill-opacity": 1 } });
+    map.addLayer({ id: "cell-focus-border", type: "line", source: "selected-cell", paint: { "line-color": "#ffffff", "line-width": 3 } });
+  } else map.getSource("selected-cell").setData(data);
+  map.setPaintProperty("cell-focus-fill", "fill-color", map.getPaintProperty(layerId, "fill-color"));
+  for (const id of ["cell-focus-dim", "cell-focus-fill", "cell-focus-border"]) {
+    map.moveLayer(id);
+    map.setLayoutProperty(id, "visibility", "visible");
+  }
+}
+
+function openCellPopup(popup, feature, layerId) {
+  cellPopup?.remove();
+  cellPopup = popup;
+  const container = map.getContainer();
+  popup.on("close", () => {
+    if (cellPopup !== popup) return;
+    cellPopup = null;
+    container.classList.remove("cell-popup-open");
+    for (const id of ["cell-focus-dim", "cell-focus-fill", "cell-focus-border"]) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
+    }
+    map.getSource("selected-cell")?.setData(EMPTY_FEATURE_COLLECTION);
+    if (state.metroPopup === popup) state.metroPopup = null;
+  });
+  showCellFocus(feature, layerId);
+  popup.setLngLat(cellCenter(feature)).addTo(map);
+  container.classList.add("cell-popup-open");
+  return popup;
+}
 
 function chartRenderer(kind = state.chartConfig?.chartKind) {
   return kind === "line" ? LineRenderer : kind === "pie" ? PieRenderer : BarRenderer;
@@ -95,6 +140,10 @@ function showSupportedChartCatalog(visible) {
 function updateModelSections() {
   const hasModel = Boolean(state.mapType);
   const isChart = Boolean(state.chartConfig);
+  $("metro-time-section").hidden = !state.metroData || isChart;
+  $("metro-layer-controls").hidden = !state.metroData || isChart;
+  $("line-toggle-field").hidden = isChart || !state.lineData.features.length;
+  $("travel-palette").hidden = !state.metroData;
   $("display-config-section").hidden = !hasModel || isChart || state.mapType !== "h3";
   $("chart-data-mapping-section").hidden = !isChart;
   $("feature-section").hidden = !hasModel || isChart;
@@ -104,7 +153,7 @@ function updateModelSections() {
     const isPolygon = state.mapType === "polygon";
     $("style-description").textContent = isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
     $("polygon-color-ramp").hidden = !isPolygon;
-    $("border-color-field").hidden = isPolygon;
+    $("border-color-field").hidden = isPolygon && !state.metroData;
     $("show-border-field").hidden = false;
     $("line-width-field").hidden = false;
     if (isPolygon) syncPolygonPaletteControls();
@@ -116,8 +165,8 @@ function fillExpression() {
 }
 
 function syncPolygonPaletteControls() {
-  const colorField = polygonColorField(state.boundary, state.dataProfile);
-  $("polygon-color-field").textContent = colorField ? `Theo ${humanizeField(colorField.field)}` : "Cần thuộc tính dữ liệu";
+  const colorField = state.metroData ? { field: "ratio" } : polygonColorField(state.boundary, state.dataProfile);
+  $("polygon-color-field").textContent = state.metroData ? "Xe buýt / xe máy" : colorField ? `Theo ${humanizeField(colorField.field)}` : "Cần thuộc tính dữ liệu";
   document.querySelectorAll("#polygon-color-ramp .palette").forEach(button => {
     button.disabled = !colorField;
     button.classList.toggle("active", button.dataset.palette === state.polygonPalette);
@@ -137,19 +186,20 @@ function applyStyle() {
     map.setPaintProperty("h3-border", "line-width", borderWidth);
   }
   if (map.getLayer("polygon-fill")) {
-    map.setPaintProperty("polygon-fill", "fill-color", polygonFillExpression(state.boundary, state.dataProfile, state.polygonPalette, color));
+    map.setPaintProperty("polygon-fill", "fill-color", state.metroData ? travelFillExpression(state.polygonPalette, color) : polygonFillExpression(state.boundary, state.dataProfile, state.polygonPalette, color));
     map.setPaintProperty("polygon-fill", "fill-opacity", opacity);
     map.setPaintProperty("polygon-border", "line-color", borderColor);
     map.setPaintProperty("polygon-border", "line-width", borderWidth);
   }
   applyMapLayerVisibility();
+  renderMetroLegend();
 }
 
 function applyMapLayerVisibility() {
   if (!map) return;
   const showLayers = $("show-map-layers")?.checked ?? false;
   const showH3 = showLayers && state.mapType === "h3";
-  const showPolygon = showLayers && state.mapType === "polygon";
+  const showPolygon = showLayers && state.mapType === "polygon" && (!state.metroData || $("show-metro-cells").checked);
   if (map.getLayer("h3-fill")) map.setLayoutProperty("h3-fill", "visibility", showH3 ? "visible" : "none");
   if (map.getLayer("h3-border")) map.setLayoutProperty("h3-border", "visibility", showH3 && $("show-border").checked ? "visible" : "none");
   if (map.getLayer("point-marker")) map.setLayoutProperty("point-marker", "visibility", showLayers && state.mapType === "point" ? "visible" : "none");
@@ -157,7 +207,14 @@ function applyMapLayerVisibility() {
   if (map.getLayer("point-heatmap")) map.setLayoutProperty("point-heatmap", "visibility", showLayers && state.mapType === "heatmap" ? "visible" : "none");
   if (map.getLayer("polygon-fill")) map.setLayoutProperty("polygon-fill", "visibility", showPolygon ? "visible" : "none");
   if (map.getLayer("polygon-border")) map.setLayoutProperty("polygon-border", "visibility", showPolygon && $("show-border").checked ? "visible" : "none");
-  if (map.getLayer("vietnam-border")) map.setLayoutProperty("vietnam-border", "visibility", "visible");
+  if (map.getLayer("vietnam-border")) map.setLayoutProperty("vietnam-border", "visibility", showLayers && (!state.metroData || $("show-metro-boundary").checked) ? "visible" : "none");
+  for (const id of ["metro-stations", "metro-station-labels"]) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", showLayers && state.metroData && $("show-metro-stations").checked ? "visible" : "none");
+  }
+  if (map.getLayer("data-lines")) map.setLayoutProperty("data-lines", "visibility", showLayers && $("show-map-lines").checked && (state.metroData || state.mapType === "line") ? "visible" : "none");
+  $("metro-legend").hidden = !state.metroData || !showPolygon;
+  if (!showPolygon) { state.metroPopup?.remove(); state.metroPopup = null; }
+  if (!showH3 && !showPolygon) cellPopup?.remove();
 }
 
 function addMapLayers() {
@@ -175,16 +232,33 @@ function addMapLayers() {
   map.addSource("vietnam-boundary", { type: "geojson", data: state.boundary || EMPTY_FEATURE_COLLECTION });
   map.addLayer({ id: "vietnam-border", type: "line", source: "vietnam-boundary", paint: { "line-color": "#00e65c", "line-width": 2 } });
   PolygonRenderer.render(map, state.boundary || EMPTY_FEATURE_COLLECTION, {
-    sourceId: "vietnam-boundary",
+    sourceId: "polygon-data",
     fillLayerId: "polygon-fill",
     borderLayerId: "polygon-border",
     fillPaint: { "fill-color": "#389e55", "fill-opacity": .32 },
     borderPaint: { "line-color": "#00e65c", "line-width": 2 }
   });
+  map.moveLayer("vietnam-border");
+  map.addSource("line-data", { type: "geojson", data: state.lineData });
+  map.addLayer({ id: "data-lines", type: "line", source: "line-data", paint: { "line-color": "#c52e64", "line-width": 3 } });
+  map.addSource("metro-station-data", { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
+  map.addLayer({ id: "metro-stations", type: "circle", source: "metro-station-data", paint: { "circle-radius": 4, "circle-color": "#c52e64", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 } });
+  map.addLayer({ id: "metro-station-labels", type: "symbol", source: "metro-station-data", layout: { "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"], "text-size": 12, "text-offset": [0, 1.4], "text-anchor": "top" }, paint: { "text-color": "#ffffff", "text-halo-color": "#151a23", "text-halo-width": 2 } });
+  map.on("click", "polygon-fill", showMetroComparison);
+  map.on("click", "metro-stations", event => {
+    const feature = event.features?.[0]; if (!feature) return;
+    const label = document.createElement("strong"); label.textContent = feature.properties?.name || "Ga Metro";
+    new maplibregl.Popup({ offset: 8 }).setLngLat(event.lngLat).setDOMContent(label).addTo(map);
+  });
+  for (const id of ["polygon-fill", "metro-stations"]) {
+    map.on("mouseenter", id, () => { if (state.metroData) map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", id, () => map.getCanvas().style.cursor = "");
+  }
   applyMapLayerVisibility();
   map.on("click", "h3-fill", event => {
     const p = event.features?.[0]?.properties; if (!p) return;
-    new maplibregl.Popup({ offset: 8 }).setLngLat(event.lngLat).setHTML(`<div style="font:12px Inter;line-height:1.8"><b>H3:</b> ${p.h3}<br><b>Tâm ô:</b> ${fmt(Number(p.center_lat), 5)}, ${fmt(Number(p.center_lng), 5)}</div>`).addTo(map);
+    const feature = state.h3Data.features.find(cell => cell.properties.h3 === p.h3) || event.features[0];
+    openCellPopup(new maplibregl.Popup({ offset: 8 }).setHTML(`<div style="font:12px Inter;line-height:1.8"><b>H3:</b> ${p.h3}<br><b>Tâm ô:</b> ${fmt(Number(p.center_lat), 5)}, ${fmt(Number(p.center_lng), 5)}</div>`), feature, "h3-fill");
   });
   map.on("mouseenter", "h3-fill", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "h3-fill", () => map.getCanvas().style.cursor = "");
   map.on("click", "point-circle", event => {
@@ -211,6 +285,115 @@ function pointFeatureCollection(data) {
   if (data?.type === "FeatureCollection") data.features?.forEach(collect);
   else if (data?.type === "Feature") collect(data);
   return { type: "FeatureCollection", features };
+}
+
+function clearMetroData() {
+  state.metroPopup?.remove(); state.metroPopup = null;
+  state.metroData = null; state.metroTime = null; state.lineData = EMPTY_FEATURE_COLLECTION;
+  if (state.polygonPalette === "travel") state.polygonPalette = null;
+  map?.getSource("metro-station-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  map?.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  $("metro-legend").hidden = true;
+  $("metro-departure").replaceChildren();
+}
+
+function renderMetroLegend() {
+  const legend = $("metro-legend");
+  if (!state.metroData) { legend.hidden = true; return; }
+  legend.replaceChildren();
+  const heading = document.createElement("strong");
+  heading.textContent = `Tỷ lệ thời gian xe buýt/xe máy · ${state.metroTime}`;
+  legend.append(heading);
+  const colors = travelLegendColors(state.polygonPalette);
+  if (colors) {
+    const row = document.createElement("div"); row.className = "metro-legend-scale";
+    ["Dưới 1 lần", "1–2 lần", "2–3 lần", "≥ 3 lần"].forEach((text, index) => {
+      const item = document.createElement("span"); const swatch = document.createElement("i");
+      swatch.style.backgroundColor = colors[index]; item.append(swatch, text); row.append(item);
+    });
+    legend.append(row);
+  }
+  const note = document.createElement("small"); note.textContent = "Dữ liệu mô phỏng · Bấm vào ô để xem thời gian. Ô xám: thiếu dữ liệu.";
+  legend.append(note);
+}
+
+function showMetroComparison(event) {
+  if (!state.metroData) return;
+  const clicked = event.features?.[0]; if (!clicked?.properties) return;
+  const feature = state.boundary.features.find(cell => cell.properties.cell_id === clicked.properties.cell_id) || clicked;
+  const p = feature.properties;
+  state.metroPopup?.remove();
+  const card = document.createElement("div"); card.className = "metro-comparison";
+  if (p.ratio == null || !Number.isFinite(Number(p.ratio))) {
+    const note = document.createElement("p"); note.textContent = "Không có thời gian di chuyển ở giờ này."; card.append(note);
+  } else {
+    const ratio = Number(p.bus_minutes) / Number(p.motorbike_minutes);
+    const summary = document.createElement("p"); summary.className = "metro-comparison-summary";
+    summary.textContent = ratio > 1 ? "Xe buýt chậm hơn xe máy" : ratio < 1 ? "Thời gian xe buýt bằng" : "Thời gian xe buýt và xe máy bằng nhau";
+    const ratioDisplay = document.createElement("div"); ratioDisplay.className = "metro-comparison-ratio";
+    const ratioValue = document.createElement("strong"); ratioValue.textContent = fmt(ratio, 2);
+    const ratioUnit = document.createElement("span"); ratioUnit.textContent = "lần";
+    ratioDisplay.append(ratioValue, ratioUnit);
+    const chart = document.createElement("div"); chart.className = "metro-comparison-bars";
+    const step = Math.max(10, Math.ceil(Math.max(Number(p.bus_minutes), Number(p.motorbike_minutes)) / 60) * 10);
+    const max = step * 6;
+    const axis = document.createElement("div"); axis.className = "metro-comparison-axis";
+    const unit = document.createElement("span"); unit.className = "metro-comparison-axis-unit"; unit.textContent = "phút";
+    axis.append(unit);
+    for (let tick = 0; tick <= 6; tick++) {
+      const row = document.createElement("div"); row.className = "metro-comparison-tick";
+      row.style.bottom = `${tick / 6 * 100}%`;
+      const label = document.createElement("span"); label.textContent = String(tick * step);
+      row.append(label); axis.append(row);
+    }
+    chart.append(axis);
+    [["Xe buýt (1)", Number(p.bus_minutes)], ["Xe máy (2)", Number(p.motorbike_minutes)]].forEach(([name, minutes]) => {
+      const column = document.createElement("div"); const value = document.createElement("b"); const bar = document.createElement("i"); const label = document.createElement("span");
+      column.className = "metro-comparison-column";
+      column.style.height = `${Math.max(1, minutes / max * 100)}%`;
+      value.textContent = `${Number(minutes.toFixed(1))}′`; label.textContent = name;
+      column.append(value, bar, label); chart.append(column);
+    });
+    card.append(summary, ratioDisplay, chart);
+  }
+  const footnote = document.createElement("small"); footnote.className = "metro-comparison-notes";
+  for (const text of ["(1) Thời gian di chuyển bằng xe buýt.", "(2) Thời gian di chuyển bằng xe máy.", `Số liệu mô phỏng · Giờ xuất phát ${state.metroTime}.`]) {
+    const line = document.createElement("div"); line.textContent = text; footnote.append(line);
+  }
+  card.append(footnote);
+  const center = map.project(cellCenter(feature));
+  const anchor = "left";
+  const ring = feature.geometry.type === "Polygon" ? feature.geometry.coordinates[0] : feature.geometry.coordinates[0][0];
+  const offset = Math.max(...ring.map(point => Math.abs(map.project(point).x - center.x))) + 16;
+  state.metroPopup = openCellPopup(new maplibregl.Popup({ anchor, offset, maxWidth: "380px", className: "metro-comparison-popup" }).setDOMContent(card), feature, "polygon-fill");
+}
+
+function updateMetroTime() {
+  if (!state.metroData) return;
+  state.metroPopup?.remove(); state.metroPopup = null;
+  state.metroTime = $("metro-departure").value;
+  state.boundary = metroCellsAtTime(state.metroData, state.metroTime);
+  state.sourceBoundary = state.boundary;
+  state.dataProfile = analyzeSpatialData(state.boundary);
+  map.getSource("polygon-data")?.setData(state.boundary);
+  syncPolygonPaletteControls(); applyStyle();
+}
+
+async function replaceMetroData(data, name) {
+  await replaceBoundary(metroCellsAtTime(data, data.times[0]), name, null, { preservePolygons: true });
+  state.metroData = data; state.metroTime = data.times[0]; state.mapType = "polygon"; state.polygonPalette = "travel";
+  state.lineData = data.metro_route;
+  map.getSource("vietnam-boundary")?.setData(data.boundary);
+  map.getSource("metro-station-data")?.setData(data.stations);
+  map.getSource("line-data")?.setData(state.lineData);
+  $("metro-departure").replaceChildren(...data.times.map(time => {
+    const option = document.createElement("option"); option.value = time; option.textContent = time; return option;
+  }));
+  for (const id of ["show-map-layers", "show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).checked = true;
+  $("show-map-layers-status").textContent = "Đang bật";
+  renderCompatibleMapTypes(state.boundary); applyStyle();
+  $("file-note").textContent = `${data.hexagons.features.length} ô · ${data.stations.features.length} ga · Dữ liệu mô phỏng`;
+  setStatus("Đã hiển thị vùng dữ liệu, đường bao, các ga và tuyến Metro.", true);
 }
 
 function applyPointStyle() {
@@ -335,7 +518,7 @@ function fitBoundary() {
 }
 
 function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
-  const types = compatibleMapTypes(profile); const grid = $("map-type-grid"); state.dataProfile = profile;
+  const types = compatibleMapTypes(profile).filter(type => !state.metroData || type.id === "polygon"); const grid = $("map-type-grid"); state.dataProfile = profile;
   showSupportedChartCatalog(false);
   if (!types.some(type => type.id === state.mapType)) state.mapType = types[0]?.id || null;
   grid.replaceChildren(...types.map(type => {
@@ -352,6 +535,7 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 }
 
 function clearUploadedData() {
+  clearMetroData();
   state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
   state.pointData = { type: "FeatureCollection", features: [] };
   state.mapType = null; state.dataProfile = null; state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; state.baselineCount = null; state.page = 1;
@@ -365,13 +549,14 @@ function clearUploadedData() {
   $("selected-file").hidden = true; $("spatial-file").value = ""; setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
   map?.getSource("h3-grid")?.setData(state.h3Data); map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   map?.getSource("point-data")?.setData(state.pointData);
+  map?.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
 }
 
 async function resetConfiguration() {
   state.resolution = CONFIG.DEFAULT_RESOLUTION;
   state.barStyle = mergeBarConfig();
   state.pieStyle = mergePieConfig();
-  state.polygonPalette = null;
+  state.polygonPalette = state.metroData ? "travel" : null;
 
   $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
   $("resolution-value").value = CONFIG.DEFAULT_RESOLUTION;
@@ -387,6 +572,7 @@ async function resetConfiguration() {
   if (!state.chartConfig) syncPolygonPaletteControls();
   $("show-map-layers").checked = true;
   $("show-map-layers-status").textContent = "Đang bật";
+  for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).checked = true;
 
   if (state.chartConfig) {
     const defaultOption = state.chartOptions.find(option => option.id === state.mapType);
@@ -408,6 +594,8 @@ async function resetConfiguration() {
     renderChartCanvas();
     renderChartDataMapping();
     renderChartStyleControls();
+  } else if (state.metroData) {
+    $("metro-departure").value = state.metroData.times[0]; updateMetroTime();
   } else if (state.boundary) {
     await rebuildGrid();
   }
@@ -582,6 +770,8 @@ async function readSpatialFile(file) {
     }
   }
   const parsed = JSON.parse(text);
+  const metro = readMetroData(parsed);
+  if (metro) return { kind: "metro", data: metro };
   if (typeof parsed?.type === "string") return { data: parsed, profile: analyzeSpatialData(parsed) };
   const records = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : null;
   if (records) {
@@ -608,6 +798,7 @@ function selectChartOption(type) {
 }
 
 function replaceChartData(analysis, name) {
+  clearMetroData();
   const primaryDataset = analysis.datasets.find(dataset => dataset.path === analysis.sourcePath) || analysis.datasets[0];
   const lineOption = createLineOption(primaryDataset, analysis.titlePrefix);
   const pieOptions = createPieOptions(primaryDataset, `Cơ cấu các chỉ số · ${analysis.titlePrefix}`);
@@ -615,6 +806,7 @@ function replaceChartData(analysis, name) {
   state.chartAnalysis = { ...analysis, options }; state.chartOptions = options; state.boundary = null; state.sourceBoundary = null; state.dataProfile = null;
   state.h3Data = { type: "FeatureCollection", features: [] }; state.pointData = { type: "FeatureCollection", features: [] };
   map.getSource("h3-grid")?.setData(state.h3Data); map.getSource("point-data")?.setData(state.pointData); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+  map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
   setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
   showSupportedChartCatalog(false);
   $("map-type-grid").className = "map-type-grid";
@@ -628,13 +820,25 @@ function replaceChartData(analysis, name) {
   const canvas = $("chart-canvas"); canvas.hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
   setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(options[0].id);
 }
-async function replaceBoundary(data, name, profile = null) {
+async function replaceBoundary(data, name, profile = null, { preservePolygons = false } = {}) {
+  clearMetroData();
   state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; clearDataMappingPanel($("data-mapping-controls")); clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
   showChartStyleControls(false);
-  if (!data) throw new Error("Không tìm thấy dữ liệu."); geoJSONToCells(data, Math.min(state.resolution, 3)); state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
+  if (!data) throw new Error("Không tìm thấy dữ liệu.");
+  if (preservePolygons) state.mapType = "polygon";
+  else geoJSONToCells(data, Math.min(state.resolution, 3));
+  state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
   renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));
   state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData); applyPointStyle();
-  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("selected-file").hidden = false; state.baselineCount = null; await rebuildGrid({ fit: true }); applyStyle();
+  const features = data.type === "FeatureCollection" ? data.features : data.type === "Feature" ? [data] : [{ type: "Feature", properties: {}, geometry: data }];
+  state.lineData = { type: "FeatureCollection", features: features.filter(feature => ["LineString", "MultiLineString"].includes(feature.geometry?.type)) };
+  map.getSource("line-data")?.setData(state.lineData);
+  map.getSource("polygon-data")?.setData(data); updateModelSections();
+  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("selected-file").hidden = false; state.baselineCount = null;
+  if (preservePolygons) {
+    state.h3Data = EMPTY_FEATURE_COLLECTION; map.getSource("h3-grid")?.setData(state.h3Data); updateDashboard(); fitBoundary();
+  } else await rebuildGrid({ fit: true });
+  applyStyle();
 }
 
 async function processSpatialFile(file) {
@@ -642,7 +846,8 @@ async function processSpatialFile(file) {
   try {
     setStatus(`Đang đọc ${file.name}…`);
     const result = await readSpatialFile(file);
-    if (result.kind === "chart") replaceChartData(result.analysis, file.name);
+    if (result.kind === "metro") await replaceMetroData(result.data, file.name);
+    else if (result.kind === "chart") replaceChartData(result.analysis, file.name);
     else await replaceBoundary(result.data, file.name, result.profile);
   } catch (error) {
     console.error(error);
@@ -686,6 +891,8 @@ function bindFileDropZone() {
 }
 
 function bindUI() {
+  $("metro-departure").addEventListener("change", updateMetroTime);
+  for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).addEventListener("change", applyMapLayerVisibility);
   $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
   $("opacity").addEventListener("input", e => { $("opacity-value").value = `${Math.round(e.target.value * 100)}%`; applyStyle(); }); $("line-width").addEventListener("input", e => { $("line-width-value").value = `${e.target.value} px`; applyStyle(); });
   for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); if (id === "fixed-color" && state.mapType === "polygon") { state.polygonPalette = null; syncPolygonPaletteControls(); } applyStyle(); }); }
@@ -708,6 +915,7 @@ function bindUI() {
   $("apply-provinces").addEventListener("click", async () => {
     const names = selectedProvinceNames(); const toggle = $("province-filter-toggle"); state.boundary = boundaryForProvinces(state.sourceBoundary, names); state.baselineCount = null;
     map.getSource("vietnam-boundary")?.setData(state.boundary); $("file-note").textContent = names.length ? `Đang lọc: ${names.map(formatProvinceName).join(", ")}` : "Dữ liệu đã tải · đang sử dụng";
+    map.getSource("polygon-data")?.setData(state.boundary);
     $("province-filter-menu").hidden = true; toggle.setAttribute("aria-expanded", "false"); toggle.disabled = true;
     try { await rebuildGrid({ fit: true }); } finally { toggle.disabled = false; }
   });
