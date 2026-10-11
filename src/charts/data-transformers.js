@@ -82,7 +82,8 @@ function findHint(fields, hints) {
 
 function inspectDataset(records, path) {
   const { fields, records: flatRecords } = schemaFor(records);
-  const categoryFields = fields.filter(field => ["String", "Date"].includes(field.type) && field.validCount > 0);
+  const categoryFields = fields.filter(field => ["String", "Date"].includes(field.type) && field.validCount > 0 &&
+    !(field.path === "type" && flatRecords.every(row => row.type === "Feature")));
   const rankFields = fields.filter(field => field.type === "Number" && field.numericCount > 0 && RANK_PATTERN.test(field.path));
   const numericFields = fields.filter(field => field.type === "Number" && field.numericCount > 0 && !NON_METRIC_PATTERN.test(normalizedFieldName(field.path)));
   const allCategoryFields = [...categoryFields, ...rankFields.filter(field => !categoryFields.includes(field))];

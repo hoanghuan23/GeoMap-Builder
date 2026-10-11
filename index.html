@@ -34,6 +34,27 @@
           <div id="supported-chart-grid" class="supported-chart-grid" role="list" aria-label="Các kiểu bản đồ và biểu đồ được hỗ trợ"></div>
         </div>
       </section>
+      <section id="analysis-section" class="panel-section" hidden>
+        <div class="section-title"><span class="step">3</span><div><h2>Phân tích dữ liệu AI</h2><p>Đề xuất hiển thị và điều chỉnh dữ liệu</p></div></div>
+        <p id="analysis-explanation" class="analysis-explanation" aria-live="polite"></p>
+        <details><summary>Điều chỉnh nguồn và mapping</summary><div class="analysis-mapping">
+          <label class="field">Nguồn dữ liệu<select id="analysis-source"></select></label>
+          <label class="field">Kiểu hiển thị<select id="analysis-renderer"></select></label>
+          <label class="field">Bảng đo để nối<select id="analysis-join"></select></label>
+          <label class="field">Khóa của lớp không gian<select id="analysis-source-key"></select></label>
+          <label class="field">Khóa của bảng đo<select id="analysis-target-key"></select></label>
+          <label class="field">Chỉ số<select id="analysis-metric"></select></label>
+          <label class="field">Danh mục biểu đồ<select id="analysis-category"></select></label>
+          <label class="field">Trường thời gian<select id="analysis-time-field"></select></label>
+          <label class="field">Vĩ độ<select id="analysis-latitude"></select></label>
+          <label class="field">Kinh độ<select id="analysis-longitude"></select></label>
+          <label class="field">Đơn vị<input id="analysis-unit" type="text"></label>
+          <label class="field">Dải màu<select id="analysis-colors"><option value="file">Theo dữ liệu / đề xuất</option><option value="blue">Xanh</option><option value="viridis">Viridis</option></select></label>
+          <label class="field">Tổng hợp bản ghi trùng<select id="analysis-aggregate"><option value="none">Không tổng hợp</option><option value="mean">Trung bình</option><option value="sum">Tổng</option><option value="max">Lớn nhất</option><option value="min">Nhỏ nhất</option></select></label>
+          <button id="analysis-apply" class="secondary-button" type="button">Áp dụng cấu hình</button>
+        </div></details>
+        <div id="analysis-time-controls" hidden><label class="field">Thời gian<select id="analysis-time-select"></select></label><button id="analysis-play" class="secondary-button" type="button">▶ Phát</button></div>
+      </section>
       <section id="display-config-section" class="panel-section" hidden>
         <div class="section-title"><span class="step">3</span><div><h2>Cấu hình hiển thị</h2><p>Điều chỉnh độ chi tiết và thuộc tính</p></div></div>
         <div class="field range-field"><div class="field-label"><label for="resolution">Resolution (H3)</label><output id="resolution-value">5</output></div><input id="resolution" type="range" min="0" max="15" value="5"><div class="range-labels"><span>0</span><span>Độ chi tiết</span><span>15</span></div></div>
@@ -86,6 +107,7 @@
     <section class="content-area table-hidden">
       <div class="map-panel"><div id="map"></div><div id="chart-canvas" class="chart-canvas" hidden></div><div id="status" class="status-pill" hidden></div>
         <div id="metro-legend" class="metro-legend" hidden aria-live="polite"></div>
+        <div id="analysis-legend" class="analysis-legend" hidden aria-live="polite"></div>
         <div id="map-search" class="map-search">
           <form id="map-search-form" class="map-search-form" role="search">
             <span class="map-search-location" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/></svg></span>

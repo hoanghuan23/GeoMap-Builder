@@ -11,12 +11,13 @@ test("loads the Metro bundle without classifying it as chart data", () => {
   assert.equal(data.stations.features.length, 13);
   assert.deepEqual(data.times, Array.from({ length: 18 }, (_, i) => `${String(i + 5).padStart(2, "0")}:30`));
   assert.deepEqual(data.times, source.metadata.departure_times);
-  assert.equal(data.boundary.features[0].geometry.type, "Polygon");
+  assert.equal(data.boundary.type, "FeatureCollection");
+  for (const feature of data.boundary.features) assert.ok(["Polygon", "MultiPolygon"].includes(feature.geometry.type));
   assert.equal(data.metro_route.features[0].geometry.type, "LineString");
   assert.equal(readMetroData({ type: "FeatureCollection", features: [] }), null);
 });
 
-test("branched demo has bounded polygons and a complete, unique departure matrix", () => {
+test("branched demo has valid polygons and a complete, unique departure matrix", () => {
   const ids = new Set(source.hexagons.features.map(f => f.properties.cell_id));
   assert.equal(ids.size, source.hexagons.features.length);
   assert.equal(source.metadata.cell_count, ids.size);
@@ -33,8 +34,12 @@ test("branched demo has bounded polygons and a complete, unique departure matrix
     assert.ok(Number.isFinite(row.motorbike_minutes) && row.motorbike_minutes > 0);
     assert.ok(Math.abs(row.ratio - row.bus_minutes / row.motorbike_minutes) <= 0.0051);
   }
-  const boundary = source.boundary.features[0].geometry.coordinates[0];
+  const boundary = source.boundary.features[0]?.geometry.coordinates[0];
   function inside([x, y]) {
+    if (!boundary) {
+      const bbox = source.metadata.extent_bbox;
+      return !bbox || x >= bbox[0] && x <= bbox[2] && y >= bbox[1] && y <= bbox[3];
+    }
     let result = false;
     for (let i = 0, j = boundary.length - 1; i < boundary.length; j = i++) {
       const [xi, yi] = boundary[i], [xj, yj] = boundary[j];

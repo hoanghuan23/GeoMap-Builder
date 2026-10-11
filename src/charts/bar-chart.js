@@ -26,8 +26,15 @@ function requireString(value, field) {
   return value.trim();
 }
 
-export function analyzeBarData(input) {
-  const datasets = analyzeDataSets(input).filter(dataset => dataset.suggestedCategory && dataset.numericFields.length);
+export function analyzeBarData(input, mapping = null) {
+  const datasets = analyzeDataSets(input).map(dataset => {
+    if (mapping && dataset.fields.some(f => f.path === mapping.category) && dataset.numericFields.some(f => f.path === mapping.metric)) {
+      dataset.suggestedCategory = mapping.category;
+      dataset.suggestedMetrics = [mapping.metric, ...dataset.suggestedMetrics.filter(f => f !== mapping.metric)];
+      if (!dataset.categoryFields.some(f => f.path === mapping.category)) dataset.categoryFields.push(dataset.fields.find(f => f.path === mapping.category));
+    }
+    return dataset;
+  }).filter(dataset => dataset.suggestedCategory && dataset.numericFields.length);
   const best = datasets.find(dataset => createBarOptions(dataset).length);
   if (!best) throw new Error("Không tìm thấy bảng dữ liệu có trường phân loại và trường số để dựng biểu đồ.");
   const titlePrefix = typeof input?.report_name === "string" ? input.report_name : best.label;

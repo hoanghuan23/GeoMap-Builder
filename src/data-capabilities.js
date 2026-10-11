@@ -12,13 +12,14 @@ function geometriesFrom(data) {
   if (data.type === "FeatureCollection") return data.features?.flatMap(feature => geometriesFrom(feature)) || [];
   if (data.type === "Feature") return geometriesFrom(data.geometry);
   if (data.type === "GeometryCollection") return data.geometries?.flatMap(geometriesFrom) || [];
-  return typeof data.type === "string" ? [data] : [];
+  if (typeof data.type === "string") return [data];
+  return Object.values(data).filter(value => value && typeof value === "object" && !Array.isArray(value)).flatMap(geometriesFrom);
 }
 
 function propertiesFrom(data) {
   if (data?.type === "FeatureCollection") return data.features?.map(feature => feature?.properties || {}) || [];
   if (data?.type === "Feature") return [data.properties || {}];
-  return [];
+  return data && typeof data === "object" ? Object.values(data).filter(value => value && typeof value === "object" && !Array.isArray(value)).flatMap(propertiesFrom) : [];
 }
 
 function classifyFields(records) {

@@ -1,5 +1,5 @@
 import { CONFIG } from "./config.js";
-import { geoJSONToCells, cellsToFeatureCollection, recordsToPointGeoJSON } from "./h3-utils.js";
+import { geoJSONToCells, cellsToFeatureCollection } from "./h3-utils.js";
 import { analyzeSpatialData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
 import { BarRenderer, analyzeBarData } from "./charts/bar-chart.js";
 import { createLineOption, LINE_COLORS, lineSeriesFromFields, LineRenderer } from "./charts/line-chart.js";
@@ -23,6 +23,10 @@ import { PolygonRenderer } from "./renderers/polygon-renderer.js";
 import { polygonColorField, polygonFillExpression } from "./renderers/polygon-style.js";
 import { createMapSearch } from "./map-search.js";
 import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColors } from "./metro-data.js";
+import { profileInput, metricFields, coordinateFields } from "./analysis/data-profile.js";
+import { localPlan, compilePlan, isChartPlan, fillForColors, defaultColors } from "./analysis/plan-engine.js";
+import { requestAnalysis } from "./analysis/ai-client.js";
+import { createBarOptions } from "./charts/data-transformers.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -50,6 +54,191 @@ const state = {
   metroData: null, metroTime: null, metroPopup: null, lineData: EMPTY_FEATURE_COLLECTION
 };
 let map; let toastTimer; let cellPopup;
+let uploadSequence = 0; let analysisAbort; let playbackTimer;
+state.analysisProfile = null; state.visualization = null; state.analysisTime = null;
+
+function stopPlayback() {
+  clearInterval(playbackTimer); playbackTimer = null;
+  if ($("analysis-play")) $("analysis-play").textContent = "▶ Phát";
+}
+
+function togglePlayback() {
+  if (playbackTimer) { stopPlayback(); return; }
+  if (!state.visualization?.times.length) return;
+  $("analysis-play").textContent = "Ⅱ Dừng";
+  playbackTimer = setInterval(() => {
+    const times = state.visualization?.times;
+    if (!times?.length) { stopPlayback(); return; }
+    $("analysis-time-select").value = times[(times.indexOf(state.analysisTime) + 1) % times.length];
+    updateAnalysisTime();
+  }, 1000);
+}
+
+function clearAnalysis({ cancel = true } = {}) {
+  stopPlayback();
+  if (cancel) { uploadSequence++; analysisAbort?.abort(); }
+  state.visualization = null; state.analysisProfile = null; state.analysisTime = null;
+  state.analysisInput = null; state.analysisPlan = null;
+  if ($("analysis-section")) $("analysis-section").hidden = true;
+  if ($("analysis-legend")) $("analysis-legend").hidden = true;
+  state.analysisPopup?.remove(); state.analysisPopup = null;
+}
+
+function populateSelect(id, entries, value, optional = false) {
+  const select = $(id);
+  select.replaceChildren(...(optional ? [["", "Không dùng"], ...entries] : entries).map(([key, label]) => {
+    const option = document.createElement("option"); option.value = key; option.textContent = label; return option;
+  }));
+  select.value = value || "";
+}
+
+function mappingFields(plan = null) {
+  const profile = state.analysisProfile;
+  if (!profile) return;
+  const source = profile.datasets.find(d => d.path === $("analysis-source").value) || profile.datasets[0];
+  const join = $("analysis-join").value;
+  const values = profile.datasets.find(d => d.path === join) || source;
+  const entries = d => d.fields.map(f => [f.path, `${f.path} · ${f.type}`]);
+  populateSelect("analysis-source-key", entries(source), plan?.join?.sourceKey, true);
+  populateSelect("analysis-target-key", entries(values), plan?.join?.targetKey, true);
+  populateSelect("analysis-metric", entries(values), plan?.metric || metricFields(values)[0]?.path, true);
+  populateSelect("analysis-category", entries(source), plan?.category, true);
+  populateSelect("analysis-time-field", entries(values), plan?.time?.field, true);
+  const coords = coordinateFields(source);
+  populateSelect("analysis-latitude", entries(source), plan?.latitude || coords.latitude, true);
+  populateSelect("analysis-longitude", entries(source), plan?.longitude || coords.longitude, true);
+  const kinds = source.geometryTypes;
+  const choices = source.kind === "geojson"
+    ? [...(kinds.some(t => /Polygon/.test(t)) ? ["polygon"] : []), ...(kinds.some(t => /LineString/.test(t)) ? ["line"] : []), ...(kinds.some(t => /Point/.test(t)) ? ["point", "circle", "heatmap"] : [])]
+    : coords.latitude && coords.longitude ? ["point", "circle", "heatmap", "bar", "line-chart", "pie", "halfPie"] : ["bar", "line-chart", "pie", "halfPie", "point", "circle"];
+  if (state.analysisInput?.metro_route) choices.push("metro");
+  populateSelect("analysis-renderer", choices.map(v => [v, v]), plan?.renderer || choices[0]);
+}
+
+function renderAnalysisControls(plan, message) {
+  // Keep the internal mapping controls available for the upload pipeline;
+  // this panel is deferred and must remain absent from the sidebar.
+  $("analysis-section").hidden = true;
+  $("analysis-explanation").textContent = message;
+  const profile = state.analysisProfile;
+  populateSelect("analysis-source", profile.datasets.map(d => [d.path, `${d.path} (${d.rowCount} bản ghi)`]), plan?.source || profile.datasets[0]?.path);
+  populateSelect("analysis-join", profile.datasets.filter(d => d.kind === "table").map(d => [d.path, d.path]), plan?.join?.source, true);
+  mappingFields(plan);
+  $("analysis-unit").value = plan?.unit || profile.metadata.unit || "";
+  $("analysis-colors").value = "file";
+  $("analysis-aggregate").value = "none";
+  $("analysis-time-controls").hidden = true;
+}
+
+function renderAnalysisLegend() {
+  const legend = $("analysis-legend"); const compiled = state.visualization;
+  if (!legend) return;
+  legend.hidden = !compiled || isChartPlan(compiled.plan) || !( $("show-map-layers")?.checked ?? true);
+  if (legend.hidden) return;
+  legend.replaceChildren();
+  const title = document.createElement("strong"); title.textContent = `${compiled.plan.metric || "Dữ liệu"} · ${compiled.plan.unit}`;
+  legend.append(title);
+  const scale = document.createElement("div"); scale.className = "analysis-legend-scale";
+  compiled.colors.forEach((c, i) => {
+    const item = document.createElement("span"); const swatch = document.createElement("i"); swatch.style.backgroundColor = c.color;
+    const label = i === 0 && c.max !== null ? `≤${c.max}` : c.max === null ? `>${compiled.colors[i - 1]?.max ?? ""}` : `>${compiled.colors[i - 1].max}–${c.max}`;
+    item.append(swatch, label); scale.append(item);
+  });
+  legend.append(scale);
+  const note = document.createElement("small");
+  note.textContent = `${state.analysisTime || ""} · Xám: không có dữ liệu${state.analysisProfile?.metadata.not_official || state.analysisProfile?.metadata.data_status === "SYNTHETIC_DEMO" ? " · Dữ liệu mô phỏng" : ""}`;
+  legend.append(note);
+}
+
+function updateAnalysisTime() {
+  const compiled = state.visualization;
+  if (!compiled || isChartPlan(compiled.plan)) return;
+  state.analysisTime = $("analysis-time-select").value || compiled.times[0] || null;
+  const data = compiled.atTime(state.analysisTime);
+  state.boundary = data; state.sourceBoundary = data;
+  map.getSource("polygon-data")?.setData(data);
+  state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData);
+  state.lineData = { type: "FeatureCollection", features: data.features.filter(f => /LineString/.test(f.geometry.type)) };
+  map.getSource("line-data")?.setData(state.lineData);
+  state.analysisPopup?.remove(); state.analysisPopup = null;
+  applyStyle(); renderAnalysisLegend();
+}
+
+async function displayAnalysisPlan(plan, name) {
+  // Compile before touching the current map, including duplicate-key checks.
+  const compiled = compilePlan(plan, state.analysisProfile);
+  stopPlayback(); state.visualization = null;
+  if (plan.renderer === "metro") {
+    const metro = readMetroData(state.analysisInput);
+    if (!metro) throw new Error("Bộ dữ liệu Metro không hợp lệ.");
+    await replaceMetroData(metro, name, { preserveAnalysis: true });
+  } else if (isChartPlan(plan)) {
+    const analysis = analyzeBarData(compiled.rows, plan);
+    const dataset = analysis.datasets.find(d => d.path === analysis.sourcePath);
+    dataset.suggestedCategory = plan.category; dataset.suggestedMetrics = [plan.metric, ...dataset.suggestedMetrics.filter(f => f !== plan.metric)];
+    analysis.options = createBarOptions(dataset, name); analysis.xField = plan.category;
+    analysis.options.forEach(o => { o.config.unit = plan.unit; });
+    replaceChartData(analysis, name, plan.metric);
+    state.chartOptions.forEach(o => { o.config.unit = plan.unit; });
+    const variant = { bar: "single", "line-chart": "line", pie: "pie", halfPie: "halfPie" }[plan.renderer];
+    const option = state.chartOptions.find(o => o.config.variant === variant);
+    if (!option) throw new Error("Không có dữ liệu hợp lệ cho biểu đồ đã chọn.");
+    option.config.series = option.config.series.filter(s => s.key === plan.metric);
+    option.config.data = dataForBarMapping(dataset, { xField: plan.category, metrics: [plan.metric] });
+    selectChartOption(option.id);
+  } else {
+    const data = compiled.atTime();
+    await replaceBoundary(data, name, analyzeSpatialData(data), { preservePolygons: true, preserveAnalysis: true });
+    state.mapType = plan.renderer;
+    // H3 generation is an explicit user choice, never a default for imported cells.
+    $("show-map-layers").checked = true; $("show-map-layers-status").textContent = "Đang bật";
+    $("show-border").checked = false;
+    map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+    renderCompatibleMapTypes(data);
+    state.visualization = compiled;
+    state.analysisTime = compiled.times[0] || null;
+    populateSelect("analysis-time-select", compiled.times.map(t => [t, t]), state.analysisTime);
+    $("analysis-time-controls").hidden = !compiled.times.length;
+    applyStyle(); renderAnalysisLegend();
+  }
+  state.analysisPlan = structuredClone(plan); state.analysisFileName = name;
+  setStatus(`Đã hiển thị dữ liệu theo ${plan.renderer}.`, true);
+}
+
+async function applyAnalysisMapping() {
+  if (!state.analysisProfile) return;
+  const get = id => $(id).value || null;
+  const joinSource = get("analysis-join"); const metric = get("analysis-metric"); const time = get("analysis-time-field");
+  const plan = { version: 1, source: get("analysis-source"), renderer: get("analysis-renderer"), metric,
+    category: get("analysis-category"), latitude: get("analysis-latitude"), longitude: get("analysis-longitude"),
+    join: joinSource ? { source: joinSource, sourceKey: get("analysis-source-key"), targetKey: get("analysis-target-key") } : null,
+    time: time ? { field: time } : null, unit: $("analysis-unit").value, reason: "Cấu hình do người dùng lựa chọn.", colors: [], operations: [] };
+  const dataset = state.analysisProfile.datasets.find(d => d.path === (joinSource || plan.source));
+  if ($("analysis-colors").value !== "file") {
+    plan.colors = defaultColors(dataset?.fields.find(f => f.path === metric));
+    const ramp = { viridis: ["#440154", "#414487", "#2a788e", "#22a884", "#fde725"], blue: ["#eff6ff", "#60a5fa", "#3b82f6", "#1d4ed8", "#172554"] }[$("analysis-colors").value];
+    plan.colors.forEach((c, i) => c.color = ramp[i]);
+  }
+  const aggregate = $("analysis-aggregate").value;
+  if (aggregate !== "none") plan.operations.push({ op: "aggregate", field: metric, fields: [plan.join?.targetKey || plan.category, time].filter(Boolean), value: null, method: aggregate });
+  try {
+    await displayAnalysisPlan(plan, state.analysisFileName);
+    // Explicit user palette overrides file rules after compilation.
+    if (state.visualization && $("analysis-colors").value !== "file") { state.visualization.colors = plan.colors; applyStyle(); renderAnalysisLegend(); }
+    $("analysis-explanation").textContent = plan.reason;
+  } catch (error) { $("analysis-explanation").textContent = error.message; showToast(error.message); }
+}
+
+function showAnalysisPopup(event) {
+  if (!state.visualization || isChartPlan(state.visualization.plan)) return;
+  const feature = event.features?.[0]; if (!feature) return;
+  const p = feature.properties || {}; const card = document.createElement("div");
+  const lines = [`Ô: ${p.__id || feature.id || "—"}`, `Thời gian: ${p.__time || "—"}`,
+    `${state.visualization.plan.metric || "Giá trị"}: ${p.__value == null ? "Không có dữ liệu" : `${p.__value} ${state.visualization.plan.unit}`}`];
+  if (state.analysisProfile.metadata.not_official || state.analysisProfile.metadata.data_status === "SYNTHETIC_DEMO") lines.push("Dữ liệu mô phỏng");
+  for (const text of lines) { const row = document.createElement("div"); row.textContent = text; card.append(row); }
+  state.analysisPopup?.remove(); state.analysisPopup = new maplibregl.Popup({ offset: 8 }).setLngLat(event.lngLat).setDOMContent(card).addTo(map);
+}
 
 function cellCenter(feature) {
   const p = feature.properties || {};
@@ -186,13 +375,24 @@ function applyStyle() {
     map.setPaintProperty("h3-border", "line-width", borderWidth);
   }
   if (map.getLayer("polygon-fill")) {
-    map.setPaintProperty("polygon-fill", "fill-color", state.metroData ? travelFillExpression(state.polygonPalette, color) : polygonFillExpression(state.boundary, state.dataProfile, state.polygonPalette, color));
+    map.setPaintProperty("polygon-fill", "fill-color", state.visualization ? fillForColors(state.visualization.colors, color) : state.metroData ? travelFillExpression(state.polygonPalette, color) : polygonFillExpression(state.boundary, state.dataProfile, state.polygonPalette, color));
     map.setPaintProperty("polygon-fill", "fill-opacity", opacity);
     map.setPaintProperty("polygon-border", "line-color", borderColor);
     map.setPaintProperty("polygon-border", "line-width", borderWidth);
   }
+  if (state.visualization) {
+    const colors = fillForColors(state.visualization.colors, color);
+    if (map.getLayer("point-circle")) map.setPaintProperty("point-circle", "circle-color", colors);
+    if (map.getLayer("point-marker")) map.setPaintProperty("point-marker", "circle-color", colors);
+    if (map.getLayer("data-lines")) map.setPaintProperty("data-lines", "line-color", colors);
+    if (map.getLayer("point-heatmap")) {
+      const max = state.visualization.colors.filter(c => c.max !== null).at(-1)?.max || 1;
+      map.setPaintProperty("point-heatmap", "heatmap-weight", ["case", ["==", ["get", "__value"], null], 0, ["/", ["get", "__value"], Math.max(1, max)]]);
+    }
+  }
   applyMapLayerVisibility();
   renderMetroLegend();
+  renderAnalysisLegend();
 }
 
 function applyMapLayerVisibility() {
@@ -215,6 +415,7 @@ function applyMapLayerVisibility() {
   $("metro-legend").hidden = !state.metroData || !showPolygon;
   if (!showPolygon) { state.metroPopup?.remove(); state.metroPopup = null; }
   if (!showH3 && !showPolygon) cellPopup?.remove();
+  renderAnalysisLegend();
 }
 
 function addMapLayers() {
@@ -245,13 +446,14 @@ function addMapLayers() {
   map.addLayer({ id: "metro-stations", type: "circle", source: "metro-station-data", paint: { "circle-radius": 4, "circle-color": "#c52e64", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 } });
   map.addLayer({ id: "metro-station-labels", type: "symbol", source: "metro-station-data", layout: { "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"], "text-size": 12, "text-offset": [0, 1.4], "text-anchor": "top" }, paint: { "text-color": "#ffffff", "text-halo-color": "#151a23", "text-halo-width": 2 } });
   map.on("click", "polygon-fill", showMetroComparison);
+  for (const id of ["polygon-fill", "point-circle", "point-marker", "data-lines"]) map.on("click", id, showAnalysisPopup);
   map.on("click", "metro-stations", event => {
     const feature = event.features?.[0]; if (!feature) return;
     const label = document.createElement("strong"); label.textContent = feature.properties?.name || "Ga Metro";
     new maplibregl.Popup({ offset: 8 }).setLngLat(event.lngLat).setDOMContent(label).addTo(map);
   });
   for (const id of ["polygon-fill", "metro-stations"]) {
-    map.on("mouseenter", id, () => { if (state.metroData) map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseenter", id, () => { if (state.metroData || state.visualization) map.getCanvas().style.cursor = "pointer"; });
     map.on("mouseleave", id, () => map.getCanvas().style.cursor = "");
   }
   applyMapLayerVisibility();
@@ -262,6 +464,7 @@ function addMapLayers() {
   });
   map.on("mouseenter", "h3-fill", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "h3-fill", () => map.getCanvas().style.cursor = "");
   map.on("click", "point-circle", event => {
+    if (state.visualization) return;
     const feature = event.features?.[0]; if (!feature) return;
     const rows = Object.entries(feature.properties || {}).map(([key, value]) => `<b>${key}:</b> ${String(value)}`).join("<br>");
     new maplibregl.Popup({ offset: 9 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
@@ -379,8 +582,8 @@ function updateMetroTime() {
   syncPolygonPaletteControls(); applyStyle();
 }
 
-async function replaceMetroData(data, name) {
-  await replaceBoundary(metroCellsAtTime(data, data.times[0]), name, null, { preservePolygons: true });
+async function replaceMetroData(data, name, { preserveAnalysis = false } = {}) {
+  await replaceBoundary(metroCellsAtTime(data, data.times[0]), name, null, { preservePolygons: true, preserveAnalysis });
   state.metroData = data; state.metroTime = data.times[0]; state.mapType = "polygon"; state.polygonPalette = "travel";
   state.lineData = data.metro_route;
   map.getSource("vietnam-boundary")?.setData(data.boundary);
@@ -518,7 +721,7 @@ function fitBoundary() {
 }
 
 function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
-  const types = compatibleMapTypes(profile).filter(type => !state.metroData || type.id === "polygon"); const grid = $("map-type-grid"); state.dataProfile = profile;
+  const types = compatibleMapTypes(profile).filter(type => (!state.metroData || type.id === "polygon") && (!state.analysisProfile || type.id !== "h3")); const grid = $("map-type-grid"); state.dataProfile = profile;
   showSupportedChartCatalog(false);
   if (!types.some(type => type.id === state.mapType)) state.mapType = types[0]?.id || null;
   grid.replaceChildren(...types.map(type => {
@@ -535,6 +738,7 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 }
 
 function clearUploadedData() {
+  clearAnalysis();
   clearMetroData();
   state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
   state.pointData = { type: "FeatureCollection", features: [] };
@@ -594,6 +798,11 @@ async function resetConfiguration() {
     renderChartCanvas();
     renderChartDataMapping();
     renderChartStyleControls();
+  } else if (state.visualization) {
+    stopPlayback();
+    state.visualization.colors = compilePlan(state.analysisPlan, state.analysisProfile).colors;
+    $("analysis-time-select").value = state.visualization.times[0] || "";
+    updateAnalysisTime();
   } else if (state.metroData) {
     $("metro-departure").value = state.metroData.times[0]; updateMetroTime();
   } else if (state.boundary) {
@@ -745,42 +954,14 @@ function showChartStyleControls(show) {
 async function readSpatialFile(file) {
   const extension = file.name.toLowerCase().split(".").pop();
   if (extension === "zip") throw new Error("ZIP/Shapefile sẽ được hỗ trợ ở phiên bản tiếp theo.");
-  if (["xlsx", "xls"].includes(extension)) {
-    if (!globalThis.XLSX) throw new Error("Không tải được thư viện đọc Excel. Vui lòng kiểm tra kết nối mạng.");
-    const workbook = globalThis.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    const records = globalThis.XLSX.utils.sheet_to_json(firstSheet, { defval: "", raw: true });
-    try {
-      const data = recordsToPointGeoJSON(records);
-      return { data, profile: analyzeSpatialData(data) };
-    } catch {
-      return { kind: "chart", analysis: analyzeBarData(records) };
-    }
+  if (["xlsx", "xls", "csv"].includes(extension)) {
+    if (!globalThis.XLSX) throw new Error("Không tải được thư viện đọc Excel/CSV. Vui lòng kiểm tra kết nối mạng.");
+    const workbook = globalThis.XLSX.read(extension === "csv" ? await file.text() : await file.arrayBuffer(),
+      extension === "csv" ? { type: "string", raw: true } : { type: "array", cellDates: true });
+    const input = Object.fromEntries(workbook.SheetNames.map(name => [name, globalThis.XLSX.utils.sheet_to_json(workbook.Sheets[name], { defval: "", raw: true })]));
+    return { input };
   }
-  const text = await file.text();
-  if (extension === "csv") {
-    if (!globalThis.XLSX) throw new Error("Không tải được thư viện đọc CSV. Vui lòng kiểm tra kết nối mạng.");
-    const workbook = globalThis.XLSX.read(text, { type: "string", raw: true });
-    const records = globalThis.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: true });
-    try {
-      const data = recordsToPointGeoJSON(records);
-      return { data, profile: analyzeSpatialData(data) };
-    } catch {
-      return { kind: "chart", analysis: analyzeBarData(records) };
-    }
-  }
-  const parsed = JSON.parse(text);
-  const metro = readMetroData(parsed);
-  if (metro) return { kind: "metro", data: metro };
-  if (typeof parsed?.type === "string") return { data: parsed, profile: analyzeSpatialData(parsed) };
-  const records = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : null;
-  if (records) {
-    try {
-      const data = recordsToPointGeoJSON(records);
-      return { data, profile: analyzeSpatialData(data) };
-    } catch { /* Không có tọa độ: tiếp tục phân tích như dữ liệu biểu đồ. */ }
-  }
-  return { kind: "chart", analysis: analyzeBarData(parsed) };
+  return { input: JSON.parse(await file.text()) };
 }
 
 function selectChartOption(type) {
@@ -797,11 +978,12 @@ function selectChartOption(type) {
   return true;
 }
 
-function replaceChartData(analysis, name) {
+function replaceChartData(analysis, name, preferredMetric = null) {
   clearMetroData();
   const primaryDataset = analysis.datasets.find(dataset => dataset.path === analysis.sourcePath) || analysis.datasets[0];
-  const lineOption = createLineOption(primaryDataset, analysis.titlePrefix);
-  const pieOptions = createPieOptions(primaryDataset, `Cơ cấu các chỉ số · ${analysis.titlePrefix}`);
+  const preferredDataset = preferredMetric ? { ...primaryDataset, suggestedMetrics: [preferredMetric] } : primaryDataset;
+  const lineOption = createLineOption(preferredDataset, analysis.titlePrefix);
+  const pieOptions = createPieOptions(preferredDataset, `Cơ cấu các chỉ số · ${analysis.titlePrefix}`);
   const options = [...analysis.options, ...(lineOption ? [lineOption] : []), ...pieOptions];
   state.chartAnalysis = { ...analysis, options }; state.chartOptions = options; state.boundary = null; state.sourceBoundary = null; state.dataProfile = null;
   state.h3Data = { type: "FeatureCollection", features: [] }; state.pointData = { type: "FeatureCollection", features: [] };
@@ -820,7 +1002,8 @@ function replaceChartData(analysis, name) {
   const canvas = $("chart-canvas"); canvas.hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
   setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(options[0].id);
 }
-async function replaceBoundary(data, name, profile = null, { preservePolygons = false } = {}) {
+async function replaceBoundary(data, name, profile = null, { preservePolygons = false, preserveAnalysis = false } = {}) {
+  if (!preserveAnalysis) clearAnalysis();
   clearMetroData();
   state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; clearDataMappingPanel($("data-mapping-controls")); clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
   showChartStyleControls(false);
@@ -843,16 +1026,50 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
 
 async function processSpatialFile(file) {
   if (!file) return;
+  clearAnalysis();
+  const sequence = uploadSequence;
+  analysisAbort = new AbortController();
   try {
-    setStatus(`Đang đọc ${file.name}…`);
-    const result = await readSpatialFile(file);
-    if (result.kind === "metro") await replaceMetroData(result.data, file.name);
-    else if (result.kind === "chart") replaceChartData(result.analysis, file.name);
-    else await replaceBoundary(result.data, file.name, result.profile);
+    setStatus(`Đang đọc và phân tích cấu trúc ${file.name}…`);
+    const { input } = await readSpatialFile(file);
+    if (sequence !== uploadSequence) return;
+    const profile = profileInput(input);
+    if (!profile.datasets.length) throw new Error("Không tìm thấy tập dữ liệu có thể hiển thị.");
+    state.analysisProfile = profile; state.analysisInput = input; state.analysisFileName = file.name;
+    renderAnalysisControls(null, "Đang phân tích bằng Luna…");
+    $("analysis-apply").disabled = true;
+    setStatus("Luna đang phân tích cấu trúc, trường dữ liệu và cách hiển thị…");
+    let plan; let message;
+    try {
+      const response = await requestAnalysis(profile.payload, { signal: analysisAbort.signal });
+      if (sequence !== uploadSequence) return;
+      compilePlan(response.plan, profile);
+      plan = response.plan; message = `${response.model || "Luna"}: ${plan.reason}`;
+    } catch (error) {
+      if (sequence !== uploadSequence) return;
+      message = `${error.message} Phân tích cục bộ.`;
+      const metro = readMetroData(input);
+      if (metro) plan = { version: 1, source: "hexagons", renderer: "metro", metric: null, category: null, latitude: null, longitude: null,
+        join: null, time: null, unit: "", reason: "Bộ dữ liệu Metro tương thích.", colors: [], operations: [] };
+      else {
+        try { plan = localPlan(profile); }
+        catch (mappingError) {
+          renderAnalysisControls(null, `${message} ${mappingError.message}`);
+          setStatus("Hãy chọn nguồn và mapping để hiển thị dữ liệu.", true);
+          return;
+        }
+      }
+    }
+    renderAnalysisControls(plan, message);
+    await displayAnalysisPlan(plan, file.name);
   } catch (error) {
+    if (sequence !== uploadSequence) return;
     console.error(error);
+    if (state.analysisProfile) $("analysis-explanation").textContent = error.message;
     showToast(error.message || "Không thể đọc file.");
-    setStatus("Không thể đọc file.", true);
+    setStatus("Chưa thể hiển thị dữ liệu. Kiểm tra file hoặc chỉnh mapping.", true);
+  } finally {
+    if (sequence === uploadSequence) $("analysis-apply").disabled = false;
   }
 }
 
@@ -891,21 +1108,34 @@ function bindFileDropZone() {
 }
 
 function bindUI() {
+  $("analysis-source").addEventListener("change", () => { $("analysis-join").value = ""; mappingFields(); });
+  $("analysis-join").addEventListener("change", () => mappingFields());
+  $("analysis-apply").addEventListener("click", applyAnalysisMapping);
+  $("analysis-time-select").addEventListener("change", () => { stopPlayback(); updateAnalysisTime(); });
+  $("analysis-play").addEventListener("click", togglePlayback);
   $("metro-departure").addEventListener("change", updateMetroTime);
   for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).addEventListener("change", applyMapLayerVisibility);
   $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
   $("opacity").addEventListener("input", e => { $("opacity-value").value = `${Math.round(e.target.value * 100)}%`; applyStyle(); }); $("line-width").addEventListener("input", e => { $("line-width-value").value = `${e.target.value} px`; applyStyle(); });
-  for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); if (id === "fixed-color" && state.mapType === "polygon") { state.polygonPalette = null; syncPolygonPaletteControls(); } applyStyle(); }); }
+    for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); if (id === "fixed-color" && state.mapType === "polygon") { state.polygonPalette = null; if (state.visualization) state.visualization.colors = []; syncPolygonPaletteControls(); } applyStyle(); }); }
   $("polygon-color-ramp").addEventListener("click", event => {
     const button = event.target.closest(".palette");
     if (!button || button.disabled) return;
     state.polygonPalette = button.dataset.palette;
+    if (state.visualization) {
+      const palettes = { blue: ["#eff6ff", "#60a5fa", "#3b82f6", "#1d4ed8", "#172554"], viridis: ["#440154", "#414487", "#2a788e", "#22a884", "#fde725"], diverging: ["#313695", "#74add1", "#ffffbf", "#f46d43", "#a50026"] };
+      const palette = palettes[state.polygonPalette];
+      if (palette) {
+        const colors = state.visualization.colors.length ? state.visualization.colors : compilePlan(state.analysisPlan, state.analysisProfile).colors;
+        state.visualization.colors = colors.map((c, i) => ({ ...c, color: palette[Math.round(i * (palette.length - 1) / Math.max(1, colors.length - 1))] }));
+      }
+    }
     syncPolygonPaletteControls();
     applyStyle();
   });
   $("show-border").addEventListener("change", applyStyle);
   document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => { document.querySelectorAll(".tab,.tab-panel").forEach(x => x.classList.remove("active")); tab.classList.add("active"); document.querySelector(`[data-panel="${tab.dataset.tab}"]`).classList.add("active"); }));
-  $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; if (selectChartOption(button.dataset.type)) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; updateModelSections(); applyStyle(); setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true); });
+  $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; if (selectChartOption(button.dataset.type)) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; if (state.visualization) { state.visualization.plan.renderer = button.dataset.type; state.analysisPlan.renderer = button.dataset.type; $("analysis-renderer").value = button.dataset.type; } updateModelSections(); applyStyle(); setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true); });
   bindFileDropZone();
   $("province-filter-toggle").addEventListener("click", () => {
     const menu = $("province-filter-menu"); const open = menu.hidden; menu.hidden = !open; $("province-filter-toggle").setAttribute("aria-expanded", String(open));
@@ -917,7 +1147,11 @@ function bindUI() {
     map.getSource("vietnam-boundary")?.setData(state.boundary); $("file-note").textContent = names.length ? `Đang lọc: ${names.map(formatProvinceName).join(", ")}` : "Dữ liệu đã tải · đang sử dụng";
     map.getSource("polygon-data")?.setData(state.boundary);
     $("province-filter-menu").hidden = true; toggle.setAttribute("aria-expanded", "false"); toggle.disabled = true;
-    try { await rebuildGrid({ fit: true }); } finally { toggle.disabled = false; }
+    try {
+      if (state.visualization) {
+        stopPlayback(); applyStyle(); fitBoundary();
+      } else await rebuildGrid({ fit: true });
+    } finally { toggle.disabled = false; }
   });
   document.addEventListener("click", event => { if (!event.target.closest("#province-filter")) { $("province-filter-menu").hidden = true; $("province-filter-toggle").setAttribute("aria-expanded", "false"); } });
   $("apply-coordinates").addEventListener("click", async () => { try { const raw = $("coordinate-input").value.trim(); let data; if (raw.startsWith("{")) data = JSON.parse(raw); else { const ring = raw.split(/\n/).map(line => line.split(",").map(Number)); if (ring.length < 3 || ring.some(p => p.length < 2 || p.some(Number.isNaN))) throw new Error("Cần ít nhất 3 dòng lng,lat."); ring.push(ring[0]); data = { type: "Polygon", coordinates: [ring] }; } await replaceBoundary(data, "Tọa độ nhập trực tiếp"); } catch (error) { showToast(error.message); } });

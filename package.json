@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "server": "node server/index.js",
+    "start": "node server/index.js",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
@@ -13,6 +15,8 @@
     "vite": "^6.1.0"
   },
   "dependencies": {
+    "dotenv": "^18.0.7",
+    "openai": "^7.32.0",
     "polygon-clipping": "^0.15.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

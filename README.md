@@ -1,5 +1,38 @@
 # GeoMap Builder
 
+## Phân tích dữ liệu bằng AI
+
+Luồng upload JSON/GeoJSON, CSV và Excel tự phân tích cấu trúc, gửi hồ sơ cùng tối đa 20 mẫu mỗi tập dữ liệu tới Luna, kiểm tra đặc tả trả về rồi render. Geometry và toàn bộ bảng đo được xử lý tại trình duyệt; không gửi nguyên file cho AI. Đặc tả chỉ dùng các phép chọn trường, chuyển kiểu, lọc, nối, tổng hợp và sắp xếp đã hỗ trợ.
+
+Thiết lập trong `.env` (không commit file này):
+
+```env
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-6-luna
+API_PORT=3001
+```
+
+Chạy hai terminal trong thư mục dự án:
+
+```bash
+npm install
+npm run server
+```
+
+```bash
+npm run dev
+```
+
+Vite chuyển `/api` tới backend ở `127.0.0.1:3001`. Nếu đổi `API_PORT`, cập nhật cổng proxy tương ứng trong `vite.config.js`. API key chỉ được backend đọc; tuyệt đối không dùng tiền tố `VITE_` cho OpenAI key. Khởi động lại backend sau khi thay `.env`.
+
+File `geomap_demo_rainfall_theo_thoi_gian.json` được render bằng các polygon gốc, nối `cell_id` với bảng `measurements`, chọn 12 mốc thời gian và phát mỗi giây. Màu dùng cận trên bao gồm từ `style_rules`, giữ đúng đơn vị `mm / 2 giờ`; giá trị thiếu được tô xám. Không nội suy hoặc chuyển các ô mô phỏng thành H3. Có thể mở **Điều chỉnh nguồn và mapping** để đổi nguồn, khóa nối, trường số, thời gian, đơn vị và màu. Với bản ghi đo trùng, chọn phép tổng hợp thích hợp; không tự bỏ bản ghi.
+
+AI có timeout 30 giây. Khi thiếu key, lỗi xác thực, lỗi mạng hoặc đặc tả không hợp lệ, giao diện thông báo và dùng phân tích cục bộ. Nguồn hoặc phép nối mơ hồ cần chỉnh mapping trước khi render. Bộ dữ liệu Metro tiếp tục dùng bộ xử lý tương thích.
+
+Để triển khai, chạy `npm run build` rồi `npm start`. Backend phục vụ `dist` và API trên cùng cổng; đặt reverse proxy tới backend khi public. Chỉ phục vụ thư mục build, giữ `.env` ở server. Không triển khai riêng `dist` nếu muốn gọi AI. `GET /api/health` cho biết model và việc cấu hình key (không trả key); `POST /api/analyze-data` nhận hồ sơ JSON giới hạn 1 MB và trả `{ plan, model }`.
+
+Kiểm tra bằng `npm test` và `npm run build`. Trên Windows PowerShell bị chặn chạy script npm, dùng `npm.cmd` thay cho `npm`.
+
 ## Chạy dự án
 
 ```bash

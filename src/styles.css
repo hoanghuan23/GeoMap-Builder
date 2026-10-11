@@ -1,5 +1,17 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
+.analysis-explanation { font-size: 12px; line-height: 1.6; color: #526580; overflow-wrap: anywhere; }
+.analysis-mapping { display: grid; gap: 10px; padding-top: 12px; }
+#analysis-section summary { cursor: pointer; font-size: 12px; color: #1769e8; }
+#analysis-section select, #analysis-unit { width: 100%; min-width: 0; }
+#analysis-time-controls { margin-top: 16px; }
+.analysis-legend { position: absolute; z-index: 4; bottom: 40px; left: 20px; max-width: calc(100% - 40px); background: #fff; color: #26364b; padding: 14px 18px; border-radius: 12px; box-shadow: 0 4px 20px #0002; font-size: 12px; }
+.analysis-legend[hidden], #analysis-section[hidden], #analysis-time-controls[hidden] { display: none; }
+.analysis-legend small { display: block; margin-top: 10px; }
+.analysis-legend-scale { display: flex; gap: 4px; margin-top: 10px; }
+.analysis-legend-scale span { min-width: 50px; text-align: center; }
+.analysis-legend-scale i { display: block; height: 10px; margin-bottom: 6px; }
+
 :root {
     --blue: #0867ed;
     --blue-soft: #edf5ff;
