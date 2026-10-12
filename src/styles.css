@@ -2078,7 +2078,8 @@ th:last-child {
   color: #182338;
 }
 
-.metro-legend {
+.metro-legend,
+.weather-legend {
   position: absolute;
   bottom: 38px;
   left: 20px;
@@ -2093,11 +2094,19 @@ th:last-child {
   pointer-events: none;
 }
 
-.metro-legend strong, .metro-legend small { display: block; }
-.metro-legend small { color: #a5b4c8; margin-top: 10px; }
+.metro-legend strong, .metro-legend small,
+.weather-legend strong, .weather-legend small { display: block; }
+.metro-legend small,
+.weather-legend small { color: #a5b4c8; margin-top: 10px; }
 .metro-legend-scale { display: flex; margin-top: 10px; }
 .metro-legend-scale span { flex: 1; text-align: center; white-space: nowrap; }
 .metro-legend-scale i { display: block; height: 8px; margin-bottom: 7px; }
+.weather-legend { width: min(330px, calc(100% - 40px)); }
+.weather-legend-scale { height: 10px; margin-top: 11px; border-radius: 6px; }
+.weather-legend-scale.diverging { background: linear-gradient(90deg, #313695, #74add1, #ffffbf, #f46d43, #a50026); }
+.weather-legend-scale.viridis { background: linear-gradient(90deg, #440154, #31688e, #35b779, #90d743, #fde725); }
+.weather-legend-scale.blue { background: linear-gradient(90deg, #eff6ff, #bfdbfe, #60a5fa, #2563eb, #1e3a8a); }
+.weather-legend-labels { display: flex; justify-content: space-between; margin-top: 5px; color: #cbd5e1; font-size: 10px; }
 #map.cell-popup-open .maplibregl-popup {
   z-index: 2;
 }
@@ -2125,6 +2134,25 @@ th:last-child {
   line-height: 28px;
 }
 .metro-comparison-popup .maplibregl-popup-close-button:hover { background: #475569; }
+.weather-cell-popup .maplibregl-popup-content {
+  min-width: 260px;
+  padding: 0;
+  border: 1px solid #ffffff24;
+  border-radius: 12px;
+  background: #11151ef2;
+  box-shadow: 0 14px 38px #0007;
+  color: #e2e8f0;
+}
+.weather-cell-popup .maplibregl-popup-tip { border-top-color: #11151ef2; }
+.weather-cell-popup .maplibregl-popup-close-button { color: #94a3b8; font-size: 20px; }
+.weather-popup { padding: 18px; font: 12px/1.45 Inter, "Segoe UI", Arial, sans-serif; }
+.weather-popup > strong { display: block; padding-right: 18px; color: #f8fafc; font-size: 14px; }
+.weather-popup > small { display: block; margin-top: 2px; color: #64748b; }
+.weather-popup dl { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 14px 0 0; }
+.weather-popup dl > div { padding: 9px; border: 1px solid #ffffff12; border-radius: 8px; background: #ffffff08; }
+.weather-popup dt { color: #94a3b8; }
+.weather-popup dd { margin: 3px 0 0; color: #f8fafc; font-size: 14px; font-weight: 700; }
+.weather-popup-status { margin: 14px 0 0; color: #cbd5e1; }
 .metro-comparison { padding: 28px 24px 24px; color: #d7dde5; font-size: 14px; }
 .metro-comparison p { margin: 0; color: #94a3b8; text-align: center; line-height: 1.5; }
 .metro-comparison-ratio {

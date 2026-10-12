@@ -1,4 +1,4 @@
-import { polygonToCells, latLngToCell, cellToBoundary, cellToLatLng } from "https://cdn.jsdelivr.net/npm/h3-js@4.1.0/+esm";
+import { polygonToCells, latLngToCell, cellToBoundary, cellToLatLng, cellToParent, getResolution } from "https://cdn.jsdelivr.net/npm/h3-js@4.1.0/+esm";
 
 function geometriesFromGeoJSON(data) {
   if (!data) return [];
@@ -27,6 +27,15 @@ export function cellsToFeatureCollection(cells) {
     const [lat,lng] = cellToLatLng(cell);
     return { type:"Feature", properties:{ h3:cell, center_lat:lat, center_lng:lng }, geometry:{type:"Polygon",coordinates:[boundary]} };
   }) };
+}
+
+export function cellAtMaxResolution(cell, maxResolution = 5) {
+  return getResolution(cell) > maxResolution ? cellToParent(cell, maxResolution) : cell;
+}
+
+export function h3CellCenter(cell) {
+  const [latitude, longitude] = cellToLatLng(cell);
+  return [longitude, latitude];
 }
 
 export function csvPointsToGeoJSON(text) {

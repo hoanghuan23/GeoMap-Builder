@@ -14,6 +14,19 @@ const SEARCH_BOUNDARY_SOURCE = "map-search-boundary";
 const SEARCH_BOUNDARY_LINE = "map-search-boundary-line";
 const vietnamLandPromises = new Map();
 
+function normalizePlaceName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase();
+}
+
+function displayGadmName(value) {
+  return String(value || "").replace(/([a-zà-ỹ])([A-ZÀ-Ỹ])/g, "$1 $2");
+}
+
 export function buildGeocodingUrl(query, apiKey, center) {
   const url = new URL(`${MAPTILER_GEOCODING_URL}/${encodeURIComponent(query)}.json`);
   url.searchParams.set("key", apiKey);
@@ -155,6 +168,40 @@ async function loadVietnamLand(level, fetchImpl = fetch, signal) {
   return vietnamLandPromises.get(level);
 }
 
+export async function searchGadmBoundaries(query, { signal, fetchImpl = fetch, limit = 8 } = {}) {
+  const needle = normalizePlaceName(query);
+  if (!needle) return [];
+  const collections = await Promise.all([1, 2, 0].map(level => loadVietnamLand(level, fetchImpl, signal)));
+  if (signal?.aborted) throw new DOMException("Search aborted", "AbortError");
+  const candidates = collections.flatMap((collection, collectionIndex) => (collection.features || []).flatMap(feature => {
+    const level = collectionIndex === 0 ? 1 : collectionIndex === 1 ? 2 : 0;
+    const properties = feature.properties || {};
+    const rawName = properties[`NAME_${level}`] || properties.COUNTRY;
+    const aliases = [rawName, properties[`VARNAME_${level}`], properties[`NL_NAME_${level}`]].map(normalizePlaceName);
+    const matchIndex = aliases.findIndex(name => name.includes(needle));
+    if (matchIndex < 0) return [];
+    const name = displayGadmName(rawName);
+    const province = level === 2 ? displayGadmName(properties.NAME_1) : "";
+    const bbox = geometryBounds(feature.geometry?.coordinates);
+    const center = bbox ? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2] : null;
+    return [{
+      ...feature,
+      id: `gadm.${properties[`GID_${level}`] || "vnm"}`,
+      bbox,
+      center,
+      text: name,
+      place_name: [name, province, "Việt Nam"].filter(Boolean).join(", "),
+      place_type: [level === 0 ? "country" : level === 1 ? "region" : "county"],
+      properties: { ...properties, country_code: "vn", local_gadm: true },
+      _searchScore: aliases[matchIndex] === needle ? 0 : aliases[matchIndex].startsWith(needle) ? 1 : 2
+    }];
+  }));
+  return candidates
+    .sort((a, b) => a._searchScore - b._searchScore || a.text.localeCompare(b.text, "vi"))
+    .slice(0, limit)
+    .map(({ _searchScore, ...feature }) => feature);
+}
+
 export async function landOnlyBoundary(feature, { fetchImpl = fetch, signal, forceVietnam = false } = {}) {
   if (!isBoundaryFeature(feature)) return null;
   if (!forceVietnam && !isVietnamFeature(feature)) return feature;
@@ -250,7 +297,7 @@ export function focusMapOnFeature(map, feature) {
   return true;
 }
 
-export function createMapSearch({ map, apiKey }) {
+export function createMapSearch({ map, apiKey, onBoundariesChange = null }) {
   const root = document.getElementById("map-search");
   const form = document.getElementById("map-search-form");
   const input = document.getElementById("map-search-input");
@@ -273,6 +320,12 @@ export function createMapSearch({ map, apiKey }) {
   const drawSelectedBoundary = () => {
     boundaryRenderPending = !map?.isStyleLoaded?.();
     if (!boundaryRenderPending) renderSearchBoundary(map, [...selectedRegions.values()].map(item => item.boundary).filter(Boolean));
+  };
+
+  const notifyBoundariesChange = () => {
+    if (typeof onBoundariesChange !== "function") return;
+    const boundaries = [...selectedRegions.values()].map(item => item.boundary).filter(Boolean);
+    Promise.resolve(onBoundariesChange(boundaries)).catch(error => console.error("Không thể cập nhật vùng tìm kiếm:", error));
   };
 
   const featureKey = feature => String(feature?.id || featureLabel(feature)).toLocaleLowerCase("vi");
@@ -302,6 +355,7 @@ export function createMapSearch({ map, apiKey }) {
     selectedRegions.delete(key);
     renderSelection();
     drawSelectedBoundary();
+    notifyBoundariesChange();
     updateSpinner();
   };
 
@@ -312,6 +366,7 @@ export function createMapSearch({ map, apiKey }) {
     boundaryRenderPending = false;
     renderSelection();
     drawSelectedBoundary();
+    notifyBoundariesChange();
     updateSpinner();
   };
 
@@ -359,12 +414,15 @@ export function createMapSearch({ map, apiKey }) {
     try {
       const detailedFeature = isBoundaryFeature(feature) ? feature : feature.id ? await getMapTilerFeature(feature.id, { apiKey, signal: controller.signal }) : null;
       if (detailControllers.get(key) !== controller || !isBoundaryFeature(detailedFeature)) return;
-      const clippedBoundary = await landOnlyBoundary(detailedFeature, { signal: controller.signal, forceVietnam: true });
+      const clippedBoundary = detailedFeature.properties?.local_gadm
+        ? detailedFeature
+        : await landOnlyBoundary(detailedFeature, { signal: controller.signal, forceVietnam: true });
       if (detailControllers.get(key) !== controller || !selectedRegions.has(key)) return;
       selectedRegions.set(key, { feature, boundary: clippedBoundary, loading: false });
       renderSelection();
       drawSelectedBoundary();
       const boundaries = [...selectedRegions.values()].map(item => item.boundary).filter(Boolean);
+      notifyBoundariesChange();
       if (clippedBoundary) focusMapOnFeatures(map, boundaries);
       else console.warn("Ranh giới MapTiler không giao với mặt nạ đất liền GADM.");
     } catch (error) {
@@ -422,22 +480,20 @@ export function createMapSearch({ map, apiKey }) {
       setOpen(false);
       return;
     }
-    if (!apiKey) {
-      renderMessage("Cần cấu hình MAPTILER_API_KEY trong file .env.", "error");
-      return;
-    }
     requestController?.abort();
     const controller = new AbortController();
     requestController = controller;
     updateSpinner();
     try {
-      const boundaries = await searchMapTilerBoundaries(query, { apiKey, center: map.getCenter(), signal: controller.signal });
+      const boundaries = apiKey
+        ? await searchMapTilerBoundaries(query, { apiKey, center: map.getCenter(), signal: controller.signal })
+        : await searchGadmBoundaries(query, { signal: controller.signal });
       if (requestController !== controller || controller.signal.aborted) return;
       renderFeatures(boundaries);
     } catch (error) {
       if (error.name === "AbortError") return;
       console.error(error);
-      renderMessage(error.status === 403 ? "API key MapTiler không hợp lệ hoặc bị giới hạn." : "Không thể kết nối MapTiler. Vui lòng thử lại.", "error");
+      renderMessage(error.status === 403 ? "API key MapTiler không hợp lệ hoặc bị giới hạn." : "Không thể tải dữ liệu tìm kiếm. Vui lòng thử lại.", "error");
     } finally {
       if (requestController === controller) requestController = null;
       updateSpinner();
@@ -455,8 +511,7 @@ export function createMapSearch({ map, apiKey }) {
     debounceTimer = setTimeout(runSearch, 320);
   });
   input.addEventListener("focus", () => {
-    if (!apiKey) renderMessage("Cần cấu hình MAPTILER_API_KEY trong file .env.", "error");
-    else if (features.length && input.value.trim().length >= MIN_QUERY_LENGTH) setOpen(true);
+    if (features.length && input.value.trim().length >= MIN_QUERY_LENGTH) setOpen(true);
   });
   input.addEventListener("keydown", event => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -497,7 +552,7 @@ export function createMapSearch({ map, apiKey }) {
     if (boundaryRenderPending) drawSelectedBoundary();
   });
 
-  if (!apiKey) input.title = "Thêm MAPTILER_API_KEY vào file .env";
+  if (!apiKey) input.title = "Tìm trong ranh giới hành chính GADM Việt Nam";
   return () => {
     clearTimeout(debounceTimer);
     requestController?.abort();

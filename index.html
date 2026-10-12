@@ -50,6 +50,7 @@
         <button id="feature-toggle" class="section-title collapsible" aria-expanded="true"><span class="step">4</span><div><h2>Chức năng</h2><p>Bật/tắt tính năng bổ sung</p></div><span class="chevron">⌃</span></button>
         <div id="feature-controls" class="feature-controls">
           <label class="toggle-row feature-toggle-row"><span class="feature-copy"><b>Hiển thị lớp bản đồ</b><small>Bật để vẽ các đối tượng/lớp dữ liệu lên bản đồ</small></span><span class="switch-control"><input id="show-map-layers" type="checkbox" checked><i></i><em id="show-map-layers-status">Đang bật</em></span></label>
+          <label id="weather-toggle-field" class="toggle-row feature-toggle-row" hidden><span class="feature-copy"><b>Dữ liệu thời tiết</b><small>Nhiệt độ, độ ẩm, tầm nhìn và gió theo ô H3</small></span><span class="switch-control"><input id="show-weather" type="checkbox" checked><i></i><em id="show-weather-status">Đang bật</em></span></label>
           <div id="metro-layer-controls" hidden>
             <label class="toggle-row"><span>Hiển thị vùng dữ liệu</span><input id="show-metro-cells" type="checkbox" checked><i></i></label>
             <label class="toggle-row"><span>Hiển thị đường bao vùng</span><input id="show-metro-boundary" type="checkbox" checked><i></i></label>
@@ -86,6 +87,12 @@
     <section class="content-area table-hidden">
       <div class="map-panel"><div id="map"></div><div id="chart-canvas" class="chart-canvas" hidden></div><div id="status" class="status-pill" hidden></div>
         <div id="metro-legend" class="metro-legend" hidden aria-live="polite"></div>
+        <div id="weather-legend" class="weather-legend" hidden aria-live="polite">
+          <strong>Nhiệt độ không khí (°C)</strong>
+          <div id="weather-legend-scale" class="weather-legend-scale"></div>
+          <div class="weather-legend-labels"><span>10</span><span>20</span><span>25</span><span>30</span><span>38</span></div>
+          <small id="weather-legend-note"></small>
+        </div>
         <div id="map-search" class="map-search">
           <form id="map-search-form" class="map-search-form" role="search">
             <span class="map-search-location" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/></svg></span>

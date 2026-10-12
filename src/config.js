@@ -1,5 +1,6 @@
 export const CONFIG = Object.freeze({
-  DEFAULT_RESOLUTION: 5,
+  DEFAULT_RESOLUTION: 6,
   MAX_RENDER_CELLS: 120000,
-  MAPTILER_API_KEY: import.meta.env?.MAPTILER_API_KEY || ""
+  MAPTILER_API_KEY: import.meta.env?.MAPTILER_API_KEY || "",
+  OPENWEATHER_API_KEY: import.meta.env?.VITE_OPENWEATHER_API_KEY || ""
 });

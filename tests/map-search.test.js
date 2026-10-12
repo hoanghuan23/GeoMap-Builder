@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, gadmLevelForFeature, getMapTilerFeature, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, renderSearchBoundary, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
+import { buildGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, gadmLevelForFeature, getMapTilerFeature, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, renderSearchBoundary, searchGadmBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
 
 test("buildGeocodingUrl limits administrative autocomplete to Vietnam", () => {
   const url = new URL(buildGeocodingUrl("Hưng Yên", "test-key", { lng: 105.85, lat: 20.65 }));
@@ -239,6 +239,24 @@ test("feature helpers use MapTiler center and place name", () => {
   const feature = { center: [106, 21], place_name: "Hưng Yên, Việt Nam", text: "Hưng Yên" };
   assert.deepEqual(featureCenter(feature), [106, 21]);
   assert.equal(featureLabel(feature), "Hưng Yên, Việt Nam");
+});
+
+test("GADM fallback finds Vietnamese names without requiring accents or spaces", async () => {
+  const polygon = coordinates => ({ type: "Polygon", coordinates: [coordinates] });
+  const collections = {
+    0: { type: "FeatureCollection", features: [{ type: "Feature", properties: { GID_0: "VNM", COUNTRY: "Vietnam" }, geometry: polygon([[102, 8], [109, 8], [109, 23], [102, 8]]) }] },
+    1: { type: "FeatureCollection", features: [{ type: "Feature", properties: { GID_1: "VNM.35_1", NAME_1: "LâmĐồng", VARNAME_1: "LamDong" }, geometry: polygon([[107, 11], [108, 11], [108, 12], [107, 11]]) }] },
+    2: { type: "FeatureCollection", features: [] }
+  };
+  const fetchImpl = async url => {
+    const level = Number(String(url).match(/VNM_(\d)\.json/)?.[1]);
+    return { ok: true, json: async () => collections[level] };
+  };
+  const results = await searchGadmBoundaries("lam dong", { fetchImpl });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].text, "Lâm Đồng");
+  assert.equal(results[0].properties.local_gadm, true);
+  assert.deepEqual(results[0].bbox, [107, 11, 108, 12]);
 });
 
 test("focusMapOnFeature fits the clipped boundary", () => {
