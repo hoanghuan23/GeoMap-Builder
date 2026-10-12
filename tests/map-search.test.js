@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, focusMapOnFeature, gadmLevelForFeature, getMapTilerFeature, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, renderSearchBoundary, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
+import { buildGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, gadmLevelForFeature, getMapTilerFeature, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, renderSearchBoundary, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
 
 test("buildGeocodingUrl limits administrative autocomplete to Vietnam", () => {
   const url = new URL(buildGeocodingUrl("Hưng Yên", "test-key", { lng: 105.85, lat: 20.65 }));
@@ -157,6 +157,15 @@ test("renderSearchBoundary adds only the clipped outline and clears its data", (
   assert.deepEqual(sources.get("map-search-boundary").data.features, []);
 });
 
+test("renderSearchBoundary displays multiple selected boundaries", () => {
+  const source = { setData(data) { this.data = data; } };
+  const map = { isStyleLoaded: () => true, getSource: () => source, getLayer: () => ({}), addSource() {}, addLayer() {} };
+  const first = { type: "Feature", geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [0, 0]]] } };
+  const second = { type: "Feature", geometry: { type: "MultiPolygon", coordinates: [[[[2, 2], [3, 2], [2, 2]]]] } };
+  assert.equal(renderSearchBoundary(map, [first, null, second]), true);
+  assert.deepEqual(source.data.features, [first, second]);
+});
+
 test("selection retries boundary rendering on idle after moving the map", async t => {
   const element = () => ({
     value: "", hidden: false, children: [], handlers: {},
@@ -207,16 +216,20 @@ test("selection retries boundary rendering on idle after moving the map", async 
   handlers.idle();
   assert.equal(sources.get("map-search-boundary").data.features[0].geometry.type, "MultiPolygon");
 
-  // Retry also updates an existing source, rather than leaving its cleared data.
+  // Clicking an already selected result removes only that region.
+  await option.handlers.click();
+  assert.equal(sources.get("map-search-boundary").data.features.length, 0);
+
+  // Selecting it again updates the existing source.
   await option.handlers.click();
   loaded = true;
   handlers.idle();
   assert.equal(sources.get("map-search-boundary").data.features.length, 1);
 
-  // Clearing while a render is pending must not restore the old selection.
+  // Clearing all while a render is pending must not restore the old selection.
   await option.handlers.click();
-  get("map-search-input").focus = () => {};
-  get("map-search-clear").handlers.click();
+  option.handlers.click();
+  get("map-search-clear-all").handlers.click();
   loaded = true;
   handlers.idle();
   assert.equal(sources.get("map-search-boundary").data.features.length, 0);
@@ -234,4 +247,16 @@ test("focusMapOnFeature fits the clipped boundary", () => {
   assert.equal(focusMapOnFeature(map, { center: [106, 21], bbox: [105, 20, 107, 22] }), true);
   assert.deepEqual(call[0], [[105, 20], [107, 22]]);
   assert.equal(call[1].maxZoom, 14);
+});
+
+test("multiple feature focus fits the combined extent", () => {
+  const features = [
+    { bbox: [102, 8, 105, 12] },
+    { geometry: { type: "Polygon", coordinates: [[[106, 20], [109, 20], [109, 23], [106, 20]]] } }
+  ];
+  assert.deepEqual(featuresBounds(features), [102, 8, 109, 23]);
+  let fitted;
+  const map = { fitBounds: bounds => { fitted = bounds; } };
+  assert.equal(focusMapOnFeatures(map, features), true);
+  assert.deepEqual(fitted, [[102, 8], [109, 23]]);
 });

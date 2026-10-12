@@ -173,9 +173,10 @@ export async function landOnlyBoundary(feature, { fetchImpl = fetch, signal, for
 
 export function renderSearchBoundary(map, feature) {
   if (!map?.isStyleLoaded?.()) return false;
-  const hasBoundary = isBoundaryFeature(feature);
+  const boundaries = (Array.isArray(feature) ? feature : [feature]).filter(isBoundaryFeature);
+  const hasBoundary = boundaries.length > 0;
   if (!hasBoundary && !map.getSource(SEARCH_BOUNDARY_SOURCE)) return false;
-  const data = hasBoundary ? { type: "FeatureCollection", features: [feature] } : EMPTY_FEATURE_COLLECTION;
+  const data = hasBoundary ? { type: "FeatureCollection", features: boundaries } : EMPTY_FEATURE_COLLECTION;
   if (!map.getSource(SEARCH_BOUNDARY_SOURCE)) map.addSource(SEARCH_BOUNDARY_SOURCE, { type: "geojson", data });
   else map.getSource(SEARCH_BOUNDARY_SOURCE).setData(data);
   if (!map.getLayer(SEARCH_BOUNDARY_LINE)) {
@@ -191,6 +192,28 @@ export function renderSearchBoundary(map, feature) {
     });
   }
   return hasBoundary;
+}
+
+export function featuresBounds(features) {
+  const boxes = (features || []).map(feature => feature?.bbox || geometryBounds(feature?.geometry?.coordinates)).filter(Boolean);
+  if (!boxes.length) return null;
+  return boxes.reduce((bounds, box) => [
+    Math.min(bounds[0], box[0]), Math.min(bounds[1], box[1]),
+    Math.max(bounds[2], box[2]), Math.max(bounds[3], box[3])
+  ], [...boxes[0]]);
+}
+
+export function focusMapOnFeatures(map, features) {
+  const list = (features || []).filter(Boolean);
+  if (!list.length) return false;
+  const bbox = featuresBounds(list);
+  if (!bbox || bbox[0] >= bbox[2] || bbox[1] >= bbox[3]) return focusMapOnFeature(map, list.at(-1));
+  map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
+    padding: { top: 125, right: 70, bottom: 70, left: 70 },
+    maxZoom: 14,
+    duration: 900
+  });
+  return true;
 }
 
 export function featureCenter(feature) {
@@ -234,19 +257,62 @@ export function createMapSearch({ map, apiKey }) {
   const results = document.getElementById("map-search-results");
   const clearButton = document.getElementById("map-search-clear");
   const spinner = document.getElementById("map-search-spinner");
-  if (!root || !form || !input || !results || !clearButton || !spinner) return () => {};
+  const selection = document.getElementById("map-search-selection");
+  const chips = document.getElementById("map-search-chips");
+  const clearAllButton = document.getElementById("map-search-clear-all");
+  if (!root || !form || !input || !results || !clearButton || !spinner || !selection || !chips || !clearAllButton) return () => {};
 
   let features = [];
   let activeIndex = -1;
   let debounceTimer;
   let requestController;
-  let detailController;
-  let selectedBoundary = null;
+  const detailControllers = new Map();
+  const selectedRegions = new Map();
   let boundaryRenderPending = false;
 
   const drawSelectedBoundary = () => {
     boundaryRenderPending = !map?.isStyleLoaded?.();
-    if (!boundaryRenderPending) renderSearchBoundary(map, selectedBoundary);
+    if (!boundaryRenderPending) renderSearchBoundary(map, [...selectedRegions.values()].map(item => item.boundary).filter(Boolean));
+  };
+
+  const featureKey = feature => String(feature?.id || featureLabel(feature)).toLocaleLowerCase("vi");
+  const updateSpinner = () => { spinner.hidden = !requestController && detailControllers.size === 0; };
+
+  const renderSelection = () => {
+    chips.replaceChildren();
+    selectedRegions.forEach((item, key) => {
+      const chip = document.createElement("span");
+      const label = document.createElement("span");
+      const remove = document.createElement("button");
+      chip.className = `map-search-chip${item.loading ? " loading" : ""}`;
+      label.textContent = item.feature.text || featureLabel(item.feature).split(",")[0];
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", `Bỏ ${label.textContent}`);
+      remove.addEventListener("click", () => removeRegion(key));
+      chip.append(label, remove);
+      chips.append(chip);
+    });
+    selection.hidden = selectedRegions.size === 0;
+  };
+
+  const removeRegion = key => {
+    detailControllers.get(key)?.abort();
+    detailControllers.delete(key);
+    selectedRegions.delete(key);
+    renderSelection();
+    drawSelectedBoundary();
+    updateSpinner();
+  };
+
+  const clearSelections = () => {
+    detailControllers.forEach(controller => controller.abort());
+    detailControllers.clear();
+    selectedRegions.clear();
+    boundaryRenderPending = false;
+    renderSelection();
+    drawSelectedBoundary();
+    updateSpinner();
   };
 
   const setOpen = open => {
@@ -275,32 +341,43 @@ export function createMapSearch({ map, apiKey }) {
     options[activeIndex].scrollIntoView({ block: "nearest" });
   };
   const chooseFeature = async feature => {
+    const key = featureKey(feature);
+    if (selectedRegions.has(key)) {
+      removeRegion(key);
+      return;
+    }
     if (!focusMapOnFeature(map, feature)) return;
-    input.value = featureLabel(feature);
-    clearButton.hidden = false;
+    selectedRegions.set(key, { feature, boundary: null, loading: true });
+    renderSelection();
+    input.value = "";
+    clearButton.hidden = true;
     setOpen(false);
-    detailController?.abort();
-    selectedBoundary = null;
-    boundaryRenderPending = false;
-    drawSelectedBoundary();
-    if (!feature.id) return;
 
     const controller = new AbortController();
-    detailController = controller;
-    spinner.hidden = false;
+    detailControllers.set(key, controller);
+    updateSpinner();
     try {
-      const detailedFeature = isBoundaryFeature(feature) ? feature : await getMapTilerFeature(feature.id, { apiKey, signal: controller.signal });
-      if (detailController !== controller || !isBoundaryFeature(detailedFeature)) return;
+      const detailedFeature = isBoundaryFeature(feature) ? feature : feature.id ? await getMapTilerFeature(feature.id, { apiKey, signal: controller.signal }) : null;
+      if (detailControllers.get(key) !== controller || !isBoundaryFeature(detailedFeature)) return;
       const clippedBoundary = await landOnlyBoundary(detailedFeature, { signal: controller.signal, forceVietnam: true });
-      if (detailController !== controller) return;
-      selectedBoundary = clippedBoundary;
+      if (detailControllers.get(key) !== controller || !selectedRegions.has(key)) return;
+      selectedRegions.set(key, { feature, boundary: clippedBoundary, loading: false });
+      renderSelection();
       drawSelectedBoundary();
-      if (selectedBoundary) focusMapOnFeature(map, selectedBoundary);
+      const boundaries = [...selectedRegions.values()].map(item => item.boundary).filter(Boolean);
+      if (clippedBoundary) focusMapOnFeatures(map, boundaries);
       else console.warn("Ranh giới MapTiler không giao với mặt nạ đất liền GADM.");
     } catch (error) {
-      if (error.name !== "AbortError") console.warn("Không thể tải hoặc cắt ranh giới MapTiler:", error);
+      if (error.name !== "AbortError") {
+        console.warn("Không thể tải hoặc cắt ranh giới MapTiler:", error);
+        if (detailControllers.get(key) === controller) {
+          selectedRegions.delete(key);
+          renderSelection();
+        }
+      }
     } finally {
-      if (detailController === controller) spinner.hidden = true;
+      if (detailControllers.get(key) === controller) detailControllers.delete(key);
+      updateSpinner();
     }
   };
   const renderFeatures = nextFeatures => {
@@ -319,10 +396,12 @@ export function createMapSearch({ map, apiKey }) {
       const subtitle = document.createElement("small");
       button.type = "button";
       button.id = `map-search-result-${index}`;
-      button.className = "map-search-result";
+      button.className = `map-search-result${selectedRegions.has(featureKey(feature)) ? " selected" : ""}`;
       button.setAttribute("role", "option");
+      const selected = selectedRegions.has(featureKey(feature));
+      button.setAttribute("aria-selected", String(selected));
       icon.className = "map-search-result-icon";
-      icon.textContent = "⌖";
+      icon.textContent = selected ? "✓" : "⌖";
       title.textContent = feature.text || featureLabel(feature).split(",")[0];
       subtitle.textContent = resultSubtitle(feature);
       copy.append(title, subtitle);
@@ -337,6 +416,8 @@ export function createMapSearch({ map, apiKey }) {
     const query = input.value.trim();
     if (query.length < MIN_QUERY_LENGTH) {
       requestController?.abort();
+      requestController = null;
+      updateSpinner();
       features = [];
       setOpen(false);
       return;
@@ -348,7 +429,7 @@ export function createMapSearch({ map, apiKey }) {
     requestController?.abort();
     const controller = new AbortController();
     requestController = controller;
-    spinner.hidden = false;
+    updateSpinner();
     try {
       const boundaries = await searchMapTilerBoundaries(query, { apiKey, center: map.getCenter(), signal: controller.signal });
       if (requestController !== controller || controller.signal.aborted) return;
@@ -358,7 +439,8 @@ export function createMapSearch({ map, apiKey }) {
       console.error(error);
       renderMessage(error.status === 403 ? "API key MapTiler không hợp lệ hoặc bị giới hạn." : "Không thể kết nối MapTiler. Vui lòng thử lại.", "error");
     } finally {
-      if (requestController === controller) spinner.hidden = true;
+      if (requestController === controller) requestController = null;
+      updateSpinner();
     }
   };
 
@@ -366,7 +448,8 @@ export function createMapSearch({ map, apiKey }) {
     clearButton.hidden = !input.value;
     clearTimeout(debounceTimer);
     requestController?.abort();
-    spinner.hidden = true;
+    requestController = null;
+    updateSpinner();
     features = [];
     setOpen(false);
     debounceTimer = setTimeout(runSearch, 320);
@@ -395,22 +478,20 @@ export function createMapSearch({ map, apiKey }) {
   clearButton.addEventListener("click", () => {
     clearTimeout(debounceTimer);
     requestController?.abort();
-    detailController?.abort();
+    requestController = null;
     input.value = "";
     clearButton.hidden = true;
-    spinner.hidden = true;
     features = [];
-    selectedBoundary = null;
-    boundaryRenderPending = false;
-    drawSelectedBoundary();
+    updateSpinner();
     setOpen(false);
     input.focus();
   });
+  clearAllButton.addEventListener("click", clearSelections);
   document.addEventListener("pointerdown", event => {
     if (!root.contains(event.target)) setOpen(false);
   });
   map.on("style.load", () => {
-    if (selectedBoundary) drawSelectedBoundary();
+    if (selectedRegions.size) drawSelectedBoundary();
   });
   map.on("idle", () => {
     if (boundaryRenderPending) drawSelectedBoundary();
@@ -420,8 +501,9 @@ export function createMapSearch({ map, apiKey }) {
   return () => {
     clearTimeout(debounceTimer);
     requestController?.abort();
-    detailController?.abort();
-    selectedBoundary = null;
+    detailControllers.forEach(controller => controller.abort());
+    detailControllers.clear();
+    selectedRegions.clear();
     boundaryRenderPending = false;
     renderSearchBoundary(map, null);
   };

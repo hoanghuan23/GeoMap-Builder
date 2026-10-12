@@ -1370,6 +1370,96 @@ input[type=range] {
     box-shadow: 0 12px 32px #17263f3d
 }
 
+.map-search-selection {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 7px;
+    padding: 8px;
+    border: 1px solid #33445b;
+    border-radius: 10px;
+    background: #0d1624eb;
+    box-shadow: 0 8px 24px #02081745;
+    backdrop-filter: blur(9px)
+}
+
+.map-search-selection[hidden] {
+    display: none
+}
+
+.map-search-chips {
+    min-width: 0;
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    gap: 6px
+}
+
+.map-search-chip {
+    max-width: 190px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0 3px 0 9px;
+    border: 1px solid #2b8bb2;
+    border-radius: 14px;
+    color: #eaf8ff;
+    background: #0c6f952e;
+    font-size: 10px
+}
+
+.map-search-chip.loading {
+    opacity: .68
+}
+
+.map-search-chip.loading::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border: 1px solid #8edcf7;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: map-search-spin .7s linear infinite
+}
+
+.map-search-chip>span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis
+}
+
+.map-search-chip button {
+    width: 22px;
+    height: 22px;
+    flex: none;
+    border: 0;
+    border-radius: 50%;
+    color: #a9c6d4;
+    background: transparent;
+    font-size: 16px;
+    line-height: 1
+}
+
+.map-search-chip button:hover {
+    color: #fff;
+    background: #ffffff17
+}
+
+.map-search-clear-all {
+    flex: none;
+    padding: 6px 4px;
+    border: 0;
+    color: #9cc9dc;
+    background: transparent;
+    font-size: 9px;
+    white-space: nowrap
+}
+
+.map-search-clear-all:hover {
+    color: #fff
+}
+
 .map-search-result {
     width: 100%;
     min-height: 57px;
@@ -1390,6 +1480,15 @@ input[type=range] {
 .map-search-result:hover,
 .map-search-result.active {
     background: #eff7ff
+}
+
+.map-search-result.selected {
+    background: #e8f8ef
+}
+
+.map-search-result.selected .map-search-result-icon {
+    color: #fff;
+    background: #168c50
 }
 
 .map-search-result-icon {
