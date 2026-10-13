@@ -15,6 +15,19 @@ MAPTILER_API_KEY=your_maptiler_api_key
 
 Key được dùng từ trình duyệt cho Geocoding API; khi triển khai nên giới hạn key theo domain trong trang quản lý MapTiler.
 
+Phân tích dữ liệu bảng bằng AI dùng OpenAI Responses API qua middleware phía server. Thêm key không có tiền tố `VITE_` để key không bị đưa vào bundle trình duyệt:
+
+```env
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-5.6-luna
+```
+
+Khi upload Excel/CSV/JSON không có tọa độ, ứng dụng gửi metadata cột, các giá trị phân loại và một mẫu nhỏ tới model. Model chỉ trả về cấu hình có schema (loại visualization, trường địa điểm, thời gian và metric). Với dữ liệu tỉnh/thành, ứng dụng lấy trực tiếp full polygon mới từ MapTiler bằng loại `region` và feature ID, sau đó gắn bản ghi vào polygon tương ứng; không hợp nhất các tỉnh GADM cũ. Nếu OpenAI tạm thời lỗi, rule-based recommendation được dùng làm fallback.
+
+Các control lọc không được khai báo cố định trong HTML. Model trả về `filters[]` gồm tên trường, nhãn, loại control và chế độ chọn “tất cả”; ứng dụng tạo giao diện từ spec này. Vì vậy option thời gian chỉ xuất hiện khi dữ liệu có chiều thời gian, còn các dataset khác có thể tạo filter theo tuyến, nhà ga, phương tiện hoặc trường phân loại tương ứng.
+
+Các file GeoJSON độc lập cũng được xếp lớp theo nội dung thay vì thứ tự upload. Rule nền luôn đặt polygon/hexagon dưới line/route và đặt point/station trên cùng; AI nhận metadata của các lớp để đề xuất thứ tự chi tiết giữa những lớp cùng nhóm. Nếu chưa cấu hình OpenAI hoặc API lỗi, thứ tự hình học này vẫn được áp dụng ngay ở trình duyệt.
+
 Kết quả ranh giới mới từ MapTiler được cắt bằng polygon GADM tương ứng trước khi hiển thị: cấp quốc gia dùng GADM 0, tỉnh/thành dùng GADM 1, quận/huyện và địa phương dùng GADM 2. Các polygon GADM chồng lấn được dùng như một mặt nạ đất liền, nhằm giữ biên giới hành chính mới từ MapTiler nhưng loại phần ranh giới ngoài biển.
 
 ## 1. Mục tiêu dự án

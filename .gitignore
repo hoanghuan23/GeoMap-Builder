@@ -4,8 +4,14 @@ dist/
 .env.local
 
 # dữ liệu test
-# geomap_test_samples/
-# metro/
+geomap_test_samples/
+metro_test_samples/
+
+# dữ liệu ranh giới tỉnh/thành phố
+administrative_division/
+
+# dữ liệu đường
+roads/
 
 # logic test
 test/
