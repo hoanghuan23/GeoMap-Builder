@@ -481,6 +481,7 @@ function renderUploadedFiles() {
     return item;
   }));
   if (!state.uploadedFiles.length) return;
+  $("remove-current-file").hidden = true;
   $("file-name").textContent = `${state.uploadedFiles.length} lớp dữ liệu`;
   $("file-note").textContent = "Các file được xếp chồng theo từng lớp";
   $("selected-file").hidden = false;
@@ -836,7 +837,7 @@ function clearUploadedData() {
   $("map-type-grid").className = "map-type-grid is-empty"; $("map-type-grid").textContent = "Chưa có dữ liệu để đề xuất mô hình.";
   $("map-type-summary").textContent = "";
   showSupportedChartCatalog(true);
-  $("selected-file").hidden = true; $("spatial-file").value = ""; $("uploaded-layer-list")?.replaceChildren(); setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
+  $("selected-file").hidden = true; $("remove-current-file").hidden = true; $("spatial-file").value = ""; $("uploaded-layer-list")?.replaceChildren(); setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
   map?.getSource("h3-grid")?.setData(state.h3Data); map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   map?.getSource("point-data")?.setData(state.pointData);
   map?.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
@@ -1146,7 +1147,7 @@ function replaceChartData(analysis, name) {
     button.title = `${option.label} · Recharts`; renderChartIcon(icon, option.icon); button.append(icon, option.label); return button;
   }));
   $("map-type-summary").textContent = `Tìm thấy ${analysis.rowCount} bản ghi tại ${analysis.sourcePath} · ${analysis.numericFields.length} trường số · ${options.length} kiểu biểu đồ phù hợp`;
-  $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu biểu đồ đã tải · đang sử dụng"; $("selected-file").hidden = false;
+  $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu biểu đồ đã tải · đang sử dụng"; $("remove-current-file").hidden = false; $("selected-file").hidden = false;
   const canvas = $("chart-canvas"); canvas.hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
   setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(options[0].id);
 }
@@ -1166,7 +1167,7 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   state.lineData = { type: "FeatureCollection", features: features.filter(feature => ["LineString", "MultiLineString"].includes(feature.geometry?.type)) };
   map.getSource("line-data")?.setData(state.lineData);
   map.getSource("polygon-data")?.setData(data); updateModelSections();
-  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("selected-file").hidden = false; state.baselineCount = null;
+  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("remove-current-file").hidden = false; $("selected-file").hidden = false; state.baselineCount = null;
   if (preservePolygons) {
     state.h3Data = EMPTY_FEATURE_COLLECTION; map.getSource("h3-grid")?.setData(state.h3Data); updateDashboard(); fitBoundary();
   } else await rebuildGrid({ fit: true });
@@ -1487,6 +1488,10 @@ function bindUI() {
   $("uploaded-layer-list").addEventListener("click", event => {
     const button = event.target.closest(".remove-uploaded-layer");
     if (button?.dataset.uploadId) removeUploadedFile(button.dataset.uploadId);
+  });
+  $("remove-current-file").addEventListener("click", () => {
+    deleteData();
+    setStatus("Đã xóa file dữ liệu.", true);
   });
   $("province-filter-toggle").addEventListener("click", () => {
     const menu = $("province-filter-menu"); const open = menu.hidden; menu.hidden = !open; $("province-filter-toggle").setAttribute("aria-expanded", String(open));

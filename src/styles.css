@@ -646,10 +646,6 @@ button {
     font-weight: 700
 }
 
-.success-check {
-    color: #15a66a
-}
-
 .placeholder-panel,
 textarea {
     border: 1px solid var(--line);
