@@ -28,6 +28,7 @@ import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient
 import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } from "./geojson-layers.js";
 import { comparableFilterValue, displayFilterValue, requestAiMapRecommendation } from "./ai-data-analysis.js";
 import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
+import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -58,7 +59,8 @@ const state = {
   metroParts: {}, separateMetroActive: false,
   aiDataset: null
 };
-let map; let toastTimer; let cellPopup;
+let map; let toastTimer; let cellPopup; let layerOrderTimer;
+let layerOrderRevision = 0;
 const weatherCache = new Map();
 const MAX_WEATHER_SAMPLES = 50;
 let weatherLoadRevision = 0;
@@ -519,7 +521,40 @@ function renderUploadedFiles() {
   $("selected-file").hidden = false;
 }
 
+function uploadLayerOrderInput() {
+  return state.uploadLayers.map(layer => ({
+    id: layer.id,
+    name: layer.name,
+    role: layer.role,
+    geometryKinds: geometryKinds(layer.originalData),
+    featureCount: layer.featureCount,
+    layerIds: layer.layerIds
+  }));
+}
+
+function applyUploadLayerOrder(orderedLayerIds) {
+  const layers = uploadLayerOrderInput();
+  for (const mapLayerId of mapLayerIdsInOrder(layers, orderedLayerIds)) {
+    if (map?.getLayer(mapLayerId)) map.moveLayer(mapLayerId);
+  }
+}
+
+function scheduleUploadLayerOrder() {
+  const layers = uploadLayerOrderInput();
+  applyUploadLayerOrder(deterministicLayerOrder(layers));
+  clearTimeout(layerOrderTimer);
+  const revision = ++layerOrderRevision;
+  if (layers.length < 2) return;
+  layerOrderTimer = setTimeout(async () => {
+    const recommendation = await requestAiLayerOrder(layers);
+    if (revision !== layerOrderRevision) return;
+    applyUploadLayerOrder(recommendation.order);
+  }, 350);
+}
+
 function clearUploadLayers() {
+  clearTimeout(layerOrderTimer);
+  layerOrderRevision++;
   for (const layer of state.uploadLayers) {
     for (const layerId of [...(layer.layerIds || [])].reverse()) {
       if (map?.getLayer(layerId)) map.removeLayer?.(layerId);
@@ -601,6 +636,7 @@ function addUploadedGeoJSONLayer(data, name, { forceRole = null, id: requestedId
   }
   renderUploadedFiles();
   applyMapLayerVisibility();
+  scheduleUploadLayerOrder();
   if (!hasPolygonMask()) fitGeoJSON(layer.data);
   return layer;
 }
@@ -1432,6 +1468,7 @@ function removeDynamicUploadLayer(id) {
   }
   if (map?.getSource(layer.sourceId)) map.removeSource?.(layer.sourceId);
   state.uploadLayers = state.uploadLayers.filter(item => item.id !== id);
+  scheduleUploadLayerOrder();
 }
 
 async function activateSeparateMetroData() {
@@ -1579,7 +1616,8 @@ async function processSpatialFiles(files) {
   });
   for (const item of overlays) {
     const role = metroPartRole(item.result.data, item.file.name);
-    const layer = addUploadedGeoJSONLayer(item.result.data, item.file.name, { forceRole: role === "hexagons" ? "hexagon" : null, fileKey: item.key });
+    const forceRole = role === "hexagons" ? "hexagon" : role === "stations" ? "point" : role === "metro_route" ? "line" : null;
+    const layer = addUploadedGeoJSONLayer(item.result.data, item.file.name, { forceRole, fileKey: item.key });
     if (role) state.metroParts[role] = { id: layer.id, name: item.file.name, data: item.result.data };
   }
   for (const item of metroParts) {
