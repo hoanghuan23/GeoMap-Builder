@@ -5,6 +5,7 @@ import vm from "node:vm";
 import * as metro from "../src/metro-data.js";
 import * as capabilities from "../src/data-capabilities.js";
 import * as polygonStyle from "../src/renderers/polygon-style.js";
+import * as geojsonLayers from "../src/geojson-layers.js";
 import { PolygonRenderer } from "../src/renderers/polygon-renderer.js";
 
 // Exercise the actual upload and UI handlers with a MapLibre/DOM adapter.
@@ -25,6 +26,7 @@ function createHarness() {
     getSource: id => sources.get(id), getLayer: id => layers.get(id),
     addSource(id, config) { sources.set(id, { data: config.data, setData(data) { this.data = data; } }); },
     addLayer(layer) { layers.set(layer.id, { ...layer, layout: { ...layer.layout }, paint: { ...layer.paint } }); },
+    removeSource(id) { sources.delete(id); }, removeLayer(id) { layers.delete(id); },
     setPaintProperty(id, key, value) { layers.get(id).paint[key] = value; },
     getPaintProperty(id, key) { return layers.get(id).paint[key]; },
     getContainer() { return get("map"); },
@@ -33,7 +35,7 @@ function createHarness() {
     moveLayer() {}, on() {}, resize() {}, fitBounds() {}
   };
   const context = vm.createContext({
-    ...metro, ...capabilities, ...polygonStyle, PolygonRenderer,
+    ...metro, ...capabilities, ...polygonStyle, ...geojsonLayers, PolygonRenderer,
     CONFIG: { DEFAULT_RESOLUTION: 5, MAX_RENDER_CELLS: 120000 },
     DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     mergeBarConfig: () => ({}), mergePieConfig: () => ({}),
@@ -101,6 +103,75 @@ test("upload displays independent Metro layers, changes departure, and clears al
   for (const id of ["polygon-data", "vietnam-boundary", "metro-station-data", "line-data"]) assert.equal(sources.get(id).data.features.length, 0);
   assert.equal(get("metro-time-section").hidden, true);
   assert.equal(get("metro-legend").hidden, true);
+});
+
+test("skips a file uploaded more than once and allows it again after removal", async () => {
+  const { context } = createHarness();
+  const data = JSON.stringify({
+    type: "FeatureCollection",
+    features: [{ type: "Feature", properties: { name: "A" }, geometry: { type: "Point", coordinates: [106.7, 10.8] } }]
+  });
+  context.file = { name: "points.geojson", size: data.length, lastModified: 123, type: "application/geo+json", text: async () => data };
+
+  await vm.runInContext("processSpatialFiles([file, file])", context);
+  assert.equal(vm.runInContext("state.uploadedFiles.length", context), 1);
+  assert.equal(vm.runInContext("state.uploadLayers.length", context), 1);
+  assert.equal(vm.runInContext("state.uploadedFileKeys.size", context), 1);
+
+  await vm.runInContext("processSpatialFiles([file])", context);
+  assert.equal(vm.runInContext("state.uploadedFiles.length", context), 1);
+  assert.match(vm.runInContext("document.getElementById('status').textContent", context), /đã được tải lên/i);
+
+  vm.runInContext("removeUploadedFile(state.uploadedFiles[0].id)", context);
+  assert.equal(vm.runInContext("state.uploadedFileKeys.size", context), 0);
+  await vm.runInContext("processSpatialFiles([file])", context);
+  assert.equal(vm.runInContext("state.uploadedFiles.length", context), 1);
+  assert.equal(vm.runInContext("state.uploadLayers.length", context), 1);
+});
+
+test("recognizes an Excel travel-time table as a Metro part", async () => {
+  const { context } = createHarness();
+  context.XLSX = {
+    read: () => ({ SheetNames: ["travel_times"], Sheets: { travel_times: {} } }),
+    utils: { sheet_to_json: () => [{ cell_id: "hex_0001", departure_time: 5.5 / 24, bus_minutes: "55,6", motorbike_minutes: 28.8, ratio: "1,93" }] }
+  };
+  context.file = { name: "travel_times.xlsx", arrayBuffer: async () => new ArrayBuffer(0) };
+
+  const result = await vm.runInContext("readSpatialFile(file)", context);
+  assert.equal(result.kind, "metro-part");
+  assert.equal(result.role, "travel_times");
+  assert.deepEqual({ ...result.data[0] }, {
+    cell_id: "hex_0001",
+    departure_time: "05:30",
+    bus_minutes: 55.6,
+    motorbike_minutes: 28.8,
+    ratio: 1.93
+  });
+});
+
+test("activates Metro with only hexagons and travel times, then adds optional overlays", async () => {
+  const { context, sources } = createHarness();
+  const bundle = JSON.parse(readFileSync(new URL("../geomap_metro1_du_lieu_mo_phong.json", import.meta.url), "utf8"));
+  const file = (name, data, stamp) => {
+    const text = JSON.stringify(data);
+    return { name, size: text.length, lastModified: stamp, type: "application/json", text: async () => text };
+  };
+  context.hexagonsFile = file("hexagons.geojson", bundle.hexagons, 1);
+  context.timesFile = file("travel_times.json", bundle.travel_times, 2);
+
+  await vm.runInContext("processSpatialFiles([hexagonsFile, timesFile])", context);
+  assert.equal(vm.runInContext("state.separateMetroActive", context), true);
+  assert.equal(sources.get("polygon-data").data.features.length, bundle.hexagons.features.length);
+  assert.equal(sources.get("metro-station-data").data.features.length, 0);
+  assert.equal(sources.get("line-data").data.features.length, 0);
+  assert.match(vm.runInContext("document.getElementById('status').textContent", context), /ghép 2 file/i);
+
+  context.stationsFile = file("stations.geojson", bundle.stations, 3);
+  context.routeFile = file("metro_route.geojson", bundle.metro_route, 4);
+  await vm.runInContext("processSpatialFiles([stationsFile, routeFile])", context);
+  assert.equal(sources.get("metro-station-data").data.features.length, bundle.stations.features.length);
+  assert.equal(sources.get("line-data").data.features.length, bundle.metro_route.features.length);
+  assert.match(vm.runInContext("document.getElementById('status').textContent", context), /ghép 4 file/i);
 });
 
 test("clicks anywhere in a Metro cell focus its full geometry and anchor to the same center", async () => {

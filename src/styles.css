@@ -487,6 +487,59 @@ button {
     font-size: 9px
 }
 
+.uploaded-layer-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 4px 0 0;
+    padding: 0;
+    list-style: none
+}
+
+.uploaded-layer-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: #34445d;
+    font-size: 9px
+}
+
+.uploaded-layer-list li span:first-child {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap
+}
+
+.uploaded-layer-list em {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-style: normal
+}
+
+.remove-uploaded-layer {
+    display: grid;
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: #8a96a8;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1
+}
+
+.remove-uploaded-layer:hover {
+    background: #fee2e2;
+    color: #dc2626
+}
+
 .province-filter {
     margin: 8px 0 0
 }

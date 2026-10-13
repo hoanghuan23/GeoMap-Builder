@@ -4,7 +4,8 @@ dist/
 .env.local
 
 # dữ liệu test
-geomap_test_samples/
+# geomap_test_samples/
+# metro/
 
 # logic test
 test/

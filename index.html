@@ -21,7 +21,7 @@
       <section class="panel-section">
         <div class="section-title"><span class="step">1</span><div><h2>Cung cấp dữ liệu</h2><p>Tải lên hoặc nhập vùng cần phân tích</p></div></div>
         <div class="tabs"><button class="tab active" data-tab="upload">Upload file</button><button class="tab" data-tab="draw">Vẽ trên bản đồ</button><button class="tab" data-tab="coordinates">Nhập tọa độ</button></div>
-        <div class="tab-panel active" data-panel="upload"><label class="drop-zone" for="spatial-file"><input id="spatial-file" type="file" accept=".geojson,.json,.csv,.xlsx,.xls,.zip"><span class="upload-icon">⇧</span><b>Kéo thả file vào đây</b><span>hoặc <u>chọn từ máy tính</u></span><small>Excel, GeoJSON, JSON, CSV hoặc ZIP/Shapefile</small></label><div id="selected-file" class="selected-file" hidden><span class="file-badge">GJ</span><div><b id="file-name"></b><small id="file-note"></small></div><span class="success-check">✓</span></div><div id="province-filter-field" class="field province-filter" hidden><span>Tỉnh / thành phố</span><div id="province-filter" class="province-multiselect"><button id="province-filter-toggle" class="province-filter-toggle" type="button" aria-expanded="false"><span id="province-filter-label">Tất cả tỉnh/thành</span><span>⌄</span></button><div id="province-filter-menu" class="province-filter-menu" hidden><div id="province-filter-options" class="province-filter-options"></div><div class="province-filter-actions"><button id="clear-provinces" type="button">Bỏ chọn</button><button id="apply-provinces" type="button">Áp dụng</button></div></div></div></div></div>
+        <div class="tab-panel active" data-panel="upload"><label class="drop-zone" for="spatial-file"><input id="spatial-file" type="file" accept=".geojson,.json,.csv,.xlsx,.xls,.zip" multiple><span class="upload-icon">⇧</span><b>Kéo thả nhiều file vào đây</b><span>hoặc <u>chọn từ máy tính</u></span><small>GeoJSON/JSON được xếp thành từng lớp bản đồ</small></label><div id="selected-file" class="selected-file" hidden><span class="file-badge">GJ</span><div><b id="file-name"></b><small id="file-note"></small><ul id="uploaded-layer-list" class="uploaded-layer-list"></ul></div><span class="success-check">✓</span></div><div id="province-filter-field" class="field province-filter" hidden><span>Tỉnh / thành phố</span><div id="province-filter" class="province-multiselect"><button id="province-filter-toggle" class="province-filter-toggle" type="button" aria-expanded="false"><span id="province-filter-label">Tất cả tỉnh/thành</span><span>⌄</span></button><div id="province-filter-menu" class="province-filter-menu" hidden><div id="province-filter-options" class="province-filter-options"></div><div class="province-filter-actions"><button id="clear-provinces" type="button">Bỏ chọn</button><button id="apply-provinces" type="button">Áp dụng</button></div></div></div></div></div>
         <div class="tab-panel placeholder-panel" data-panel="draw">Chọn công cụ vẽ trên bản đồ để bắt đầu.</div>
         <div class="tab-panel" data-panel="coordinates"><textarea id="coordinate-input" rows="4" placeholder="Nhập GeoJSON Polygon hoặc danh sách lng,lat"></textarea><button id="apply-coordinates" class="secondary-button">Áp dụng tọa độ</button></div>
       </section>
@@ -34,16 +34,13 @@
           <div id="supported-chart-grid" class="supported-chart-grid" role="list" aria-label="Các kiểu bản đồ và biểu đồ được hỗ trợ"></div>
         </div>
       </section>
-      <section id="display-config-section" class="panel-section" hidden>
-        <div class="section-title"><span class="step">3</span><div><h2>Cấu hình hiển thị</h2><p>Điều chỉnh độ chi tiết và thuộc tính</p></div></div>
-        <div class="field range-field"><div class="field-label"><label for="resolution">Resolution (H3)</label><output id="resolution-value">5</output></div><input id="resolution" type="range" min="0" max="15" value="5"><div class="range-labels"><span>0</span><span>Độ chi tiết</span><span>15</span></div></div>
-      </section>
+      <input id="resolution" type="hidden" value="5"><output id="resolution-value" hidden>5</output>
       <section id="chart-data-mapping-section" class="panel-section" hidden>
         <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p>Chọn thông tin để vẽ biểu đồ</p></div></div>
         <div id="data-mapping-controls"></div>
       </section>
       <section id="metro-time-section" class="panel-section" hidden>
-        <div class="section-title"><span class="step">3</span><div><h2>Cấu hình hiển thị</h2><p>So sánh thời gian xe buýt và xe máy</p></div></div>
+        <div class="section-title"><span class="step">3</span><div><h2>Thời gian di chuyển</h2><p>So sánh thời gian xe buýt và xe máy</p></div></div>
         <label class="field">Thời gian xuất phát<select id="metro-departure" aria-label="Thời gian xuất phát"></select></label>
       </section>
       <section id="feature-section" class="panel-section feature-section" hidden>

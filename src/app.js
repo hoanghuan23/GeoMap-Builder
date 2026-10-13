@@ -25,6 +25,7 @@ import { createMapSearch } from "./map-search.js";
 import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColors } from "./metro-data.js";
 import { fetchCurrentWeather, formatVisibility, readCachedWeather, WEATHER_CACHE_TTL_MS, windDirectionLabel, writeCachedWeather } from "./openweather.js";
 import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient } from "./renderers/weather-style.js";
+import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } from "./geojson-layers.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -50,7 +51,9 @@ const state = {
   chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null,
   barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, polygonPalette: null,
   metroData: null, metroTime: null, metroPopup: null, lineData: EMPTY_FEATURE_COLLECTION,
-  dataOrigin: null
+  dataOrigin: null,
+  uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0,
+  metroParts: {}, separateMetroActive: false
 };
 let map; let toastTimer; let cellPopup;
 const weatherCache = new Map();
@@ -273,12 +276,11 @@ function showSupportedChartCatalog(visible) {
 function updateModelSections() {
   const hasModel = Boolean(state.mapType);
   const isChart = Boolean(state.chartConfig);
-  $("metro-time-section").hidden = !state.metroData || isChart;
+  $("metro-time-section").hidden = true;
   $("metro-layer-controls").hidden = !state.metroData || isChart;
   $("line-toggle-field").hidden = isChart || !state.lineData.features.length;
   $("travel-palette").hidden = !state.metroData;
   $("weather-toggle-field").hidden = state.dataOrigin !== "search" || isChart;
-  $("display-config-section").hidden = !hasModel || isChart || state.mapType !== "h3";
   $("chart-data-mapping-section").hidden = !isChart;
   $("feature-section").hidden = !hasModel || isChart;
   $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon"].includes(state.mapType));
@@ -363,6 +365,11 @@ function applyMapLayerVisibility() {
     if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", showLayers && state.metroData && $("show-metro-stations").checked ? "visible" : "none");
   }
   if (map.getLayer("data-lines")) map.setLayoutProperty("data-lines", "visibility", showLayers && $("show-map-lines").checked && (state.metroData || state.mapType === "line") ? "visible" : "none");
+  for (const layer of state.uploadLayers) {
+    for (const layerId of layer.layerIds || []) {
+      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", showLayers ? "visible" : "none");
+    }
+  }
   $("metro-legend").hidden = !state.metroData || !showPolygon;
   if (!showPolygon) { state.metroPopup?.remove(); state.metroPopup = null; }
   if (!showH3 && !showPolygon) cellPopup?.remove();
@@ -452,6 +459,117 @@ function pointFeatureCollection(data) {
   if (data?.type === "FeatureCollection") data.features?.forEach(collect);
   else if (data?.type === "Feature") collect(data);
   return { type: "FeatureCollection", features };
+}
+
+function renderUploadedFiles() {
+  const list = $("uploaded-layer-list");
+  if (!list) return;
+  list.replaceChildren(...state.uploadedFiles.map(file => {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    const detail = document.createElement("em");
+    const remove = document.createElement("button");
+    name.textContent = file.name;
+    detail.textContent = file.detail;
+    remove.type = "button";
+    remove.className = "remove-uploaded-layer";
+    remove.dataset.uploadId = file.id;
+    remove.setAttribute("aria-label", `Xóa ${file.name}`);
+    remove.title = `Xóa ${file.name}`;
+    remove.textContent = "×";
+    item.append(name, detail, remove);
+    return item;
+  }));
+  if (!state.uploadedFiles.length) return;
+  $("file-name").textContent = `${state.uploadedFiles.length} lớp dữ liệu`;
+  $("file-note").textContent = "Các file được xếp chồng theo từng lớp";
+  $("selected-file").hidden = false;
+}
+
+function clearUploadLayers() {
+  for (const layer of state.uploadLayers) {
+    for (const layerId of [...(layer.layerIds || [])].reverse()) {
+      if (map?.getLayer(layerId)) map.removeLayer?.(layerId);
+    }
+    if (layer.sourceId && map?.getSource(layer.sourceId)) map.removeSource?.(layer.sourceId);
+  }
+  state.uploadLayers = [];
+  state.uploadedFiles = [];
+  state.uploadedFileKeys.clear();
+  state.uploadLayerSequence = 0;
+  state.metroParts = {};
+  state.separateMetroActive = false;
+}
+
+function hasPolygonMask() {
+  return geometryKinds(state.boundary || state.sourceBoundary).includes("area");
+}
+
+function uploadLayerData(layer) {
+  if (layer.role !== "hexagon") return layer.originalData;
+  if (!hasPolygonMask()) return layer.originalData;
+  return clipGeoJSONToPolygon(layer.originalData, state.boundary || state.sourceBoundary);
+}
+
+function refreshClippedUploadLayers() {
+  for (const layer of state.uploadLayers.filter(item => item.role === "hexagon")) {
+    layer.data = uploadLayerData(layer);
+    layer.featureCount = featureCount(layer.data);
+    map?.getSource(layer.sourceId)?.setData(layer.data);
+    const summary = state.uploadedFiles.find(file => file.id === layer.id);
+    if (summary) summary.detail = hasPolygonMask()
+      ? `${layer.featureCount.toLocaleString("vi-VN")} ô trong vùng`
+      : `${layer.featureCount.toLocaleString("vi-VN")} ô`;
+  }
+  renderUploadedFiles();
+}
+
+function addUploadedGeoJSONLayer(data, name, { forceRole = null, id: requestedId = null, register = true, fileKey = null } = {}) {
+  const kinds = geometryKinds(data);
+  const role = forceRole || (isHexagonGeoJSON(data, name) ? "hexagon" : kinds.length === 1 ? kinds[0] : "mixed");
+  const sequence = ++state.uploadLayerSequence;
+  const id = requestedId || `uploaded-${sequence}`;
+  const sourceId = `${id}-source`;
+  const layer = { id, name, role, sourceId, layerIds: [], originalData: data, data, featureCount: featureCount(data) };
+  layer.data = uploadLayerData(layer);
+  layer.featureCount = featureCount(layer.data);
+  map.addSource(sourceId, { type: "geojson", data: layer.data });
+  const hasArea = kinds.includes("area");
+  const hasLine = kinds.includes("line");
+  const hasPoint = kinds.includes("point");
+  if (hasArea) {
+    const fillId = `${id}-fill`; const borderId = `${id}-border`;
+    map.addLayer({ id: fillId, type: "fill", source: sourceId, paint: { "fill-color": role === "hexagon" ? "#00e65c" : "#8b5cf6", "fill-opacity": role === "hexagon" ? .62 : .3 } });
+    map.addLayer({ id: borderId, type: "line", source: sourceId, paint: { "line-color": role === "hexagon" ? "#032b17" : "#c4b5fd", "line-width": role === "hexagon" ? .55 : 1.5 } });
+    layer.layerIds.push(fillId, borderId);
+  }
+  if (hasLine) {
+    const lineId = `${id}-line`;
+    map.addLayer({ id: lineId, type: "line", source: sourceId, paint: { "line-color": "#f43f5e", "line-width": 3 } });
+    layer.layerIds.push(lineId);
+  }
+  if (hasPoint) {
+    const pointId = `${id}-point`;
+    map.addLayer({ id: pointId, type: "circle", source: sourceId, paint: { "circle-radius": 5, "circle-color": "#f43f5e", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 } });
+    layer.layerIds.push(pointId);
+  }
+  state.uploadLayers.push(layer);
+  if (register) {
+    state.uploadedFiles.push({
+      id,
+      name,
+      fileKey,
+      data,
+      role,
+      detail: role === "hexagon"
+        ? hasPolygonMask() ? `${layer.featureCount.toLocaleString("vi-VN")} ô trong vùng` : `${layer.featureCount.toLocaleString("vi-VN")} ô`
+        : `${featureCount(data).toLocaleString("vi-VN")} đối tượng`
+    });
+  }
+  renderUploadedFiles();
+  applyMapLayerVisibility();
+  if (!hasPolygonMask()) fitGeoJSON(layer.data);
+  return layer;
 }
 
 function clearMetroData() {
@@ -646,7 +764,7 @@ function boundaryForProvinces(data, names) {
   const selected = new Set(names); return { ...data, features: data.features.filter(feature => selected.has(feature?.properties?.NAME_1)) };
 }
 
-function fitBoundary() {
+function fitGeoJSON(data) {
   const coords = [];
   const walk = (x) => {
     if (!Array.isArray(x)) return;
@@ -663,9 +781,9 @@ function fitBoundary() {
     if (geometry.type === "GeometryCollection") geometry.geometries?.forEach(collectGeometry);
     else walk(geometry.coordinates);
   };
-  if (state.boundary?.type === "FeatureCollection") state.boundary.features?.forEach(feature => collectGeometry(feature.geometry));
-  else if (state.boundary?.type === "Feature") collectGeometry(state.boundary.geometry);
-  else collectGeometry(state.boundary);
+  if (data?.type === "FeatureCollection") data.features?.forEach(feature => collectGeometry(feature.geometry));
+  else if (data?.type === "Feature") collectGeometry(data.geometry);
+  else collectGeometry(data);
 
   if (!coords.length) return;
 
@@ -684,6 +802,8 @@ function fitBoundary() {
     duration: 700
   });
 }
+
+function fitBoundary() { fitGeoJSON(state.boundary); }
 
 function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
   const types = compatibleMapTypes(profile).filter(type => !state.metroData || type.id === "polygon"); const grid = $("map-type-grid"); state.dataProfile = profile;
@@ -705,6 +825,7 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 function clearUploadedData() {
   weatherLoadRevision += 1;
   clearMetroData();
+  clearUploadLayers();
   state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
   state.pointData = { type: "FeatureCollection", features: [] };
   state.mapType = null; state.dataProfile = null; state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; state.baselineCount = null; state.page = 1; state.dataOrigin = null;
@@ -715,7 +836,7 @@ function clearUploadedData() {
   $("map-type-grid").className = "map-type-grid is-empty"; $("map-type-grid").textContent = "Chưa có dữ liệu để đề xuất mô hình.";
   $("map-type-summary").textContent = "";
   showSupportedChartCatalog(true);
-  $("selected-file").hidden = true; $("spatial-file").value = ""; setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
+  $("selected-file").hidden = true; $("spatial-file").value = ""; $("uploaded-layer-list")?.replaceChildren(); setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
   map?.getSource("h3-grid")?.setData(state.h3Data); map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   map?.getSource("point-data")?.setData(state.pointData);
   map?.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
@@ -913,6 +1034,31 @@ function showChartStyleControls(show) {
   }
 }
 
+function normalizeTravelTimeRecords(records) {
+  if (!Array.isArray(records) || !records.length) return null;
+  const requiredFields = ["cell_id", "departure_time", "bus_minutes", "motorbike_minutes"];
+  if (!records.every(row => row && typeof row === "object" && requiredFields.every(field => field in row))) return null;
+  const timeText = value => {
+    if (typeof value === "number" && value >= 0 && value < 1) {
+      const minutes = Math.round(value * 24 * 60) % (24 * 60);
+      return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    }
+    if (Object.prototype.toString.call(value) === "[object Date]" && !Number.isNaN(value.getTime())) {
+      return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+    }
+    return String(value ?? "").trim();
+  };
+  const numberValue = value => typeof value === "number" ? value : Number(String(value).trim().replace(",", "."));
+  return records.map(row => ({
+    ...row,
+    cell_id: String(row.cell_id ?? "").trim(),
+    departure_time: timeText(row.departure_time),
+    bus_minutes: numberValue(row.bus_minutes),
+    motorbike_minutes: numberValue(row.motorbike_minutes),
+    ...(row.ratio === undefined || row.ratio === "" ? {} : { ratio: numberValue(row.ratio) })
+  }));
+}
+
 async function readSpatialFile(file) {
   const extension = file.name.toLowerCase().split(".").pop();
   if (extension === "zip") throw new Error("ZIP/Shapefile sẽ được hỗ trợ ở phiên bản tiếp theo.");
@@ -921,6 +1067,8 @@ async function readSpatialFile(file) {
     const workbook = globalThis.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const records = globalThis.XLSX.utils.sheet_to_json(firstSheet, { defval: "", raw: true });
+    const travelRecords = normalizeTravelTimeRecords(records);
+    if (travelRecords) return { kind: "metro-part", role: "travel_times", data: travelRecords };
     try {
       const data = recordsToPointGeoJSON(records);
       return { data, profile: analyzeSpatialData(data) };
@@ -933,6 +1081,8 @@ async function readSpatialFile(file) {
     if (!globalThis.XLSX) throw new Error("Không tải được thư viện đọc CSV. Vui lòng kiểm tra kết nối mạng.");
     const workbook = globalThis.XLSX.read(text, { type: "string", raw: true });
     const records = globalThis.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: true });
+    const travelRecords = normalizeTravelTimeRecords(records);
+    if (travelRecords) return { kind: "metro-part", role: "travel_times", data: travelRecords };
     try {
       const data = recordsToPointGeoJSON(records);
       return { data, profile: analyzeSpatialData(data) };
@@ -943,6 +1093,14 @@ async function readSpatialFile(file) {
   const parsed = JSON.parse(text);
   const metro = readMetroData(parsed);
   if (metro) return { kind: "metro", data: metro };
+  const rawTravelRecords = Array.isArray(parsed) ? parsed
+    : Array.isArray(parsed?.travel_times) ? parsed.travel_times
+    : Array.isArray(parsed?.data) ? parsed.data
+    : null;
+  const travelRecords = normalizeTravelTimeRecords(rawTravelRecords);
+  if (travelRecords) {
+    return { kind: "metro-part", role: "travel_times", data: travelRecords };
+  }
   if (typeof parsed?.type === "string") return { data: parsed, profile: analyzeSpatialData(parsed) };
   const records = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : null;
   if (records) {
@@ -1012,6 +1170,7 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   if (preservePolygons) {
     state.h3Data = EMPTY_FEATURE_COLLECTION; map.getSource("h3-grid")?.setData(state.h3Data); updateDashboard(); fitBoundary();
   } else await rebuildGrid({ fit: true });
+  refreshClippedUploadLayers();
   applyStyle();
 }
 
@@ -1066,6 +1225,7 @@ async function applySearchBoundaries(boundaries) {
   renderSearchPolygonType();
   updateModelSections();
   await rebuildGrid();
+  refreshClippedUploadLayers();
   applyStyle();
 }
 
@@ -1084,12 +1244,202 @@ async function processSpatialFile(file) {
   }
 }
 
+function metroPartRole(data, name = "") {
+  const kinds = geometryKinds(data);
+  if (isHexagonGeoJSON(data, name)) return "hexagons";
+  if (kinds.includes("point") && /stations?|ga[-_ ]?/i.test(name)) return "stations";
+  if (kinds.includes("line") && /(metro[-_ ]?route|route|tuyen)/i.test(name)) return "metro_route";
+  return null;
+}
+
+function removeDynamicUploadLayer(id) {
+  const layer = state.uploadLayers.find(item => item.id === id);
+  if (!layer) return;
+  for (const layerId of [...layer.layerIds].reverse()) {
+    if (map?.getLayer(layerId)) map.removeLayer?.(layerId);
+  }
+  if (map?.getSource(layer.sourceId)) map.removeSource?.(layer.sourceId);
+  state.uploadLayers = state.uploadLayers.filter(item => item.id !== id);
+}
+
+async function activateSeparateMetroData() {
+  const { hexagons, stations, metro_route: route, travel_times: times } = state.metroParts;
+  if (!hexagons || !times) return false;
+  for (const part of [hexagons, stations, route].filter(Boolean)) removeDynamicUploadLayer(part.id);
+  const data = readMetroData({
+    hexagons: hexagons.data,
+    boundary: EMPTY_FEATURE_COLLECTION,
+    stations: stations?.data || EMPTY_FEATURE_COLLECTION,
+    metro_route: route?.data || EMPTY_FEATURE_COLLECTION,
+    travel_times: times.data
+  });
+  if (!data) return false;
+  const partCount = [hexagons, stations, route, times].filter(Boolean).length;
+  await replaceMetroData(data, `${partCount} lớp dữ liệu Metro`);
+  state.separateMetroActive = true;
+  renderUploadedFiles();
+  setStatus(`Đã ghép ${partCount} file thành bản đồ Metro.`, true);
+  return true;
+}
+
+function deactivateSeparateMetroData() {
+  state.separateMetroActive = false;
+  clearMetroData();
+  state.boundary = null; state.sourceBoundary = null; state.mapType = null; state.dataProfile = null;
+  map?.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+  map?.getSource("metro-station-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  map?.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  for (const [role, part] of Object.entries(state.metroParts)) {
+    if (role === "travel_times" || !part?.data) continue;
+    removeDynamicUploadLayer(part.id);
+    const forceRole = role === "hexagons" ? "hexagon" : role === "stations" ? "point" : "line";
+    addUploadedGeoJSONLayer(part.data, part.name, { forceRole, id: part.id, register: false });
+  }
+  updateModelSections();
+  applyMapLayerVisibility();
+}
+
+async function removeUploadedFile(id) {
+  const file = state.uploadedFiles.find(item => item.id === id);
+  if (!file) return;
+  removeDynamicUploadLayer(id);
+  let removedMetroPart = false;
+  for (const [role, part] of Object.entries(state.metroParts)) {
+    if (part?.id !== id) continue;
+    delete state.metroParts[role];
+    removedMetroPart = true;
+  }
+  state.uploadedFiles = state.uploadedFiles.filter(item => item.id !== id);
+  if (file.fileKey) state.uploadedFileKeys.delete(file.fileKey);
+  if (removedMetroPart && state.separateMetroActive) {
+    const canRemainActive = state.metroParts.hexagons && state.metroParts.travel_times;
+    if (canRemainActive) await activateSeparateMetroData();
+    else deactivateSeparateMetroData();
+  }
+  if (file.role === "base") {
+    state.boundary = null; state.sourceBoundary = null; state.mapType = null; state.dataProfile = null;
+    map?.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
+    map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+    map?.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION);
+    refreshClippedUploadLayers();
+    updateModelSections();
+    applyMapLayerVisibility();
+  }
+  renderUploadedFiles();
+  if (!state.uploadedFiles.length) $("selected-file").hidden = true;
+  setStatus(`Đã xóa lớp ${file.name}.`, true);
+}
+
+async function processSpatialFiles(files) {
+  const candidates = [...(files || [])];
+  if (!candidates.length) return;
+  const selected = [];
+  const duplicates = [];
+  for (const file of candidates) {
+    const key = uploadFileKey(file);
+    if (state.uploadedFileKeys.has(key)) duplicates.push(file);
+    else {
+      state.uploadedFileKeys.add(key);
+      selected.push({ file, key });
+    }
+  }
+  if (!selected.length) {
+    const message = candidates.length === 1
+      ? `${candidates[0].name} đã được tải lên.`
+      : `${candidates.length} file đã được tải lên trước đó.`;
+    showToast(message);
+    setStatus(message, true);
+    return;
+  }
+  setStatus(`Đang đọc ${selected.length} file…`);
+  const loaded = await Promise.all(selected.map(async ({ file, key }) => {
+    try { return { file, key, result: await readSpatialFile(file) }; }
+    catch (error) { return { file, key, error }; }
+  }));
+  const failures = loaded.filter(item => item.error);
+  for (const failure of failures) state.uploadedFileKeys.delete(failure.key);
+  for (const failure of failures) console.error(failure.file.name, failure.error);
+  const valid = loaded.filter(item => !item.error);
+  if (!valid.length) {
+    showToast(failures[0]?.error?.message || "Không thể đọc các file đã chọn.");
+    setStatus("Không thể đọc file.", true);
+    return;
+  }
+
+  const metro = valid.find(item => item.result.kind === "metro");
+  if (metro) {
+    await replaceMetroData(metro.result.data, metro.file.name);
+    if (valid.length === 1) {
+      if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
+      return;
+    }
+  }
+  const spatial = valid.filter(item => !item.result.kind && item.result.data);
+  const metroParts = valid.filter(item => item.result.kind === "metro-part");
+  const charts = valid.filter(item => item.result.kind === "chart");
+  if (!spatial.length && !metroParts.length && charts.length) {
+    replaceChartData(charts[0].result.analysis, charts[0].file.name);
+    if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
+    return;
+  }
+
+  // Khi chưa có vùng làm mặt nạ, polygon thường đầu tiên trở thành lớp nền.
+  // Hexagon không bao giờ tự trở thành mặt nạ của chính nó.
+  const base = !state.boundary && spatial.find(item => geometryKinds(item.result.data).includes("area") && !isHexagonGeoJSON(item.result.data, item.file.name));
+  if (base) {
+    await replaceBoundary(base.result.data, base.file.name, base.result.profile, { preservePolygons: true });
+    const id = `base-${++state.uploadLayerSequence}`;
+    state.uploadedFiles.push({ id, name: base.file.name, fileKey: base.key, data: base.result.data, role: "base", detail: `${featureCount(base.result.data).toLocaleString("vi-VN")} vùng nền` });
+  }
+
+  const overlays = spatial.filter(item => item !== base);
+  overlays.sort((a, b) => {
+    const rank = item => isHexagonGeoJSON(item.result.data, item.file.name) ? 0 : geometryKinds(item.result.data).includes("line") ? 1 : 2;
+    return rank(a) - rank(b);
+  });
+  for (const item of overlays) {
+    const role = metroPartRole(item.result.data, item.file.name);
+    const layer = addUploadedGeoJSONLayer(item.result.data, item.file.name, { forceRole: role === "hexagons" ? "hexagon" : null, fileKey: item.key });
+    if (role) state.metroParts[role] = { id: layer.id, name: item.file.name, data: item.result.data };
+  }
+  for (const item of metroParts) {
+    const id = `uploaded-${++state.uploadLayerSequence}`;
+    state.metroParts[item.result.role] = { id, name: item.file.name, data: item.result.data };
+    state.uploadedFiles.push({ id, name: item.file.name, fileKey: item.key, data: item.result.data, role: "travel_times", detail: `${item.result.data.length.toLocaleString("vi-VN")} dòng` });
+  }
+  refreshClippedUploadLayers();
+  const metroActivated = await activateSeparateMetroData();
+  renderUploadedFiles();
+  const added = overlays.length + metroParts.length + (base ? 1 : 0);
+  const suffix = [
+    failures.length ? `${failures.length} file lỗi` : "",
+    duplicates.length ? `${duplicates.length} file trùng bị bỏ qua` : ""
+  ].filter(Boolean).map(text => `, ${text}`).join("");
+  if (!metroActivated) setStatus(`Đã thêm ${added} lớp dữ liệu${suffix}.`, true);
+  if (failures.length) showToast(`Không đọc được: ${failures.map(item => item.file.name).join(", ")}`);
+  else if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
+}
+
+function uploadFileKey(file) {
+  return JSON.stringify([
+    file?.name || "",
+    Number.isFinite(file?.size) ? file.size : null,
+    Number.isFinite(file?.lastModified) ? file.lastModified : null,
+    file?.type || ""
+  ]);
+}
+
 function bindFileDropZone() {
   const input = $("spatial-file");
   const dropZone = document.querySelector(".drop-zone");
   let dragDepth = 0;
 
-  input.addEventListener("change", event => processSpatialFile(event.target.files?.[0]));
+  input.addEventListener("change", event => {
+    const files = [...event.target.files];
+    event.target.value = "";
+    processSpatialFiles(files);
+  });
 
   dropZone.addEventListener("dragenter", event => {
     event.preventDefault();
@@ -1113,8 +1463,7 @@ function bindFileDropZone() {
       showToast("Không tìm thấy file để tải lên.");
       return;
     }
-    if (files.length > 1) showToast("Chỉ có thể tải một file mỗi lần; đang đọc file đầu tiên.");
-    processSpatialFile(files[0]);
+    processSpatialFiles(files);
   });
 }
 
@@ -1135,6 +1484,10 @@ function bindUI() {
   document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => { document.querySelectorAll(".tab,.tab-panel").forEach(x => x.classList.remove("active")); tab.classList.add("active"); document.querySelector(`[data-panel="${tab.dataset.tab}"]`).classList.add("active"); }));
   $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; if (selectChartOption(button.dataset.type)) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; updateModelSections(); applyStyle(); setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true); });
   bindFileDropZone();
+  $("uploaded-layer-list").addEventListener("click", event => {
+    const button = event.target.closest(".remove-uploaded-layer");
+    if (button?.dataset.uploadId) removeUploadedFile(button.dataset.uploadId);
+  });
   $("province-filter-toggle").addEventListener("click", () => {
     const menu = $("province-filter-menu"); const open = menu.hidden; menu.hidden = !open; $("province-filter-toggle").setAttribute("aria-expanded", String(open));
   });
@@ -1145,7 +1498,7 @@ function bindUI() {
     map.getSource("vietnam-boundary")?.setData(state.boundary); $("file-note").textContent = names.length ? `Đang lọc: ${names.map(formatProvinceName).join(", ")}` : "Dữ liệu đã tải · đang sử dụng";
     map.getSource("polygon-data")?.setData(state.boundary);
     $("province-filter-menu").hidden = true; toggle.setAttribute("aria-expanded", "false"); toggle.disabled = true;
-    try { await rebuildGrid({ fit: true }); } finally { toggle.disabled = false; }
+    try { await rebuildGrid({ fit: true }); refreshClippedUploadLayers(); } finally { toggle.disabled = false; }
   });
   document.addEventListener("click", event => { if (!event.target.closest("#province-filter")) { $("province-filter-menu").hidden = true; $("province-filter-toggle").setAttribute("aria-expanded", "false"); } });
   $("apply-coordinates").addEventListener("click", async () => { try { const raw = $("coordinate-input").value.trim(); let data; if (raw.startsWith("{")) data = JSON.parse(raw); else { const ring = raw.split(/\n/).map(line => line.split(",").map(Number)); if (ring.length < 3 || ring.some(p => p.length < 2 || p.some(Number.isNaN))) throw new Error("Cần ít nhất 3 dòng lng,lat."); ring.push(ring[0]); data = { type: "Polygon", coordinates: [ring] }; } await replaceBoundary(data, "Tọa độ nhập trực tiếp"); } catch (error) { showToast(error.message); } });
