@@ -32,6 +32,12 @@ import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
+const MAP_STYLES = Object.freeze({
+  liberty: "https://tiles.openfreemap.org/styles/liberty",
+  bright: "https://tiles.openfreemap.org/styles/bright",
+  dark: "https://tiles.openfreemap.org/styles/dark"
+});
+const MAP_STYLE_LABELS = Object.freeze({ liberty: "Liberty", bright: "Sáng", dark: "Tối" });
 const SUPPORTED_VIEW_TYPES = Object.freeze([
   { label: "Point", icon: "point", kind: "map" },
   { label: "Circle", icon: "circle", kind: "map" },
@@ -57,10 +63,15 @@ const state = {
   dataOrigin: null,
   uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0,
   metroParts: {}, separateMetroActive: false,
-  aiDataset: null
+  aiDataset: null,
+  mapStyle: "dark"
 };
 let map; let toastTimer; let cellPopup; let layerOrderTimer;
 let layerOrderRevision = 0;
+let mapLayerEventsBound = false;
+let mapReady = false;
+let pendingMapStyle = null;
+let mapStyleLoadTimer = null;
 const weatherCache = new Map();
 const MAX_WEATHER_SAMPLES = 50;
 let weatherLoadRevision = 0;
@@ -428,6 +439,9 @@ function addMapLayers() {
   map.addSource("metro-station-data", { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
   map.addLayer({ id: "metro-stations", type: "circle", source: "metro-station-data", paint: { "circle-radius": 4, "circle-color": "#c52e64", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 } });
   map.addLayer({ id: "metro-station-labels", type: "symbol", source: "metro-station-data", layout: { "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"], "text-size": 12, "text-offset": [0, 1.4], "text-anchor": "top" }, paint: { "text-color": "#ffffff", "text-halo-color": "#151a23", "text-halo-width": 2 } });
+  applyMapLayerVisibility();
+  if (mapLayerEventsBound) return;
+  mapLayerEventsBound = true;
   map.on("click", "polygon-fill", event => {
     if (state.metroData) showMetroComparison(event);
     else if (state.aiDataset) showAiPolygonDetails(event);
@@ -441,7 +455,6 @@ function addMapLayers() {
     map.on("mouseenter", id, () => { if (state.metroData || state.aiDataset) map.getCanvas().style.cursor = "pointer"; });
     map.on("mouseleave", id, () => map.getCanvas().style.cursor = "");
   }
-  applyMapLayerVisibility();
   map.on("click", "h3-fill", event => {
     const p = event.features?.[0]?.properties; if (!p) return;
     const feature = state.h3Data.features.find(cell => cell.properties.h3 === p.h3) || event.features[0];
@@ -481,6 +494,34 @@ function addMapLayers() {
     new maplibregl.Popup({ offset: 7 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
   });
   map.on("mouseenter", "point-marker", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "point-marker", () => map.getCanvas().style.cursor = "");
+}
+
+function addUploadedLayerToMap(layer) {
+  const kinds = geometryKinds(layer.data);
+  map.addSource(layer.sourceId, { type: "geojson", data: layer.data });
+  layer.layerIds = [];
+  if (kinds.includes("area")) {
+    const fillId = `${layer.id}-fill`; const borderId = `${layer.id}-border`;
+    map.addLayer({ id: fillId, type: "fill", source: layer.sourceId, paint: { "fill-color": layer.role === "hexagon" ? "#00e65c" : "#8b5cf6", "fill-opacity": layer.role === "hexagon" ? .62 : .3 } });
+    map.addLayer({ id: borderId, type: "line", source: layer.sourceId, paint: { "line-color": layer.role === "hexagon" ? "#032b17" : "#c4b5fd", "line-width": layer.role === "hexagon" ? .55 : 1.5 } });
+    layer.layerIds.push(fillId, borderId);
+  }
+  if (kinds.includes("line")) {
+    const lineId = `${layer.id}-line`;
+    map.addLayer({ id: lineId, type: "line", source: layer.sourceId, paint: { "line-color": "#f43f5e", "line-width": 3 } });
+    layer.layerIds.push(lineId);
+  }
+  if (kinds.includes("point")) {
+    const pointId = `${layer.id}-point`;
+    map.addLayer({ id: pointId, type: "circle", source: layer.sourceId, paint: { "circle-radius": 5, "circle-color": "#f43f5e", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 } });
+    layer.layerIds.push(pointId);
+  }
+}
+
+function restoreUploadedLayers() {
+  for (const layer of state.uploadLayers) addUploadedLayerToMap(layer);
+  applyMapLayerVisibility();
+  scheduleUploadLayerOrder();
 }
 
 function pointFeatureCollection(data) {
@@ -601,26 +642,7 @@ function addUploadedGeoJSONLayer(data, name, { forceRole = null, id: requestedId
   const layer = { id, name, role, sourceId, layerIds: [], originalData: data, data, featureCount: featureCount(data) };
   layer.data = uploadLayerData(layer);
   layer.featureCount = featureCount(layer.data);
-  map.addSource(sourceId, { type: "geojson", data: layer.data });
-  const hasArea = kinds.includes("area");
-  const hasLine = kinds.includes("line");
-  const hasPoint = kinds.includes("point");
-  if (hasArea) {
-    const fillId = `${id}-fill`; const borderId = `${id}-border`;
-    map.addLayer({ id: fillId, type: "fill", source: sourceId, paint: { "fill-color": role === "hexagon" ? "#00e65c" : "#8b5cf6", "fill-opacity": role === "hexagon" ? .62 : .3 } });
-    map.addLayer({ id: borderId, type: "line", source: sourceId, paint: { "line-color": role === "hexagon" ? "#032b17" : "#c4b5fd", "line-width": role === "hexagon" ? .55 : 1.5 } });
-    layer.layerIds.push(fillId, borderId);
-  }
-  if (hasLine) {
-    const lineId = `${id}-line`;
-    map.addLayer({ id: lineId, type: "line", source: sourceId, paint: { "line-color": "#f43f5e", "line-width": 3 } });
-    layer.layerIds.push(lineId);
-  }
-  if (hasPoint) {
-    const pointId = `${id}-point`;
-    map.addLayer({ id: pointId, type: "circle", source: sourceId, paint: { "circle-radius": 5, "circle-color": "#f43f5e", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 } });
-    layer.layerIds.push(pointId);
-  }
+  addUploadedLayerToMap(layer);
   state.uploadLayers.push(layer);
   if (register) {
     state.uploadedFiles.push({
@@ -639,6 +661,44 @@ function addUploadedGeoJSONLayer(data, name, { forceRole = null, id: requestedId
   scheduleUploadLayerOrder();
   if (!hasPolygonMask()) fitGeoJSON(layer.data);
   return layer;
+}
+
+function syncMapStyleControls(loading = false) {
+  const selectedStyle = pendingMapStyle || state.mapStyle;
+  document.querySelectorAll(".basemap-option").forEach(button => {
+    const active = button.dataset.mapStyle === selectedStyle;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.disabled = loading;
+  });
+  $("basemap-selection").replaceChildren(
+    loading ? "Đang chuyển nền: " : "Minh họa lựa chọn nền: ",
+    Object.assign(document.createElement("b"), { textContent: MAP_STYLE_LABELS[selectedStyle] })
+  );
+}
+
+function selectMapStyle(styleKey) {
+  if (!MAP_STYLES[styleKey] || styleKey === state.mapStyle || pendingMapStyle || !map) return;
+  pendingMapStyle = styleKey;
+  cellPopup?.remove();
+  syncMapStyleControls(true);
+  setStatus(`Đang chuyển sang nền ${MAP_STYLE_LABELS[styleKey]}…`);
+  clearTimeout(mapStyleLoadTimer);
+  mapStyleLoadTimer = setTimeout(() => {
+    if (pendingMapStyle !== styleKey) return;
+    pendingMapStyle = null;
+    syncMapStyleControls(false);
+    setStatus(`Không thể tải nền ${MAP_STYLE_LABELS[styleKey]}. Vui lòng thử lại.`, true);
+  }, 15000);
+  try {
+    map.setStyle(MAP_STYLES[styleKey], { diff: false });
+  } catch (error) {
+    clearTimeout(mapStyleLoadTimer);
+    pendingMapStyle = null;
+    syncMapStyleControls(false);
+    console.error("Không thể đổi nền bản đồ:", error);
+    setStatus(`Không thể tải nền ${MAP_STYLE_LABELS[styleKey]}.`, true);
+  }
 }
 
 function clearMetroData() {
@@ -1685,6 +1745,10 @@ function bindFileDropZone() {
 }
 
 function bindUI() {
+  $("basemap-options").addEventListener("click", event => {
+    const option = event.target.closest(".basemap-option");
+    if (option) selectMapStyle(option.dataset.mapStyle);
+  });
   $("ai-filter-controls").addEventListener("change", async event => {
     if (!event.target.matches(".ai-generated-filter")) return;
     const shouldFit = event.target.dataset.field === state.aiDataset?.recommendation.geometry.field;
@@ -1773,9 +1837,31 @@ function exportCSV() {
 
 async function init() {
   renderSupportedChartCatalog();
-  bindUI(); map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/dark", center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
+  bindUI(); syncMapStyleControls();
+  map = new maplibregl.Map({ container: "map", style: MAP_STYLES[state.mapStyle], center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
   createMapSearch({ map, apiKey: CONFIG.MAPTILER_API_KEY, onBoundariesChange: applySearchBoundaries });
-  map.once("style.load", () => { addMapLayers(); setupProvinceFilter(EMPTY_FEATURE_COLLECTION); updateDashboard(); });
+  map.on("style.load", () => {
+    const switchedStyle = pendingMapStyle;
+    if (switchedStyle) state.mapStyle = switchedStyle;
+    pendingMapStyle = null;
+    clearTimeout(mapStyleLoadTimer);
+    syncMapStyleControls(false);
+    try {
+      addMapLayers();
+      restoreUploadedLayers();
+      applyStyle();
+    } catch (error) {
+      console.error("Không thể phục hồi lớp dữ liệu sau khi đổi nền:", error);
+      setStatus("Nền đã đổi nhưng một số lớp dữ liệu chưa thể phục hồi.", true);
+    }
+    if (!mapReady) {
+      mapReady = true;
+      setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
+      updateDashboard();
+    } else if (switchedStyle) {
+      setStatus(`Đã chuyển sang nền ${MAP_STYLE_LABELS[state.mapStyle]}.`, true);
+    }
+  });
   map.on("error", event => console.warn("MapLibre:", event.error?.message || event.error));
 }
 init();

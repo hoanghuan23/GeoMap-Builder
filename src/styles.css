@@ -208,6 +208,181 @@ button {
     border-bottom: 1px solid var(--line)
 }
 
+.basemap-section {
+    padding-top: 15px;
+    padding-bottom: 13px
+}
+
+.basemap-heading {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 12px
+}
+
+.basemap-heading h2 {
+    margin: 0;
+    color: #101828;
+    font-size: 14px;
+    line-height: 1.25
+}
+
+.basemap-heading-icon {
+    width: 16px;
+    display: grid;
+    gap: 2px
+}
+
+.basemap-heading-icon i {
+    display: block;
+    height: 2px;
+    border-radius: 2px;
+    background: #596273
+}
+
+.basemap-heading-icon i:nth-child(2) {
+    width: 12px;
+    justify-self: center
+}
+
+.basemap-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px
+}
+
+.basemap-option {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: #667085;
+    font-size: 9px;
+    text-align: center
+}
+
+.basemap-option > span:last-child {
+    display: block;
+    margin-top: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap
+}
+
+.basemap-preview {
+    position: relative;
+    display: block;
+    height: 58px;
+    overflow: hidden;
+    border: 1px solid #d8dee7;
+    border-radius: 8px;
+    background-color: #e5e7eb;
+    box-shadow: inset 0 0 0 2px #ffffffb8;
+    transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease
+}
+
+.basemap-preview::before,
+.basemap-preview::after {
+    position: absolute;
+    content: "";
+    pointer-events: none
+}
+
+.basemap-preview::before {
+    width: 130%;
+    height: 12px;
+    top: 23px;
+    left: -12px;
+    border: 2px solid #ffffffd9;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 50%;
+    transform: rotate(-21deg)
+}
+
+.basemap-preview::after {
+    width: 10px;
+    height: 105%;
+    top: -5px;
+    left: 52%;
+    border: 2px solid #ffffffb8;
+    border-top: 0;
+    border-bottom: 0;
+    border-radius: 50%;
+    transform: rotate(23deg)
+}
+
+.basemap-preview-liberty {
+    background:
+        radial-gradient(circle at 26% 28%, #c8ddba 0 11%, transparent 12%),
+        radial-gradient(circle at 82% 73%, #bdd7ae 0 17%, transparent 18%),
+        linear-gradient(145deg, transparent 0 43%, #add7e7 44% 49%, transparent 50%),
+        #e8e2d6
+}
+
+.basemap-preview-bright {
+    background:
+        radial-gradient(circle at 16% 74%, #d6ead1 0 14%, transparent 15%),
+        radial-gradient(circle at 75% 22%, #d8ebd3 0 17%, transparent 18%),
+        linear-gradient(116deg, transparent 0 55%, #b9deef 56% 62%, transparent 63%),
+        #f6f3ea
+}
+
+.basemap-preview-dark {
+    background:
+        radial-gradient(circle at 76% 30%, #353d3f 0 19%, transparent 20%),
+        linear-gradient(25deg, transparent 0 29%, #3c4148 30% 31%, transparent 32% 100%),
+        linear-gradient(115deg, transparent 0 54%, #3b4148 55% 57%, transparent 58% 100%),
+        #25292f
+}
+
+.basemap-preview-dark::before,
+.basemap-preview-dark::after {
+    border-color: #575e66
+}
+
+.basemap-option:hover .basemap-preview {
+    transform: translateY(-1px);
+    border-color: #9abff5
+}
+
+.basemap-option:focus-visible .basemap-preview {
+    box-shadow: 0 0 0 3px #0b6ff02b
+}
+
+.basemap-option.active {
+    color: var(--blue);
+    font-weight: 600
+}
+
+.basemap-option.active .basemap-preview {
+    border: 2px solid var(--blue);
+    box-shadow: 0 0 0 2px #0b6ff021, inset 0 0 0 1px #fff
+}
+
+.basemap-option:disabled {
+    cursor: wait;
+    opacity: .68
+}
+
+.basemap-selection {
+    margin: 12px 0 0;
+    color: #7a8699;
+    font-size: 10px
+}
+
+.basemap-selection b {
+    color: #4b5b73;
+    font-weight: 500
+}
+
+@media (max-width: 1180px) {
+    .basemap-options {
+        grid-template-columns: repeat(2, minmax(0, 1fr))
+    }
+}
+
 .section-title {
     display: flex;
     align-items: flex-start;

@@ -18,6 +18,27 @@
   </header>
   <main class="workspace">
     <aside class="sidebar">
+      <section class="panel-section basemap-section" aria-labelledby="basemap-heading">
+        <div class="basemap-heading">
+          <span class="basemap-heading-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+          <h2 id="basemap-heading">Nền bản đồ</h2>
+        </div>
+        <div id="basemap-options" class="basemap-options" role="group" aria-label="Chọn nền bản đồ">
+          <button class="basemap-option" type="button" data-map-style="liberty" aria-pressed="false">
+            <span class="basemap-preview basemap-preview-liberty" aria-hidden="true"></span>
+            <span>Liberty</span>
+          </button>
+          <button class="basemap-option" type="button" data-map-style="bright" aria-pressed="false">
+            <span class="basemap-preview basemap-preview-bright" aria-hidden="true"></span>
+            <span>Sáng</span>
+          </button>
+          <button class="basemap-option active" type="button" data-map-style="dark" aria-pressed="true">
+            <span class="basemap-preview basemap-preview-dark" aria-hidden="true"></span>
+            <span>Tối</span>
+          </button>
+        </div>
+        <p id="basemap-selection" class="basemap-selection" aria-live="polite">Minh họa lựa chọn nền: <b>Tối</b></p>
+      </section>
       <section class="panel-section">
         <div class="section-title"><span class="step">1</span><div><h2>Cung cấp dữ liệu</h2><p>Tải lên hoặc nhập vùng cần phân tích</p></div></div>
         <div class="tabs"><button class="tab active" data-tab="upload">Upload file</button><button class="tab" data-tab="draw">Vẽ trên bản đồ</button><button class="tab" data-tab="coordinates">Nhập tọa độ</button></div>
