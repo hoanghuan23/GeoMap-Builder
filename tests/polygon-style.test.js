@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { polygonColorField, polygonFillExpression } from "../src/renderers/polygon-style.js";
+import { polygonColorField, polygonFillExpression, polygonLegendScale } from "../src/renderers/polygon-style.js";
 
 const numericData = {
   type: "FeatureCollection",
@@ -32,4 +32,15 @@ test("giữ màu cố định khi chưa chọn dải màu", () => {
 test("không lỗi khi hồ sơ dữ liệu đang là null", () => {
   assert.equal(polygonColorField(null, null), null);
   assert.equal(polygonFillExpression(null, null, "blue", "#6c5ce7"), "#6c5ce7");
+});
+
+test("thang chú giải dùng cùng miền giá trị và dải màu với polygon", () => {
+  const profile = { numericFields: ["value"], textFields: ["province"] };
+  assert.deepEqual(polygonLegendScale(numericData, profile, "diverging"), {
+    field: "value",
+    colors: ["#313695", "#74add1", "#ffffbf", "#f46d43", "#a50026"],
+    values: [10, 15, 20, 25, 30],
+    gradient: "linear-gradient(90deg, #313695, #74add1, #ffffbf, #f46d43, #a50026)"
+  });
+  assert.equal(polygonLegendScale(numericData, profile, null), null);
 });

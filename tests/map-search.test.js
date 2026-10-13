@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, gadmLevelForFeature, getMapTilerFeature, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, renderSearchBoundary, searchGadmBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
+import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, gadmLevelForFeature, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchGadmBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
 
 test("buildGeocodingUrl limits administrative autocomplete to Vietnam", () => {
   const url = new URL(buildGeocodingUrl("Hưng Yên", "test-key", { lng: 105.85, lat: 20.65 }));
@@ -20,6 +20,51 @@ test("searchMapTiler returns GeoJSON suggestions", async () => {
     fetchImpl: async () => ({ ok: true, json: async () => ({ type: "FeatureCollection", features: expected }) })
   });
   assert.deepEqual(features, expected);
+});
+
+test("province lookup requests exact MapTiler region data without GADM", async () => {
+  const url = new URL(buildProvinceGeocodingUrl("Phú Thọ", "test-key"));
+  assert.equal(url.searchParams.get("types"), "region");
+  assert.equal(url.searchParams.get("autocomplete"), "false");
+  assert.match(decodeURIComponent(url.pathname), /Phú Thọ, Việt Nam/);
+
+  const suggestion = { id: "region.2025", text: "Phú Thọ", place_name: "Phú Thọ, Việt Nam", place_type: ["region"], geometry: { type: "Point", coordinates: [105, 21] } };
+  const polygon = { id: "region.2025", geometry: { type: "Polygon", coordinates: [[[104, 20], [106, 20], [104, 20]]] }, properties: {} };
+  const requested = [];
+  const result = await getMapTilerProvinceBoundary("Phú Thọ", {
+    apiKey: "key",
+    fetchImpl: async rawUrl => {
+      const requestedUrl = new URL(rawUrl); requested.push(requestedUrl);
+      return requestedUrl.pathname.endsWith("/region.2025.json")
+        ? { ok: true, json: async () => ({ features: [polygon] }) }
+        : { ok: true, json: async () => ({ features: [suggestion] }) };
+    }
+  });
+  assert.equal(requested.length, 2);
+  assert.equal(result.geometry.type, "Polygon");
+  assert.equal(result.properties.__data_location, "Phú Thọ");
+  assert.equal(result.properties.boundary_source, "MapTiler");
+});
+
+test("administrative boundary URL follows the AI-selected place type", () => {
+  const url = new URL(buildAdministrativeGeocodingUrl("Ba Đình", "key", "county"));
+  assert.equal(url.searchParams.get("types"), "county");
+  assert.equal(url.searchParams.get("autocomplete"), "false");
+});
+
+test("bulk province loader preserves input order", async () => {
+  const names = ["Hà Nội", "Hải Phòng"];
+  const result = await loadMapTilerProvinceBoundaries(names, {
+    apiKey: "key",
+    concurrency: 2,
+    fetchImpl: async rawUrl => {
+      const path = decodeURIComponent(new URL(rawUrl).pathname);
+      const name = path.includes("Hà Nội") ? "Hà Nội" : path.includes("Hải Phòng") ? "Hải Phòng" : "";
+      if (name) return { ok: true, json: async () => ({ features: [{ id: `region.${name}`, text: name, place_name: `${name}, Việt Nam`, place_type: ["region"], geometry: { type: "Polygon", coordinates: [] } }] }) };
+      throw new Error(`Unexpected URL: ${path}`);
+    }
+  });
+  assert.deepEqual(result.features.map(feature => feature.properties.__data_location), names);
 });
 
 test("boundary suggestions inspect detail geometry and keep only polygons in search order", async () => {

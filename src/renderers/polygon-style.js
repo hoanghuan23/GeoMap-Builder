@@ -48,3 +48,17 @@ export function polygonFillExpression(data, profile, rampName, fallbackColor) {
   const matches = colorField.values.flatMap((value, index) => [value, colors[index % colors.length]]);
   return ["match", ["get", colorField.field], ...matches, fallbackColor];
 }
+
+export function polygonLegendScale(data, profile, rampName) {
+  const colors = POLYGON_COLOR_RAMPS[rampName];
+  const colorField = colors && polygonColorField(data, profile);
+  if (!colors || colorField?.type !== "number") return null;
+  const min = Math.min(...colorField.values);
+  const max = Math.max(...colorField.values);
+  return {
+    field: colorField.field,
+    colors,
+    values: colors.map((_, index) => min + (max - min) * index / (colors.length - 1)),
+    gradient: `linear-gradient(90deg, ${colors.join(", ")})`
+  };
+}
