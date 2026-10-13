@@ -24,6 +24,28 @@ test("lọc ngày và gắn dữ liệu lên đúng polygon MapTiler", () => {
   assert.deepEqual(result.features[0].geometry, boundaries.features[0].geometry);
 });
 
+test("lọc được nhiều tỉnh cùng lúc và mảng rỗng nghĩa là tất cả", () => {
+  const records = [
+    { province: "Hà Nội", date: "2026-09-01", temperature: 29 },
+    { province: "Hải Phòng", date: "2026-09-01", temperature: 28 },
+    { province: "An Giang", date: "2026-09-01", temperature: 30 }
+  ];
+  const boundaries = {
+    type: "FeatureCollection",
+    features: [boundary("Hà Nội", 0), boundary("Hải Phòng", 1), boundary("An Giang", 2)]
+  };
+  const recommendation = { geometry: { field: "province" }, metricField: "temperature" };
+  const selected = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, {
+    filters: { province: ["Hà Nội", "An Giang"] }
+  });
+  assert.deepEqual(selected.features.map(feature => feature.properties.__location), ["Hà Nội", "An Giang"]);
+
+  const all = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, {
+    filters: { province: [] }
+  });
+  assert.equal(all.features.length, 3);
+});
+
 test("không tự ghép hoặc tự tạo polygon khi MapTiler thiếu địa phương", () => {
   const recommendation = { geometry: { field: "province" }, metricField: "value" };
   const result = joinRecordsToMapTilerBoundaries(

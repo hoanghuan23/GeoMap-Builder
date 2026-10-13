@@ -11,6 +11,12 @@ function comparableValue(value) {
   return value instanceof Date ? value.toISOString() : String(value ?? "");
 }
 
+function matchesFilter(value, selectedValue) {
+  const comparable = comparableValue(value);
+  if (Array.isArray(selectedValue)) return !selectedValue.length || selectedValue.includes(comparable);
+  return !selectedValue || comparable === selectedValue;
+}
+
 export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters = {} } = {}) {
   const { metricField } = recommendation;
   const locationField = recommendation.geometry.field;
@@ -19,7 +25,7 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
     feature
   ]));
   const selected = records.filter(record => Object.entries(filters).every(([field, selectedValue]) =>
-    !selectedValue || comparableValue(record[field]) === selectedValue
+    matchesFilter(record[field], selectedValue)
   ));
   const features = selected.flatMap(record => {
     const locationName = String(record[locationField] ?? "").trim();

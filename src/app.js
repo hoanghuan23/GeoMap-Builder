@@ -21,7 +21,7 @@ import { renderChartIcon } from "./charts/chart-icons.js";
 import { renderMapIcon } from "./renderers/map-icons.js";
 import { PolygonRenderer } from "./renderers/polygon-renderer.js";
 import { polygonColorField, polygonFillExpression, polygonLegendScale } from "./renderers/polygon-style.js";
-import { createMapSearch, loadMapTilerAdministrativeBoundaries } from "./map-search.js";
+import { createMapSearch, landOnlyBoundary, loadMapTilerAdministrativeBoundaries } from "./map-search.js";
 import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColors } from "./metro-data.js";
 import { fetchCurrentWeather, formatVisibility, readCachedWeather, WEATHER_CACHE_TTL_MS, windDirectionLabel, writeCachedWeather } from "./openweather.js";
 import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient } from "./renderers/weather-style.js";
@@ -1310,8 +1310,41 @@ function populateAiFilters(dataset) {
     if (values.length < 2) return [];
     const label = document.createElement("label");
     const caption = document.createElement("span");
-    const select = document.createElement("select");
     caption.textContent = filter.label || filter.field;
+    if (filter.field === recommendation.geometry.field) {
+      const multiselect = document.createElement("div");
+      const toggle = document.createElement("button");
+      const menu = document.createElement("div");
+      const toggleText = document.createElement("span");
+      const chevron = document.createElement("span");
+      multiselect.className = "ai-multiselect";
+      toggle.type = "button";
+      toggle.className = "ai-multiselect-toggle";
+      toggle.setAttribute("aria-expanded", "false");
+      toggleText.textContent = `Chọn ${caption.textContent.toLocaleLowerCase("vi")}`;
+      chevron.textContent = "⌄";
+      chevron.setAttribute("aria-hidden", "true");
+      toggle.append(toggleText, chevron);
+      menu.className = "ai-multiselect-menu";
+      menu.hidden = true;
+      menu.replaceChildren(...values.map(([value, raw]) => {
+        const option = document.createElement("label");
+        const input = document.createElement("input");
+        const text = document.createElement("span");
+        input.type = "checkbox";
+        input.className = "ai-generated-filter";
+        input.dataset.field = filter.field;
+        input.value = value;
+        text.textContent = displayFilterValue(raw, filter.control);
+        option.append(input, text);
+        return option;
+      }));
+      multiselect.append(toggle, menu);
+      initialFilters[filter.field] = [];
+      label.append(caption, multiselect);
+      return [label];
+    }
+    const select = document.createElement("select");
     select.className = "ai-generated-filter";
     select.dataset.field = filter.field;
     select.setAttribute("aria-label", `Lọc theo ${caption.textContent}`);
@@ -1331,8 +1364,14 @@ function populateAiFilters(dataset) {
 }
 
 function selectedAiFilters() {
-  return Object.fromEntries([...document.querySelectorAll("#ai-filter-controls .ai-generated-filter")]
-    .map(select => [select.dataset.field, select.value]));
+  const filters = {};
+  for (const control of document.querySelectorAll("#ai-filter-controls .ai-generated-filter")) {
+    if (control.type === "checkbox") {
+      if (!filters[control.dataset.field]) filters[control.dataset.field] = [];
+      if (control.checked) filters[control.dataset.field].push(control.value);
+    } else filters[control.dataset.field] = control.value;
+  }
+  return filters;
 }
 
 async function filteredAiBoundary({ fit = false } = {}) {
@@ -1358,11 +1397,18 @@ async function replaceAiMapData(records, recommendation, name) {
   const locations = uniqueRecordValues(records, recommendation.geometry.field).map(([, value]) => value);
   const geometryLabel = recommendation.filters.find(filter => filter.field === recommendation.geometry.field)?.label || recommendation.geometry.field;
   setStatus(`Đang tải ranh giới MapTiler cho ${locations.length} giá trị ${geometryLabel}…`);
-  const boundaries = await loadMapTilerAdministrativeBoundaries(locations, {
+  const mapTilerBoundaries = await loadMapTilerAdministrativeBoundaries(locations, {
     apiKey: CONFIG.MAPTILER_API_KEY,
     placeType: recommendation.geometry.placeType,
     onProgress: ({ completed, total }) => setStatus(`Đang tải ranh giới MapTiler… ${completed}/${total}`)
   });
+  setStatus("Đang chuẩn hóa ranh giới tỉnh/thành…");
+  const boundaries = {
+    ...mapTilerBoundaries,
+    features: await Promise.all(mapTilerBoundaries.features.map(async boundary =>
+      await landOnlyBoundary(boundary, { forceVietnam: true }) || boundary
+    ))
+  };
   const initialFilters = populateAiFilters({ records, recommendation });
   const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters: initialFilters });
   if (!data.features.length) throw new Error(`Không ghép được trường ${geometryLabel} với ranh giới hành chính.`);
@@ -1441,20 +1487,26 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   applyStyle();
 }
 
-function renderSearchPolygonType() {
+function renderSearchMapTypes() {
   const grid = $("map-type-grid");
-  const button = document.createElement("button");
-  const icon = document.createElement("span");
-  button.type = "button";
-  button.className = "map-type active";
-  button.dataset.type = "h3";
-  button.dataset.label = "Polygon";
-  button.title = "Polygon · H3";
-  renderMapIcon(icon, "polygon");
-  button.append(icon, "Polygon");
-  grid.replaceChildren(button);
+  const types = [
+    { id: "h3", label: "H3 Hexagon", icon: "hexagon", renderer: "H3" },
+    { id: "polygon", label: "Polygon", icon: "polygon", renderer: "MapLibre" }
+  ];
+  grid.replaceChildren(...types.map(type => {
+    const button = document.createElement("button");
+    const icon = document.createElement("span");
+    button.type = "button";
+    button.className = `map-type${type.id === state.mapType ? " active" : ""}`;
+    button.dataset.type = type.id;
+    button.dataset.label = type.label;
+    button.title = `${type.label} · ${type.renderer}`;
+    renderMapIcon(icon, type.icon);
+    button.append(icon, type.label);
+    return button;
+  }));
   grid.classList.remove("is-empty");
-  $("map-type-summary").textContent = "Khu vực tìm kiếm · Polygon theo lưới H3";
+  $("map-type-summary").textContent = "Khu vực tìm kiếm · H3 Hexagon hoặc Polygon theo ranh giới đã chọn";
   showSupportedChartCatalog(false);
 }
 
@@ -1487,9 +1539,11 @@ async function applySearchBoundaries(boundaries) {
   $("selected-file").hidden = true;
   map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
-  map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  // Keep the selected administrative boundaries available for Polygon mode.
+  // Layer visibility ensures they are only filled after the user chooses Polygon.
+  map.getSource("polygon-data")?.setData(state.boundary);
   map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
-  renderSearchPolygonType();
+  renderSearchMapTypes();
   updateModelSections();
   await rebuildGrid();
   refreshClippedUploadLayers();
@@ -1754,6 +1808,20 @@ function bindUI() {
     const shouldFit = event.target.dataset.field === state.aiDataset?.recommendation.geometry.field;
     await filteredAiBoundary({ fit: shouldFit });
   });
+  $("ai-filter-controls").addEventListener("click", event => {
+    const toggle = event.target.closest(".ai-multiselect-toggle");
+    if (!toggle) return;
+    const menu = toggle.nextElementSibling;
+    const open = menu.hidden;
+    document.querySelectorAll(".ai-multiselect-menu").forEach(item => { item.hidden = true; });
+    document.querySelectorAll(".ai-multiselect-toggle").forEach(item => item.setAttribute("aria-expanded", "false"));
+    menu.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+  });
+  $("clear-ai-data").addEventListener("click", () => {
+    deleteData();
+    setStatus("Đã xóa dữ liệu.", true);
+  });
   $("metro-departure").addEventListener("change", updateMetroTime);
   for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).addEventListener("change", applyMapLayerVisibility);
   $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
@@ -1801,7 +1869,13 @@ function bindUI() {
     $("province-filter-menu").hidden = true; toggle.setAttribute("aria-expanded", "false"); toggle.disabled = true;
     try { await rebuildGrid({ fit: true }); refreshClippedUploadLayers(); } finally { toggle.disabled = false; }
   });
-  document.addEventListener("click", event => { if (!event.target.closest("#province-filter")) { $("province-filter-menu").hidden = true; $("province-filter-toggle").setAttribute("aria-expanded", "false"); } });
+  document.addEventListener("click", event => {
+    if (!event.target.closest("#province-filter")) { $("province-filter-menu").hidden = true; $("province-filter-toggle").setAttribute("aria-expanded", "false"); }
+    if (!event.target.closest(".ai-multiselect")) {
+      document.querySelectorAll(".ai-multiselect-menu").forEach(menu => { menu.hidden = true; });
+      document.querySelectorAll(".ai-multiselect-toggle").forEach(toggle => toggle.setAttribute("aria-expanded", "false"));
+    }
+  });
   $("apply-coordinates").addEventListener("click", async () => { try { const raw = $("coordinate-input").value.trim(); let data; if (raw.startsWith("{")) data = JSON.parse(raw); else { const ring = raw.split(/\n/).map(line => line.split(",").map(Number)); if (ring.length < 3 || ring.some(p => p.length < 2 || p.some(Number.isNaN))) throw new Error("Cần ít nhất 3 dòng lng,lat."); ring.push(ring[0]); data = { type: "Polygon", coordinates: [ring] }; } await replaceBoundary(data, "Tọa độ nhập trực tiếp"); } catch (error) { showToast(error.message); } });
   for (const [toggleId, controlsId] of [["feature-toggle", "feature-controls"], ["style-toggle", "style-controls"]]) {
     $(toggleId).addEventListener("click", () => { const open = $(toggleId).getAttribute("aria-expanded") === "true"; $(toggleId).setAttribute("aria-expanded", String(!open)); $(controlsId).style.display = open ? "none" : ""; });
