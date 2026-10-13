@@ -13,6 +13,7 @@ const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", feat
 const SEARCH_BOUNDARY_SOURCE = "map-search-boundary";
 const SEARCH_BOUNDARY_LINE = "map-search-boundary-line";
 const vietnamLandPromises = new Map();
+const mapTilerBoundaryCache = new Map();
 
 function normalizePlaceName(value) {
   return String(value || "")
@@ -86,6 +87,99 @@ export async function searchMapTilerBoundaries(query, options) {
   const failed = details.filter(result => result.status === "rejected");
   if (failed.length && failed.length === details.length) throw failed[0].reason;
   return details.flatMap(result => result.status === "fulfilled" && result.value ? [result.value] : []);
+}
+
+export function buildAdministrativeGeocodingUrl(name, apiKey, placeType = "region") {
+  const url = new URL(`${MAPTILER_GEOCODING_URL}/${encodeURIComponent(`${name}, Việt Nam`)}.json`);
+  url.searchParams.set("key", apiKey);
+  url.searchParams.set("language", "vi");
+  url.searchParams.set("country", "vn");
+  url.searchParams.set("bbox", VIETNAM_BBOX);
+  url.searchParams.set("types", placeType);
+  url.searchParams.set("limit", "5");
+  url.searchParams.set("autocomplete", "false");
+  url.searchParams.set("fuzzyMatch", "true");
+  return url.toString();
+}
+
+export function buildProvinceGeocodingUrl(name, apiKey) {
+  return buildAdministrativeGeocodingUrl(name, apiKey, "region");
+}
+
+function normalizedAdministrativeName(value) {
+  return normalizePlaceName(value).replace(/^(tinh|thanhpho|tp)/, "");
+}
+
+function provinceCandidateScore(feature, name) {
+  const target = normalizedAdministrativeName(name);
+  const candidates = [feature?.text, feature?.place_name?.split(",")[0], feature?.properties?.name]
+    .filter(Boolean)
+    .map(normalizedAdministrativeName);
+  if (candidates.includes(target)) return 0;
+  if (candidates.some(candidate => candidate.startsWith(target) || target.startsWith(candidate))) return 1;
+  return 2;
+}
+
+export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeType = "region", signal, fetchImpl = fetch } = {}) {
+  if (!apiKey) throw new Error("MAPTILER_API_KEY_MISSING");
+  const cacheKey = `${placeType}:${normalizedAdministrativeName(name)}`;
+  if (fetchImpl === fetch && mapTilerBoundaryCache.has(cacheKey)) return mapTilerBoundaryCache.get(cacheKey);
+  const response = await fetchImpl(buildAdministrativeGeocodingUrl(name, apiKey, placeType), { signal });
+  if (!response.ok) {
+    const error = new Error(`MapTiler administrative lookup failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+  const data = await response.json();
+  const candidate = (data.features || [])
+    .filter(feature => feature?.id && (feature.place_type || []).includes(placeType))
+    .sort((a, b) => provinceCandidateScore(a, name) - provinceCandidateScore(b, name))[0];
+  if (!candidate || provinceCandidateScore(candidate, name) > 1) return null;
+  const detail = isBoundaryFeature(candidate)
+    ? candidate
+    : await getMapTilerFeature(candidate.id, { apiKey, signal, fetchImpl });
+  if (!isBoundaryFeature(detail)) return null;
+  const boundary = {
+    ...candidate,
+    ...detail,
+    properties: {
+      ...(candidate.properties || {}),
+      ...(detail.properties || {}),
+      __data_location: String(name),
+      __data_place_type: placeType,
+      boundary_source: "MapTiler"
+    }
+  };
+  if (fetchImpl === fetch) mapTilerBoundaryCache.set(cacheKey, boundary);
+  return boundary;
+}
+
+export async function getMapTilerProvinceBoundary(name, options = {}) {
+  return getMapTilerAdministrativeBoundary(name, { ...options, placeType: "region" });
+}
+
+export async function loadMapTilerAdministrativeBoundaries(names, { apiKey, placeType = "region", signal, fetchImpl = fetch, concurrency = 4, onProgress } = {}) {
+  const uniqueNames = [...new Set((names || []).map(name => String(name ?? "").trim()).filter(Boolean))];
+  const results = new Array(uniqueNames.length);
+  let cursor = 0;
+  let completed = 0;
+  const worker = async () => {
+    while (cursor < uniqueNames.length) {
+      if (signal?.aborted) throw new DOMException("Boundary loading aborted", "AbortError");
+      const index = cursor++;
+      results[index] = await getMapTilerAdministrativeBoundary(uniqueNames[index], { apiKey, placeType, signal, fetchImpl });
+      completed += 1;
+      onProgress?.({ completed, total: uniqueNames.length, name: uniqueNames[index] });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), uniqueNames.length) }, worker));
+  const missing = uniqueNames.filter((_, index) => !results[index]);
+  if (missing.length) throw new Error(`MapTiler không trả về polygon cho: ${missing.join(", ")}`);
+  return { type: "FeatureCollection", features: results };
+}
+
+export async function loadMapTilerProvinceBoundaries(names, options = {}) {
+  return loadMapTilerAdministrativeBoundaries(names, { ...options, placeType: "region" });
 }
 
 function asMultiPolygon(geometry) {

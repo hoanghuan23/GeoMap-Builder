@@ -34,7 +34,14 @@
           <div id="supported-chart-grid" class="supported-chart-grid" role="list" aria-label="Các kiểu bản đồ và biểu đồ được hỗ trợ"></div>
         </div>
       </section>
-      <input id="resolution" type="hidden" value="5"><output id="resolution-value" hidden>5</output>
+      <section id="resolution-section" class="panel-section" hidden>
+        <div class="section-title"><span class="step">3</span><div><h2>Điều chỉnh Resolution</h2><p>Chọn độ chi tiết cho lưới H3 Hexagon</p></div></div>
+        <div class="field range-field resolution-control">
+          <div class="field-label"><label for="resolution">H3 Resolution</label><output id="resolution-value">6</output></div>
+          <input id="resolution" type="range" min="3" max="8" step="1" value="6">
+          <div class="resolution-hints" aria-hidden="true"><span>Ít ô</span><span>Chi tiết hơn</span></div>
+        </div>
+      </section>
       <section id="chart-data-mapping-section" class="panel-section" hidden>
         <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p>Chọn thông tin để vẽ biểu đồ</p></div></div>
         <div id="data-mapping-controls"></div>
@@ -85,11 +92,12 @@
       <div class="map-panel"><div id="map"></div><div id="chart-canvas" class="chart-canvas" hidden></div><div id="status" class="status-pill" hidden></div>
         <div id="metro-legend" class="metro-legend" hidden aria-live="polite"></div>
         <div id="weather-legend" class="weather-legend" hidden aria-live="polite">
-          <strong>Nhiệt độ không khí (°C)</strong>
+          <strong id="weather-legend-title">Nhiệt độ không khí (°C)</strong>
           <div id="weather-legend-scale" class="weather-legend-scale"></div>
-          <div class="weather-legend-labels"><span>10</span><span>20</span><span>25</span><span>30</span><span>38</span></div>
+          <div id="weather-legend-labels" class="weather-legend-labels"><span>10</span><span>20</span><span>25</span><span>30</span><span>38</span></div>
           <small id="weather-legend-note"></small>
         </div>
+        <div class="map-query-panel">
         <div id="map-search" class="map-search">
           <form id="map-search-form" class="map-search-form" role="search">
             <span class="map-search-location" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/></svg></span>
@@ -103,6 +111,10 @@
             <button id="map-search-clear-all" class="map-search-clear-all" type="button">Xóa tất cả</button>
           </div>
           <div id="map-search-results" class="map-search-results" role="listbox" aria-label="Kết quả tìm kiếm" hidden></div>
+        </div>
+        <div id="ai-data-filters" class="ai-data-filters" hidden>
+          <div id="ai-filter-controls" class="ai-filter-controls"></div>
+        </div>
         </div>
         <div class="map-toolbar" id="map-toolbar"><button class="active" data-tool="select" title="Chọn">↖</button><button data-tool="pan" title="Di chuyển">✥</button><i></i><button data-tool="rectangle" title="Hình chữ nhật">▭</button><button data-tool="circle" title="Hình tròn">○</button><button data-tool="line" title="Đường">╱</button><button data-tool="polygon" title="Đa giác">⬠</button><button data-tool="delete" title="Xóa">⌫</button></div><div class="map-controls"><button id="zoom-in">+</button><button id="zoom-out">−</button><button id="fullscreen">⛶</button></div>
         <div class="right-cards"><article id="cell-stats-card" class="map-card stats-card" hidden><div class="card-heading"><div><span class="card-icon purple">⌁</span><b>Thống kê</b></div><button>•••</button></div><div class="stat-primary"><span id="cell-count">0</span><small id="cell-label">Tổng số cell (res 5)</small></div></article></div><div class="map-attribution">© OpenFreeMap · © OpenMapTiles · <a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">© MapTiler</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a> · GADM 4.1</div>

@@ -29,6 +29,27 @@ export function cellsToFeatureCollection(cells) {
   }) };
 }
 
+function geoJSONFeatures(data) {
+  if (!data) return [];
+  if (data.type === "FeatureCollection") return data.features || [];
+  if (data.type === "Feature") return [data];
+  return [{ type: "Feature", properties: {}, geometry: data }];
+}
+
+export function geoJSONToH3FeatureCollection(data, resolution) {
+  const propertiesByCell = new Map();
+  for (const feature of geoJSONFeatures(data)) {
+    for (const cell of geoJSONToCells(feature.geometry, resolution)) {
+      if (!propertiesByCell.has(cell)) propertiesByCell.set(cell, { ...(feature.properties || {}) });
+    }
+  }
+  const collection = cellsToFeatureCollection([...propertiesByCell.keys()]);
+  for (const feature of collection.features) {
+    Object.assign(feature.properties, propertiesByCell.get(feature.properties.h3));
+  }
+  return collection;
+}
+
 export function cellAtMaxResolution(cell, maxResolution = 5) {
   return getResolution(cell) > maxResolution ? cellToParent(cell, maxResolution) : cell;
 }

@@ -1,5 +1,5 @@
 import { CONFIG } from "./config.js";
-import { cellAtMaxResolution, geoJSONToCells, cellsToFeatureCollection, h3CellCenter, recordsToPointGeoJSON } from "./h3-utils.js";
+import { cellAtMaxResolution, geoJSONToCells, geoJSONToH3FeatureCollection, h3CellCenter, recordsToPointGeoJSON } from "./h3-utils.js";
 import { analyzeSpatialData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
 import { BarRenderer, analyzeBarData } from "./charts/bar-chart.js";
 import { createLineOption, LINE_COLORS, lineSeriesFromFields, LineRenderer } from "./charts/line-chart.js";
@@ -20,12 +20,14 @@ import { BAR_COLORS, dataForBarMapping, humanizeField, reconcileSeriesColors, se
 import { renderChartIcon } from "./charts/chart-icons.js";
 import { renderMapIcon } from "./renderers/map-icons.js";
 import { PolygonRenderer } from "./renderers/polygon-renderer.js";
-import { polygonColorField, polygonFillExpression } from "./renderers/polygon-style.js";
-import { createMapSearch } from "./map-search.js";
+import { polygonColorField, polygonFillExpression, polygonLegendScale } from "./renderers/polygon-style.js";
+import { createMapSearch, loadMapTilerAdministrativeBoundaries } from "./map-search.js";
 import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColors } from "./metro-data.js";
 import { fetchCurrentWeather, formatVisibility, readCachedWeather, WEATHER_CACHE_TTL_MS, windDirectionLabel, writeCachedWeather } from "./openweather.js";
 import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient } from "./renderers/weather-style.js";
 import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } from "./geojson-layers.js";
+import { comparableFilterValue, displayFilterValue, requestAiMapRecommendation } from "./ai-data-analysis.js";
+import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -53,7 +55,8 @@ const state = {
   metroData: null, metroTime: null, metroPopup: null, lineData: EMPTY_FEATURE_COLLECTION,
   dataOrigin: null,
   uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0,
-  metroParts: {}, separateMetroActive: false
+  metroParts: {}, separateMetroActive: false,
+  aiDataset: null
 };
 let map; let toastTimer; let cellPopup;
 const weatherCache = new Map();
@@ -282,18 +285,20 @@ function updateModelSections() {
   $("travel-palette").hidden = !state.metroData;
   $("weather-toggle-field").hidden = state.dataOrigin !== "search" || isChart;
   $("chart-data-mapping-section").hidden = !isChart;
+  $("resolution-section").hidden = !hasModel || isChart || state.mapType !== "h3";
   $("feature-section").hidden = !hasModel || isChart;
   $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon"].includes(state.mapType));
   $("cell-stats-card").hidden = !hasModel || isChart || state.mapType !== "h3";
   if (!isChart) {
     const isPolygon = state.mapType === "polygon";
     const isWeather = state.dataOrigin === "search" && state.mapType === "h3";
+    const isAiThematic = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
     $("style-description").textContent = isWeather ? "Bảng màu nhiệt độ, độ mờ và đường viền" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
-    $("polygon-color-ramp").hidden = !isPolygon && !isWeather;
+    $("polygon-color-ramp").hidden = !isPolygon && !isWeather && !isAiThematic;
     $("border-color-field").hidden = isPolygon && !state.metroData;
     $("show-border-field").hidden = false;
     $("line-width-field").hidden = false;
-    if (isPolygon || isWeather) syncPolygonPaletteControls();
+    if (isPolygon || isWeather || isAiThematic) syncPolygonPaletteControls();
   }
 }
 
@@ -303,7 +308,8 @@ function fillExpression() {
 
 function syncPolygonPaletteControls() {
   const isWeather = state.dataOrigin === "search" && state.mapType === "h3";
-  const colorField = isWeather ? { field: "temperature" } : state.metroData ? { field: "ratio" } : polygonColorField(state.boundary, state.dataProfile);
+  const thematicData = state.mapType === "h3" ? state.h3Data : state.boundary;
+  const colorField = isWeather ? { field: "temperature" } : state.metroData ? { field: "ratio" } : polygonColorField(thematicData, state.dataProfile);
   $("polygon-color-field").textContent = isWeather ? "Theo nhiệt độ (°C)" : state.metroData ? "Xe buýt / xe máy" : colorField ? `Theo ${humanizeField(colorField.field)}` : "Cần thuộc tính dữ liệu";
   document.querySelectorAll("#polygon-color-ramp .palette").forEach(button => {
     button.disabled = !colorField || (isWeather && button.dataset.palette === "travel");
@@ -314,12 +320,27 @@ function syncPolygonPaletteControls() {
 function renderWeatherLegend() {
   const legend = $("weather-legend");
   const isWeatherMap = state.dataOrigin === "search" && state.mapType === "h3";
-  const show = isWeatherMap && $("show-map-layers").checked && $("show-weather").checked;
+  const isAiMap = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
+  const show = $("show-map-layers").checked && ((isWeatherMap && $("show-weather").checked) || isAiMap);
   legend.hidden = !show;
   if (!show) return;
   const palette = TEMPERATURE_STOPS[state.polygonPalette] ? state.polygonPalette : "diverging";
-  $("weather-legend-scale").style.background = temperatureLegendGradient(palette);
-  $("weather-legend-note").textContent = `Dữ liệu OpenWeather · H3 res ${state.weatherResolution ?? state.resolution}`;
+  if (isWeatherMap) {
+    $("weather-legend-title").textContent = "Nhiệt độ không khí (°C)";
+    $("weather-legend-scale").style.background = temperatureLegendGradient(palette);
+    $("weather-legend-labels").replaceChildren(...TEMPERATURE_STOPS[palette].map(([value]) => Object.assign(document.createElement("span"), { textContent: String(value) })));
+    $("weather-legend-note").textContent = `Dữ liệu OpenWeather · H3 res ${state.weatherResolution ?? state.resolution}`;
+    return;
+  }
+  const data = state.mapType === "h3" ? state.h3Data : state.boundary;
+  const scale = polygonLegendScale(data, state.dataProfile, state.polygonPalette);
+  if (!scale) { legend.hidden = true; return; }
+  const metric = state.aiDataset.recommendation.metricField;
+  const hasTemperatureUnit = /nhi[eệ]t|temperature|temp/i.test(metric);
+  $("weather-legend-title").textContent = `${metric}${hasTemperatureUnit ? " (°C)" : ""}`;
+  $("weather-legend-scale").style.background = scale.gradient;
+  $("weather-legend-labels").replaceChildren(...scale.values.map(value => Object.assign(document.createElement("span"), { textContent: Number(value.toFixed(1)).toLocaleString("vi-VN") })));
+  $("weather-legend-note").textContent = state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon";
 }
 
 function applyStyle() {
@@ -331,6 +352,8 @@ function applyStyle() {
   if (map.getLayer("h3-fill")) {
     const weatherColor = state.dataOrigin === "search" && $("show-weather").checked
       ? temperatureFillExpression(state.polygonPalette, color)
+      : state.aiDataset
+      ? polygonFillExpression(state.h3Data, state.dataProfile, state.polygonPalette, color)
       : color;
     map.setPaintProperty("h3-fill", "fill-color", weatherColor);
     map.setPaintProperty("h3-fill", "fill-opacity", opacity);
@@ -403,20 +426,29 @@ function addMapLayers() {
   map.addSource("metro-station-data", { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
   map.addLayer({ id: "metro-stations", type: "circle", source: "metro-station-data", paint: { "circle-radius": 4, "circle-color": "#c52e64", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 } });
   map.addLayer({ id: "metro-station-labels", type: "symbol", source: "metro-station-data", layout: { "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"], "text-size": 12, "text-offset": [0, 1.4], "text-anchor": "top" }, paint: { "text-color": "#ffffff", "text-halo-color": "#151a23", "text-halo-width": 2 } });
-  map.on("click", "polygon-fill", showMetroComparison);
+  map.on("click", "polygon-fill", event => {
+    if (state.metroData) showMetroComparison(event);
+    else if (state.aiDataset) showAiPolygonDetails(event);
+  });
   map.on("click", "metro-stations", event => {
     const feature = event.features?.[0]; if (!feature) return;
     const label = document.createElement("strong"); label.textContent = feature.properties?.name || "Ga Metro";
     new maplibregl.Popup({ offset: 8 }).setLngLat(event.lngLat).setDOMContent(label).addTo(map);
   });
   for (const id of ["polygon-fill", "metro-stations"]) {
-    map.on("mouseenter", id, () => { if (state.metroData) map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseenter", id, () => { if (state.metroData || state.aiDataset) map.getCanvas().style.cursor = "pointer"; });
     map.on("mouseleave", id, () => map.getCanvas().style.cursor = "");
   }
   applyMapLayerVisibility();
   map.on("click", "h3-fill", event => {
     const p = event.features?.[0]?.properties; if (!p) return;
     const feature = state.h3Data.features.find(cell => cell.properties.h3 === p.h3) || event.features[0];
+    if (state.aiDataset) {
+      const popup = new maplibregl.Popup({ offset: 12, maxWidth: "360px", className: "ai-weather-popup" })
+        .setDOMContent(aiWeatherPopupContent(feature));
+      openCellPopup(popup, feature, "h3-fill");
+      return;
+    }
     if (state.dataOrigin !== "search" || !$("show-weather").checked) {
       openCellPopup(new maplibregl.Popup({ offset: 8 }).setHTML(`<div style="font:12px Inter;line-height:1.8"><b>H3:</b> ${p.h3}<br><b>Tâm ô:</b> ${fmt(Number(p.center_lat), 5)}, ${fmt(Number(p.center_lng), 5)}</div>`), feature, "h3-fill");
       return;
@@ -654,6 +686,33 @@ function showMetroComparison(event) {
   state.metroPopup = openCellPopup(new maplibregl.Popup({ anchor, offset, maxWidth: "380px", className: "metro-comparison-popup" }).setDOMContent(card), feature, "polygon-fill");
 }
 
+function aiWeatherPopupContent(feature) {
+  const { recommendation } = state.aiDataset;
+  const card = document.createElement("div");
+  card.className = "weather-popup";
+  const title = document.createElement("strong");
+  title.textContent = feature.properties?.[recommendation.geometry.field] || "Khu vực dữ liệu";
+  const list = document.createElement("dl");
+  const detailFields = [...new Set([...(recommendation.filters || []).map(filter => filter.field), ...recommendation.numericFields])];
+  for (const field of detailFields) {
+    if (feature.properties?.[field] == null || feature.properties[field] === "") continue;
+    const row = document.createElement("div");
+    const term = document.createElement("dt"); const value = document.createElement("dd");
+    const filter = recommendation.filters.find(item => item.field === field);
+    term.textContent = filter?.label || field; value.textContent = displayFilterValue(feature.properties[field], filter?.control);
+    row.append(term, value); list.append(row);
+  }
+  card.append(title, list);
+  return card;
+}
+
+function showAiPolygonDetails(event) {
+  const feature = event.features?.[0];
+  if (!feature || !state.aiDataset) return;
+  const card = aiWeatherPopupContent(feature);
+  new maplibregl.Popup({ offset: 12, maxWidth: "360px", className: "ai-weather-popup" }).setLngLat(event.lngLat).setDOMContent(card).addTo(map);
+}
+
 function updateMetroTime() {
   if (!state.metroData) return;
   state.metroPopup?.remove(); state.metroPopup = null;
@@ -704,21 +763,27 @@ async function rebuildGrid({ fit = false } = {}) {
   if (!state.boundary) { setStatus("Hãy upload dữ liệu không gian trước."); return; }
   const estimate = estimateCellCount(state.resolution);
   if (estimate > CONFIG.MAX_RENDER_CELLS) {
-    const previous = state.resolution; state.resolution = Math.min(7, CONFIG.DEFAULT_RESOLUTION + Math.floor(Math.log(CONFIG.MAX_RENDER_CELLS / state.baselineCount) / Math.log(7)));
+    const previous = state.resolution;
+    state.resolution = Math.max(3, Math.min(7, CONFIG.DEFAULT_RESOLUTION + Math.floor(Math.log(CONFIG.MAX_RENDER_CELLS / state.baselineCount) / Math.log(7))));
     $("resolution").value = state.resolution; $("resolution-value").value = state.resolution;
-    showToast(`Resolution ${previous} ước tính ${estimate.toLocaleString("vi-VN")} ô, vượt giới hạn an toàn.`); return;
+    showToast(`Resolution ${previous} ước tính ${estimate.toLocaleString("vi-VN")} ô, vượt giới hạn an toàn.`);
+    return rebuildGrid({ fit });
   }
   setStatus(`Đang tạo H3 resolution ${state.resolution}…`);
   await new Promise(resolve => setTimeout(resolve, 20));
   try {
-    const cells = geoJSONToCells(state.boundary, state.resolution);
-    if (!state.baselineCount && state.resolution === CONFIG.DEFAULT_RESOLUTION) state.baselineCount = cells.length;
-    state.h3Data = cellsToFeatureCollection(cells);
+    state.h3Data = geoJSONToH3FeatureCollection(state.boundary, state.resolution);
+    const cellCount = state.h3Data.features.length;
+    if (!state.baselineCount) {
+      state.baselineCount = Math.max(1, Math.round(cellCount / Math.pow(7, state.resolution - CONFIG.DEFAULT_RESOLUTION)));
+    }
     const source = map.getSource("h3-grid"); if (source) source.setData(state.h3Data);
-    $("cell-count").textContent = cells.length.toLocaleString("vi-VN"); $("cell-label").textContent = `Tổng số cell (res ${state.resolution})`;
+    $("cell-count").textContent = cellCount.toLocaleString("vi-VN"); $("cell-label").textContent = `Tổng số cell (res ${state.resolution})`;
     state.page = 1; updateDashboard();
     if (fit) fitBoundary();
-    setStatus(`Đã vẽ ${cells.length.toLocaleString("vi-VN")} ô H3.`, true);
+    syncPolygonPaletteControls();
+    applyStyle();
+    setStatus(`Đã vẽ ${cellCount.toLocaleString("vi-VN")} ô H3.`, true);
     if (state.dataOrigin === "search" && $("show-weather").checked) void loadWeatherForGrid();
   } catch (error) { console.error(error); setStatus("Không thể tạo lưới H3."); showToast(error.message || "Dữ liệu không hợp lệ."); }
 }
@@ -829,7 +894,8 @@ function clearUploadedData() {
   clearUploadLayers();
   state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
   state.pointData = { type: "FeatureCollection", features: [] };
-  state.mapType = null; state.dataProfile = null; state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; state.baselineCount = null; state.page = 1; state.dataOrigin = null;
+  state.mapType = null; state.dataProfile = null; state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; state.baselineCount = null; state.page = 1; state.dataOrigin = null; state.aiDataset = null;
+  $("ai-data-filters").hidden = true;
   updateModelSections();
   clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
   showChartStyleControls(false);
@@ -847,7 +913,7 @@ async function resetConfiguration() {
   state.resolution = CONFIG.DEFAULT_RESOLUTION;
   state.barStyle = mergeBarConfig();
   state.pieStyle = mergePieConfig();
-  state.polygonPalette = state.metroData ? "travel" : state.dataOrigin === "search" ? "diverging" : null;
+  state.polygonPalette = state.metroData ? "travel" : (state.dataOrigin === "search" || state.aiDataset) ? "diverging" : null;
 
   $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
   $("resolution-value").value = CONFIG.DEFAULT_RESOLUTION;
@@ -1035,6 +1101,12 @@ function showChartStyleControls(show) {
   }
 }
 
+function clearAiMapState() {
+  state.aiDataset = null;
+  $("ai-data-filters").hidden = true;
+  $("ai-filter-controls").replaceChildren();
+}
+
 function normalizeTravelTimeRecords(records) {
   if (!Array.isArray(records) || !records.length) return null;
   const requiredFields = ["cell_id", "departure_time", "bus_minutes", "motorbike_minutes"];
@@ -1074,6 +1146,8 @@ async function readSpatialFile(file) {
       const data = recordsToPointGeoJSON(records);
       return { data, profile: analyzeSpatialData(data) };
     } catch {
+      const recommendation = await requestAiMapRecommendation(records);
+      if (recommendation?.canRenderMap) return { kind: "ai-map", records, recommendation };
       return { kind: "chart", analysis: analyzeBarData(records) };
     }
   }
@@ -1088,6 +1162,8 @@ async function readSpatialFile(file) {
       const data = recordsToPointGeoJSON(records);
       return { data, profile: analyzeSpatialData(data) };
     } catch {
+      const recommendation = await requestAiMapRecommendation(records);
+      if (recommendation?.canRenderMap) return { kind: "ai-map", records, recommendation };
       return { kind: "chart", analysis: analyzeBarData(records) };
     }
   }
@@ -1108,9 +1184,101 @@ async function readSpatialFile(file) {
     try {
       const data = recordsToPointGeoJSON(records);
       return { data, profile: analyzeSpatialData(data) };
-    } catch { /* Không có tọa độ: tiếp tục phân tích như dữ liệu biểu đồ. */ }
+    } catch {
+      const recommendation = await requestAiMapRecommendation(records);
+      if (recommendation?.canRenderMap) return { kind: "ai-map", records, recommendation };
+    }
   }
   return { kind: "chart", analysis: analyzeBarData(parsed) };
+}
+
+function uniqueRecordValues(records, field) {
+  if (!field) return [];
+  const values = new Map();
+  for (const record of records) {
+    const value = record?.[field];
+    if (value == null || value === "") continue;
+    values.set(comparableFilterValue(value), value);
+  }
+  return [...values.entries()];
+}
+
+function populateAiFilters(dataset) {
+  const { records, recommendation } = dataset;
+  const controls = $("ai-filter-controls");
+  const initialFilters = {};
+  controls.replaceChildren(...recommendation.filters.flatMap(filter => {
+    const values = uniqueRecordValues(records, filter.field).sort((a, b) =>
+      filter.control === "date-select" ? a[0].localeCompare(b[0]) : String(a[1]).localeCompare(String(b[1]), "vi")
+    );
+    if (values.length < 2) return [];
+    const label = document.createElement("label");
+    const caption = document.createElement("span");
+    const select = document.createElement("select");
+    caption.textContent = filter.label || filter.field;
+    select.className = "ai-generated-filter";
+    select.dataset.field = filter.field;
+    select.setAttribute("aria-label", `Lọc theo ${caption.textContent}`);
+    const options = filter.allowAll ? [["", `Tất cả ${caption.textContent.toLocaleLowerCase("vi")}`], ...values] : values;
+    select.replaceChildren(...options.map(([value, raw]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value === "" ? raw : displayFilterValue(raw, filter.control);
+      return option;
+    }));
+    initialFilters[filter.field] = select.value;
+    label.append(caption, select);
+    return [label];
+  }));
+  $("ai-data-filters").hidden = controls.children.length === 0;
+  return initialFilters;
+}
+
+function selectedAiFilters() {
+  return Object.fromEntries([...document.querySelectorAll("#ai-filter-controls .ai-generated-filter")]
+    .map(select => [select.dataset.field, select.value]));
+}
+
+async function filteredAiBoundary({ fit = false } = {}) {
+  if (!state.aiDataset) return;
+  const { records, boundaries, recommendation } = state.aiDataset;
+  const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters: selectedAiFilters() });
+  state.boundary = data; state.sourceBoundary = data;
+  state.baselineCount = null;
+  const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)];
+  state.dataProfile = analyzeSpatialData(data, { numericFields });
+  map.getSource("polygon-data")?.setData(data);
+  map.getSource("vietnam-boundary")?.setData(data);
+  if (state.mapType === "h3") await rebuildGrid({ fit });
+  else {
+    syncPolygonPaletteControls(); applyStyle();
+    if (fit && data.features.length) fitBoundary();
+  }
+  $("file-note").textContent = `${data.features.length} khu vực · ${recommendation.metricField} · ${recommendation.source === "ai" ? "GPT-5.6 Luna đề xuất" : "quy tắc dự phòng"}`;
+}
+
+async function replaceAiMapData(records, recommendation, name) {
+  if (!CONFIG.MAPTILER_API_KEY) throw new Error("Cần cấu hình MAPTILER_API_KEY để tải ranh giới hành chính.");
+  const locations = uniqueRecordValues(records, recommendation.geometry.field).map(([, value]) => value);
+  const geometryLabel = recommendation.filters.find(filter => filter.field === recommendation.geometry.field)?.label || recommendation.geometry.field;
+  setStatus(`Đang tải ranh giới MapTiler cho ${locations.length} giá trị ${geometryLabel}…`);
+  const boundaries = await loadMapTilerAdministrativeBoundaries(locations, {
+    apiKey: CONFIG.MAPTILER_API_KEY,
+    placeType: recommendation.geometry.placeType,
+    onProgress: ({ completed, total }) => setStatus(`Đang tải ranh giới MapTiler… ${completed}/${total}`)
+  });
+  const initialFilters = populateAiFilters({ records, recommendation });
+  const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters: initialFilters });
+  if (!data.features.length) throw new Error(`Không ghép được trường ${geometryLabel} với ranh giới hành chính.`);
+  const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)];
+  const profile = analyzeSpatialData(data, { numericFields });
+  await replaceBoundary(data, name, profile, { preservePolygons: true, preserveAi: true });
+  state.aiDataset = { records, recommendation, boundaries };
+  state.dataOrigin = "ai"; state.mapType = "polygon"; state.polygonPalette = "diverging";
+  renderCompatibleMapTypes(data, profile);
+  await filteredAiBoundary();
+  $("map-type-summary").textContent = `${recommendation.explanation} · Độ tin cậy ${Math.round(recommendation.confidence * 100)}%`;
+  setStatus(`Đã tạo bản đồ ${recommendation.title}.`, true);
 }
 
 function selectChartOption(type) {
@@ -1128,6 +1296,7 @@ function selectChartOption(type) {
 }
 
 function replaceChartData(analysis, name) {
+  clearAiMapState();
   clearMetroData();
   state.dataOrigin = "upload";
   const primaryDataset = analysis.datasets.find(dataset => dataset.path === analysis.sourcePath) || analysis.datasets[0];
@@ -1151,8 +1320,9 @@ function replaceChartData(analysis, name) {
   const canvas = $("chart-canvas"); canvas.hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
   setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(options[0].id);
 }
-async function replaceBoundary(data, name, profile = null, { preservePolygons = false } = {}) {
+async function replaceBoundary(data, name, profile = null, { preservePolygons = false, preserveAi = false } = {}) {
   weatherLoadRevision += 1;
+  if (!preserveAi) clearAiMapState();
   clearMetroData();
   state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; clearDataMappingPanel($("data-mapping-controls")); clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
   showChartStyleControls(false);
@@ -1236,6 +1406,7 @@ async function processSpatialFile(file) {
     setStatus(`Đang đọc ${file.name}…`);
     const result = await readSpatialFile(file);
     if (result.kind === "metro") await replaceMetroData(result.data, file.name);
+    else if (result.kind === "ai-map") await replaceAiMapData(result.records, result.recommendation, file.name);
     else if (result.kind === "chart") replaceChartData(result.analysis, file.name);
     else await replaceBoundary(result.data, file.name, result.profile);
   } catch (error) {
@@ -1378,7 +1549,14 @@ async function processSpatialFiles(files) {
   }
   const spatial = valid.filter(item => !item.result.kind && item.result.data);
   const metroParts = valid.filter(item => item.result.kind === "metro-part");
+  const aiMaps = valid.filter(item => item.result.kind === "ai-map");
   const charts = valid.filter(item => item.result.kind === "chart");
+  if (!spatial.length && !metroParts.length && aiMaps.length) {
+    const item = aiMaps[0];
+    await replaceAiMapData(item.result.records, item.result.recommendation, item.file.name);
+    if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
+    return;
+  }
   if (!spatial.length && !metroParts.length && charts.length) {
     replaceChartData(charts[0].result.analysis, charts[0].file.name);
     if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
@@ -1469,11 +1647,16 @@ function bindFileDropZone() {
 }
 
 function bindUI() {
+  $("ai-filter-controls").addEventListener("change", async event => {
+    if (!event.target.matches(".ai-generated-filter")) return;
+    const shouldFit = event.target.dataset.field === state.aiDataset?.recommendation.geometry.field;
+    await filteredAiBoundary({ fit: shouldFit });
+  });
   $("metro-departure").addEventListener("change", updateMetroTime);
   for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).addEventListener("change", applyMapLayerVisibility);
   $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
   $("opacity").addEventListener("input", e => { $("opacity-value").value = `${Math.round(e.target.value * 100)}%`; applyStyle(); }); $("line-width").addEventListener("input", e => { $("line-width-value").value = `${e.target.value} px`; applyStyle(); });
-  for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); if (id === "fixed-color" && (state.mapType === "polygon" || state.dataOrigin === "search")) { state.polygonPalette = null; syncPolygonPaletteControls(); } applyStyle(); }); }
+  for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); if (id === "fixed-color" && (state.mapType === "polygon" || state.dataOrigin === "search" || state.aiDataset)) { state.polygonPalette = null; syncPolygonPaletteControls(); } applyStyle(); }); }
   $("polygon-color-ramp").addEventListener("click", event => {
     const button = event.target.closest(".palette");
     if (!button || button.disabled) return;
@@ -1483,7 +1666,18 @@ function bindUI() {
   });
   $("show-border").addEventListener("change", applyStyle);
   document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => { document.querySelectorAll(".tab,.tab-panel").forEach(x => x.classList.remove("active")); tab.classList.add("active"); document.querySelector(`[data-panel="${tab.dataset.tab}"]`).classList.add("active"); }));
-  $("map-type-grid").addEventListener("click", event => { const button = event.target.closest(".map-type"); if (!button) return; if (selectChartOption(button.dataset.type)) return; document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active")); button.classList.add("active"); state.mapType = button.dataset.type; updateModelSections(); applyStyle(); setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true); });
+  $("map-type-grid").addEventListener("click", async event => {
+    const button = event.target.closest(".map-type");
+    if (!button) return;
+    if (selectChartOption(button.dataset.type)) return;
+    document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active"));
+    button.classList.add("active");
+    state.mapType = button.dataset.type;
+    updateModelSections();
+    if (state.mapType === "h3" && state.boundary && !state.h3Data.features.length) await rebuildGrid();
+    else applyStyle();
+    setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true);
+  });
   bindFileDropZone();
   $("uploaded-layer-list").addEventListener("click", event => {
     const button = event.target.closest(".remove-uploaded-layer");
