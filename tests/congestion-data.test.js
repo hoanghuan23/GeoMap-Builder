@@ -10,6 +10,30 @@ test("chuẩn hóa tên đường tiếng Việt và nhận diện bảng ùn t�
   assert.equal(congestionLevel("ÙN TẮC"), "Ùn tắc");
 });
 
+test("nhận diện các tiêu đề mở rộng của bảng ùn tắc toàn tuyến", () => {
+  const records = normalizeCongestionRecords([{
+    "Tên đường": "Đường Ngọc Hồi",
+    "Mã đường": "QL.1",
+    "Thời điểm": "2026-10-13 17:30",
+    "Tốc độ trung bình (km/h)": 12,
+    "Tốc độ thông thoáng (km/h)": 60,
+    "Tỷ lệ tốc độ": 0.2,
+    "Mức độ ùn tắc": "Ùn tắc",
+    "Lưu lượng xe": 850
+  }]);
+
+  assert.deepEqual(records, [{
+    roadName: "Đường Ngọc Hồi",
+    routeRef: "QL.1",
+    timestamp: "2026-10-13 17:30",
+    speed: 12,
+    freeFlowSpeed: 60,
+    ratio: 0.2,
+    level: "Ùn tắc",
+    volume: 850
+  }]);
+});
+
 test("ghép theo tên trước và chỉ dùng mã tuyến khi tên không khớp", () => {
   const road = (name, ref, id) => ({ type: "Feature", properties: { name, ref, id }, geometry: { type: "LineString", coordinates: [[105, 21], [106, 21]] } });
   const roads = { type: "FeatureCollection", features: [road("Đường Ngọc Hồi", "QL.1", 1), road("Quốc lộ 1", "QL.1", 2), road("Tên mới", "ĐT.428", 3)] };

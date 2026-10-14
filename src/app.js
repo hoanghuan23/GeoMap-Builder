@@ -30,6 +30,7 @@ import { comparableFilterValue, displayFilterValue, requestAiMapRecommendation }
 import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
 import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
 import { CONGESTION_COLORS, congestionAtTime, congestionLineColorExpression, joinCongestionToRoads, normalizeCongestionRecords } from "./congestion-data.js";
+import { TRANSPORT_KIND_LABELS, transportClasses, transportClassStyle, transportColorExpression, transportGeometryKind } from "./transport-style.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -66,11 +67,12 @@ const state = {
   uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0,
   metroParts: {}, separateMetroActive: false,
   aiDataset: null,
-  mapStyle: "dark"
+  mapStyle: "liberty"
 };
 let map; let toastTimer; let cellPopup; let layerOrderTimer;
 let layerOrderRevision = 0;
 let mapLayerEventsBound = false;
+const uploadedPointerLayerIds = new Set();
 let mapReady = false;
 let pendingMapStyle = null;
 let mapStyleLoadTimer = null;
@@ -417,6 +419,7 @@ function applyMapLayerVisibility() {
   }
   $("metro-legend").hidden = !state.metroData || !showPolygon;
   $("congestion-legend").hidden = !state.congestionData || !showLayers;
+  renderTransportLegend();
   if (!showPolygon) { state.metroPopup?.remove(); state.metroPopup = null; }
   if (!showH3 && !showPolygon) cellPopup?.remove();
   renderWeatherLegend();
@@ -512,28 +515,106 @@ function addMapLayers() {
   });
   map.on("mouseenter", "data-lines", () => { if (state.congestionData) map.getCanvas().style.cursor = "pointer"; });
   map.on("mouseleave", "data-lines", () => { if (state.congestionData) map.getCanvas().style.cursor = ""; });
+  map.on("click", event => {
+    const layerIds = state.uploadLayers.flatMap(layer => layer.layerIds || []).filter(id => map.getLayer(id));
+    if (!layerIds.length) return;
+    const rendered = map.queryRenderedFeatures(event.point, { layers: layerIds });
+    const feature = rendered[0];
+    if (!feature) return;
+    const uploadLayer = state.uploadLayers.find(layer => layer.layerIds?.includes(feature.layer?.id));
+    showUploadedFeaturePopup(feature, uploadLayer, event.lngLat);
+  });
+}
+
+function bindUploadedLayerPointer(layerId) {
+  if (uploadedPointerLayerIds.has(layerId)) return;
+  uploadedPointerLayerIds.add(layerId);
+  map.on("mouseenter", layerId, () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", layerId, () => { map.getCanvas().style.cursor = ""; });
+}
+
+function showUploadedFeaturePopup(feature, uploadLayer, lngLat) {
+  const properties = feature.properties || {};
+  const card = document.createElement("div");
+  card.className = "transport-popup";
+  const title = document.createElement("strong");
+  title.textContent = properties.name || transportClassStyle(properties.fclass, uploadLayer?.transportKind).label || "Đối tượng giao thông";
+  const type = document.createElement("small");
+  type.textContent = uploadLayer?.transportKind
+    ? `${TRANSPORT_KIND_LABELS[uploadLayer.transportKind]} · ${transportClassStyle(properties.fclass, uploadLayer.transportKind).label}`
+    : uploadLayer?.name || "Lớp dữ liệu tải lên";
+  card.append(title, type);
+  const details = [
+    ["Phân loại", properties.fclass],
+    ["Mã OSM", properties.osm_id]
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim());
+  if (details.length) {
+    const list = document.createElement("dl");
+    for (const [label, value] of details) {
+      const row = document.createElement("div");
+      const term = document.createElement("dt"); term.textContent = label;
+      const description = document.createElement("dd"); description.textContent = String(value);
+      row.append(term, description); list.append(row);
+    }
+    card.append(list);
+  }
+  new maplibregl.Popup({ offset: 9, maxWidth: "330px" }).setLngLat(lngLat).setDOMContent(card).addTo(map);
+}
+
+function renderTransportLegend() {
+  const legend = $("transport-legend");
+  if (!legend) return;
+  const layers = state.uploadLayers.filter(layer => layer.transportKind);
+  const show = layers.length > 0 && ($("show-map-layers")?.checked ?? true);
+  legend.hidden = !show;
+  if (!show) return;
+  const heading = document.createElement("div"); heading.className = "transport-legend-heading";
+  const title = document.createElement("strong"); title.textContent = "Giao thông OSM";
+  const count = document.createElement("span");
+  count.textContent = `${layers.reduce((sum, layer) => sum + layer.featureCount, 0).toLocaleString("vi-VN")} đối tượng`;
+  heading.append(title, count);
+  const groups = document.createElement("div"); groups.className = "transport-legend-groups";
+  for (const layer of layers) {
+    const group = document.createElement("section");
+    const groupTitle = document.createElement("b"); groupTitle.textContent = TRANSPORT_KIND_LABELS[layer.transportKind];
+    group.append(groupTitle);
+    for (const fclass of layer.transportFclasses || []) {
+      const style = transportClassStyle(fclass, layer.transportKind);
+      const row = document.createElement("span");
+      const swatch = document.createElement("i");
+      swatch.className = layer.transportKind;
+      swatch.style.setProperty("--transport-color", style.color);
+      const label = document.createElement("em"); label.textContent = style.label;
+      row.append(swatch, label); group.append(row);
+    }
+    groups.append(group);
+  }
+  const note = document.createElement("small"); note.textContent = "Bấm vào điểm, khu vực hoặc tuyến đường để xem tên.";
+  legend.replaceChildren(heading, groups, note);
 }
 
 function addUploadedLayerToMap(layer) {
   const kinds = geometryKinds(layer.data);
+  const transportColors = layer.transportKind ? transportColorExpression(layer.transportKind) : null;
   map.addSource(layer.sourceId, { type: "geojson", data: layer.data });
   layer.layerIds = [];
   if (kinds.includes("area")) {
     const fillId = `${layer.id}-fill`; const borderId = `${layer.id}-border`;
-    map.addLayer({ id: fillId, type: "fill", source: layer.sourceId, paint: { "fill-color": layer.role === "hexagon" ? "#00e65c" : "#8b5cf6", "fill-opacity": layer.role === "hexagon" ? .62 : .3 } });
-    map.addLayer({ id: borderId, type: "line", source: layer.sourceId, paint: { "line-color": layer.role === "hexagon" ? "#032b17" : "#c4b5fd", "line-width": layer.role === "hexagon" ? .55 : 1.5 } });
+    map.addLayer({ id: fillId, type: "fill", source: layer.sourceId, paint: { "fill-color": transportColors || (layer.role === "hexagon" ? "#00e65c" : "#8b5cf6"), "fill-opacity": layer.transportKind ? .42 : layer.role === "hexagon" ? .62 : .3 } });
+    map.addLayer({ id: borderId, type: "line", source: layer.sourceId, paint: { "line-color": transportColors || (layer.role === "hexagon" ? "#032b17" : "#c4b5fd"), "line-width": layer.transportKind ? 2 : layer.role === "hexagon" ? .55 : 1.5 } });
     layer.layerIds.push(fillId, borderId);
   }
   if (kinds.includes("line")) {
     const lineId = `${layer.id}-line`;
-    map.addLayer({ id: lineId, type: "line", source: layer.sourceId, paint: { "line-color": "#f43f5e", "line-width": 3 } });
+    map.addLayer({ id: lineId, type: "line", source: layer.sourceId, paint: { "line-color": transportColors || "#f43f5e", "line-width": layer.transportKind ? 2.5 : 3 } });
     layer.layerIds.push(lineId);
   }
   if (kinds.includes("point")) {
     const pointId = `${layer.id}-point`;
-    map.addLayer({ id: pointId, type: "circle", source: layer.sourceId, paint: { "circle-radius": 5, "circle-color": "#f43f5e", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 } });
+    map.addLayer({ id: pointId, type: "circle", source: layer.sourceId, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 2.5, 10, 5.5, 15, 8], "circle-color": transportColors || "#f43f5e", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.25, "circle-opacity": .9 } });
     layer.layerIds.push(pointId);
   }
+  layer.layerIds.forEach(bindUploadedLayerPointer);
 }
 
 function restoreUploadedLayers() {
@@ -626,6 +707,7 @@ function clearUploadLayers() {
   state.uploadLayerSequence = 0;
   state.metroParts = {};
   state.separateMetroActive = false;
+  renderTransportLegend();
 }
 
 function hasPolygonMask() {
@@ -657,7 +739,12 @@ function addUploadedGeoJSONLayer(data, name, { forceRole = null, id: requestedId
   const sequence = ++state.uploadLayerSequence;
   const id = requestedId || `uploaded-${sequence}`;
   const sourceId = `${id}-source`;
-  const layer = { id, name, role, sourceId, layerIds: [], originalData: data, data, featureCount: featureCount(data) };
+  const transportKind = transportGeometryKind(name, data);
+  const layer = {
+    id, name, role, sourceId, layerIds: [], originalData: data, data,
+    featureCount: featureCount(data), transportKind,
+    transportFclasses: transportKind ? transportClasses(data) : []
+  };
   layer.data = uploadLayerData(layer);
   layer.featureCount = featureCount(layer.data);
   addUploadedLayerToMap(layer);
@@ -722,7 +809,7 @@ function selectMapStyle(styleKey) {
 let hanoiRoadsPromise = null;
 function loadHanoiRoads() {
   if (!hanoiRoadsPromise) {
-    const roadsUrl = new URL("../roads/hanoi_roads.geojson", import.meta.url);
+    const roadsUrl = new URL("../roads/hanoi_roads.json", import.meta.url);
     hanoiRoadsPromise = fetch(roadsUrl)
       .then(response => {
         if (!response.ok) throw new Error(`Không tải được mạng đường Hà Nội (${response.status}).`);
@@ -748,8 +835,13 @@ function renderCongestionLegend() {
   if (!legend || !state.congestionData || !state.congestionTime) { if (legend) legend.hidden = true; return; }
   const current = congestionAtTime(state.congestionData, state.congestionTime);
   const { stats } = current;
-  const heading = document.createElement("strong");
-  heading.textContent = `Mức độ ùn tắc · ${state.congestionTime}`;
+  const heading = document.createElement("div");
+  const title = document.createElement("strong");
+  const time = document.createElement("span");
+  heading.className = "congestion-legend-heading";
+  title.textContent = "Mức độ ùn tắc";
+  time.textContent = state.congestionTime;
+  heading.append(title, time);
   const scale = document.createElement("div");
   scale.className = "congestion-legend-scale";
   for (const [label, color] of Object.entries(CONGESTION_COLORS)) {
@@ -1727,6 +1819,7 @@ function removeDynamicUploadLayer(id) {
   }
   if (map?.getSource(layer.sourceId)) map.removeSource?.(layer.sourceId);
   state.uploadLayers = state.uploadLayers.filter(item => item.id !== id);
+  renderTransportLegend();
   scheduleUploadLayerOrder();
 }
 
@@ -1867,7 +1960,7 @@ async function processSpatialFiles(files) {
 
   // Khi chưa có vùng làm mặt nạ, polygon thường đầu tiên trở thành lớp nền.
   // Hexagon không bao giờ tự trở thành mặt nạ của chính nó.
-  const base = !state.boundary && spatial.find(item => geometryKinds(item.result.data).includes("area") && !isHexagonGeoJSON(item.result.data, item.file.name));
+  const base = !state.boundary && spatial.find(item => geometryKinds(item.result.data).includes("area") && !isHexagonGeoJSON(item.result.data, item.file.name) && !transportGeometryKind(item.file.name, item.result.data));
   if (base) {
     await replaceBoundary(base.result.data, base.file.name, base.result.profile, { preservePolygons: true });
     const id = `base-${++state.uploadLayerSequence}`;

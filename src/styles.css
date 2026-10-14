@@ -2480,6 +2480,7 @@ th:last-child {
 
 .metro-legend,
 .congestion-legend,
+.transport-legend,
 .weather-legend {
   position: absolute;
   bottom: 38px;
@@ -2497,20 +2498,63 @@ th:last-child {
 
 .metro-legend strong, .metro-legend small,
 .congestion-legend strong, .congestion-legend small,
+.transport-legend strong, .transport-legend small,
 .weather-legend strong, .weather-legend small { display: block; }
 .metro-legend small,
 .congestion-legend small,
+.transport-legend small,
 .weather-legend small { color: #a5b4c8; margin-top: 10px; }
+.transport-legend {
+  width: min(410px, calc(100% - 40px));
+  max-height: min(62vh, 560px);
+  overflow: auto;
+  pointer-events: auto;
+}
+.transport-legend-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.transport-legend-heading strong { font-size: 13px; }
+.transport-legend-heading span { color: #94a3b8; font-size: 11px; white-space: nowrap; }
+.transport-legend-groups { display: grid; gap: 12px; margin-top: 12px; }
+.transport-legend-groups section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 14px; }
+.transport-legend-groups section > b { grid-column: 1 / -1; color: #f8fafc; font-size: 11px; }
+.transport-legend-groups section > span { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.transport-legend-groups em { overflow: hidden; color: #cbd5e1; font-size: 10px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.transport-legend-groups i { flex: 0 0 auto; width: 10px; height: 10px; background: var(--transport-color); }
+.transport-legend-groups i.point { border: 1px solid #fff; border-radius: 50%; }
+.transport-legend-groups i.area { border: 1px solid color-mix(in srgb, var(--transport-color), white 35%); border-radius: 2px; opacity: .8; }
+.transport-legend-groups i.line { width: 18px; height: 3px; border-radius: 999px; }
+.transport-legend > small { padding-top: 9px; border-top: 1px solid #ffffff17; }
+.transport-popup { min-width: 220px; color: #182338; font: 12px/1.5 Inter, sans-serif; }
+.transport-popup > strong { display: block; padding-right: 8px; font-size: 14px; }
+.transport-popup > small { display: block; margin-top: 2px; color: #64748b; }
+.transport-popup dl { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid #e2e8f0; }
+.transport-popup dl div { display: flex; justify-content: space-between; gap: 18px; }
+.transport-popup dt { color: #64748b; }
+.transport-popup dd { margin: 0; font-weight: 600; text-align: right; }
 .metro-legend-scale { display: flex; margin-top: 10px; }
 .metro-legend-scale span { flex: 1; text-align: center; white-space: nowrap; }
 .metro-legend-scale i { display: block; height: 8px; margin-bottom: 7px; }
-.congestion-legend-scale { display: grid; grid-template-columns: repeat(4, minmax(75px, 1fr)); gap: 8px; margin-top: 11px; }
-.congestion-legend-scale span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.congestion-legend {
+  width: min(360px, calc(100% - 32px));
+  max-width: none;
+  left: 16px;
+  padding: 14px 16px 13px;
+}
+.congestion-legend-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.congestion-legend-heading strong { font-size: 13px; }
+.congestion-legend-heading span { color: #94a3b8; font-size: 11px; white-space: nowrap; }
+.congestion-legend-scale { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 18px; margin-top: 12px; }
+.congestion-legend-scale span { display: flex; min-width: 0; align-items: center; gap: 8px; white-space: nowrap; }
 .congestion-legend-scale i {
-  flex: 0 0 18px;
-  width: 18px;
-  height: 5px;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 4px;
   border-radius: 999px;
+}
+.congestion-legend small {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #ffffff17;
+  line-height: 1.45;
 }
 .congestion-popup { min-width: 230px; color: #182338; font: 12px/1.55 Inter, sans-serif; }
 .congestion-popup strong { display: block; margin-bottom: 6px; font-size: 14px; }

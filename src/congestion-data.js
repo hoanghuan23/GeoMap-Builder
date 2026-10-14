@@ -7,12 +7,12 @@ export const CONGESTION_COLORS = Object.freeze({
 
 const FIELD_ALIASES = Object.freeze({
   roadName: ["ten duong", "tên đường", "road name", "road_name", "name"],
-  routeRef: ["ma tuyen", "mã tuyến", "route ref", "route_ref", "ref"],
+  routeRef: ["ma tuyen", "mã tuyến", "ma duong", "mã đường", "route ref", "route_ref", "ref"],
   timestamp: ["thoi diem", "thời điểm", "timestamp", "time", "datetime"],
-  speed: ["toc do tb km h", "tốc độ tb km h", "tốc độ tb (km/h)", "average speed", "speed"],
+  speed: ["toc do tb km h", "tốc độ tb km h", "tốc độ tb (km/h)", "toc do trung binh km h", "tốc độ trung bình (km/h)", "average speed", "speed"],
   freeFlowSpeed: ["toc do thong thoang km h", "tốc độ thông thoáng km h", "tốc độ thông thoáng (km/h)", "free flow speed", "free_flow_speed"],
-  ratio: ["ty le", "tỷ lệ", "ratio"],
-  level: ["muc do", "mức độ", "level", "status"],
+  ratio: ["ty le", "tỷ lệ", "ty le toc do", "tỷ lệ tốc độ", "ratio"],
+  level: ["muc do", "mức độ", "muc do un tac", "mức độ ùn tắc", "level", "status"],
   volume: ["luu luong xe", "lưu lượng xe", "traffic volume", "volume"]
 });
 
