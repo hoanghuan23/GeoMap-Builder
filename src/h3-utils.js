@@ -1,4 +1,4 @@
-import { polygonToCells, latLngToCell, cellToBoundary, cellToLatLng, cellToParent, getResolution } from "https://cdn.jsdelivr.net/npm/h3-js@4.1.0/+esm";
+import { polygonToCells, latLngToCell, cellToBoundary, cellToLatLng, cellToParent, getResolution } from "h3-js";
 
 function geometriesFromGeoJSON(data) {
   if (!data) return [];
@@ -79,6 +79,10 @@ function coordinateField(headers, aliases) {
   return headers.find(header => aliases.has(String(header).trim().toLowerCase()));
 }
 
+function isFiniteValue(value) {
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+}
+
 export function recordsToPointGeoJSON(records) {
   if (!Array.isArray(records) || !records.length) throw new Error("File không có bản ghi dữ liệu.");
   const headers = [...new Set(records.flatMap(record => record && typeof record === "object" ? Object.keys(record) : []))];
@@ -88,6 +92,7 @@ export function recordsToPointGeoJSON(records) {
 
   const features = records.flatMap(record => {
     if (!record || typeof record !== "object") return [];
+    if (!isFiniteValue(record[latitudeField]) || !isFiniteValue(record[longitudeField])) return [];
     const latitude = Number(record[latitudeField]); const longitude = Number(record[longitudeField]);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return [];
     const properties = {};
@@ -99,4 +104,46 @@ export function recordsToPointGeoJSON(records) {
   });
   if (!features.length) throw new Error("Không tìm thấy tọa độ hợp lệ trong file.");
   return { type: "FeatureCollection", features };
+}
+
+function aggregateNumbers(values, aggregation) {
+  if (aggregation === "count") return values.length;
+  const numbers = values.map(Number).filter(Number.isFinite);
+  if (!numbers.length) return null;
+  if (aggregation === "sum") return numbers.reduce((sum, value) => sum + value, 0);
+  if (aggregation === "min") return Math.min(...numbers);
+  if (aggregation === "max") return Math.max(...numbers);
+  return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+}
+
+export function recordsToAggregatedH3(records, { latField, lngField, valueField, aggregation = "mean", resolution = 6 } = {}) {
+  const groups = new Map();
+  let coordinateRows = 0;
+  for (const record of records || []) {
+    if (!isFiniteValue(record?.[latField]) || !isFiniteValue(record?.[lngField])) continue;
+    const latitude = Number(record?.[latField]); const longitude = Number(record?.[lngField]);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) continue;
+    coordinateRows += 1;
+    if (!isFiniteValue(record?.[valueField])) continue;
+    const value = Number(record[valueField]);
+    const cell = latLngToCell(latitude, longitude, resolution);
+    const group = groups.get(cell) || { values: [], records: [] };
+    group.values.push(value); group.records.push(record); groups.set(cell, group);
+  }
+  const collection = cellsToFeatureCollection([...groups.keys()]);
+  for (const feature of collection.features) {
+    const group = groups.get(feature.properties.h3);
+    feature.properties[valueField] = aggregateNumbers(group.values, aggregation);
+    feature.properties.__metric = feature.properties[valueField];
+    feature.properties.__record_count = group.records.length;
+  }
+  return {
+    data: collection,
+    stats: {
+      totalRows: records?.length || 0,
+      coordinateRows,
+      coordinateRate: records?.length ? coordinateRows / records.length : 0,
+      cellCount: collection.features.length
+    }
+  };
 }

@@ -158,7 +158,7 @@ export async function getMapTilerProvinceBoundary(name, options = {}) {
   return getMapTilerAdministrativeBoundary(name, { ...options, placeType: "region" });
 }
 
-export async function loadMapTilerAdministrativeBoundaries(names, { apiKey, placeType = "region", signal, fetchImpl = fetch, concurrency = 4, onProgress } = {}) {
+export async function loadMapTilerAdministrativeBoundaries(names, { apiKey, placeType = "region", signal, fetchImpl = fetch, concurrency = 4, onProgress, strict = true, aliases = {} } = {}) {
   const uniqueNames = [...new Set((names || []).map(name => String(name ?? "").trim()).filter(Boolean))];
   const results = new Array(uniqueNames.length);
   let cursor = 0;
@@ -167,15 +167,33 @@ export async function loadMapTilerAdministrativeBoundaries(names, { apiKey, plac
     while (cursor < uniqueNames.length) {
       if (signal?.aborted) throw new DOMException("Boundary loading aborted", "AbortError");
       const index = cursor++;
-      results[index] = await getMapTilerAdministrativeBoundary(uniqueNames[index], { apiKey, placeType, signal, fetchImpl });
+      const sourceName = uniqueNames[index];
+      const queryName = String(aliases[sourceName] || sourceName).trim();
+      try {
+        const boundary = await getMapTilerAdministrativeBoundary(queryName, { apiKey, placeType, signal, fetchImpl });
+        results[index] = boundary ? {
+          ...boundary,
+          properties: { ...(boundary.properties || {}), __data_location: sourceName, __data_query: queryName }
+        } : null;
+      } catch (error) {
+        if (strict || error?.name === "AbortError") throw error;
+        results[index] = null;
+      }
       completed += 1;
-      onProgress?.({ completed, total: uniqueNames.length, name: uniqueNames[index] });
+      onProgress?.({ completed, total: uniqueNames.length, name: sourceName });
     }
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), uniqueNames.length) }, worker));
   const missing = uniqueNames.filter((_, index) => !results[index]);
-  if (missing.length) throw new Error(`MapTiler không trả về polygon cho: ${missing.join(", ")}`);
-  return { type: "FeatureCollection", features: results };
+  if (strict && missing.length) throw new Error(`MapTiler không trả về polygon cho: ${missing.join(", ")}`);
+  const features = results.filter(Boolean);
+  return {
+    type: "FeatureCollection",
+    features,
+    matched: uniqueNames.filter((_, index) => Boolean(results[index])),
+    unmatched: missing,
+    matchRate: features.length / Math.max(1, uniqueNames.length)
+  };
 }
 
 export async function loadMapTilerProvinceBoundaries(names, options = {}) {

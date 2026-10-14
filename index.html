@@ -43,6 +43,10 @@
         <div class="section-title"><span class="step">1</span><div><h2>Cung cấp dữ liệu</h2><p>Tải lên hoặc nhập vùng cần phân tích</p></div></div>
         <div class="tabs"><button class="tab active" data-tab="upload">Upload file</button><button class="tab" data-tab="draw">Vẽ trên bản đồ</button><button class="tab" data-tab="coordinates">Nhập tọa độ</button></div>
         <div class="tab-panel active" data-panel="upload"><label class="drop-zone" for="spatial-file"><input id="spatial-file" type="file" accept=".geojson,.json,.csv,.xlsx,.xls,.zip" multiple><span class="upload-icon">⇧</span><b>Kéo thả nhiều file vào đây</b><span>hoặc <u>chọn từ máy tính</u></span><small>GeoJSON/JSON được xếp thành từng lớp bản đồ</small></label><div id="selected-file" class="selected-file" hidden><span class="file-badge">GJ</span><div><b id="file-name"></b><small id="file-note"></small><ul id="uploaded-layer-list" class="uploaded-layer-list"></ul></div><button id="remove-current-file" class="remove-uploaded-layer" type="button" aria-label="Xóa file đang sử dụng" title="Xóa file">×</button></div><div id="province-filter-field" class="field province-filter" hidden><span>Tỉnh / thành phố</span><div id="province-filter" class="province-multiselect"><button id="province-filter-toggle" class="province-filter-toggle" type="button" aria-expanded="false"><span id="province-filter-label">Tất cả tỉnh/thành</span><span>⌄</span></button><div id="province-filter-menu" class="province-filter-menu" hidden><div id="province-filter-options" class="province-filter-options"></div><div class="province-filter-actions"><button id="clear-provinces" type="button">Bỏ chọn</button><button id="apply-provinces" type="button">Áp dụng</button></div></div></div></div></div>
+        <div id="ai-upload-options" class="ai-upload-options">
+          <label class="toggle-row"><span><b>Gửi giá trị mẫu cho AI</b><small>Mặc định tắt. Khi bật, gửi tối đa 5 mẫu mỗi cột và 8 dòng đã cắt ngắn.</small></span><input id="ai-include-samples" type="checkbox"><i></i></label>
+          <label id="sheet-selector-field" class="field" hidden><span>Chọn sheet dữ liệu</span><select id="sheet-selector"></select><button id="apply-sheet" class="secondary-button" type="button">Phân tích sheet</button></label>
+        </div>
         <div class="tab-panel placeholder-panel" data-panel="draw">Chọn công cụ vẽ trên bản đồ để bắt đầu.</div>
         <div class="tab-panel" data-panel="coordinates"><textarea id="coordinate-input" rows="4" placeholder="Nhập GeoJSON Polygon hoặc danh sách lng,lat"></textarea><button id="apply-coordinates" class="secondary-button">Áp dụng tọa độ</button></div>
       </section>
@@ -151,5 +155,5 @@
     </section>
   </main>
 </div><div id="toast" class="toast" role="status"></div>
-<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script><script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script><script type="module" src="./src/app.js"></script>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script><script type="module" src="./src/app.js"></script>
 </body></html>

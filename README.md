@@ -20,11 +20,34 @@ Phân tích dữ liệu bảng bằng AI dùng OpenAI Responses API qua middlewa
 ```env
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-5.6-luna
+OPENAI_BASE_URL=https://api.openai.com/v1
 ```
 
-Khi upload Excel/CSV/JSON không có tọa độ, ứng dụng gửi metadata cột, các giá trị phân loại và một mẫu nhỏ tới model. Model chỉ trả về cấu hình có schema (loại visualization, trường địa điểm, thời gian và metric). Với dữ liệu tỉnh/thành, ứng dụng lấy trực tiếp full polygon mới từ MapTiler bằng loại `region` và feature ID, sau đó gắn bản ghi vào polygon tương ứng; không hợp nhất các tỉnh GADM cũ. Nếu OpenAI tạm thời lỗi, rule-based recommendation được dùng làm fallback.
+Nếu dùng API tương thích OpenAI của Vilao, cấu hình model và base URL như sau:
 
-Các control lọc không được khai báo cố định trong HTML. Model trả về `filters[]` gồm tên trường, nhãn, loại control và chế độ chọn “tất cả”; ứng dụng tạo giao diện từ spec này. Vì vậy option thời gian chỉ xuất hiện khi dữ liệu có chiều thời gian, còn các dataset khác có thể tạo filter theo tuyến, nhà ga, phương tiện hoặc trường phân loại tương ứng.
+```env
+OPENAI_MODEL=vgpt/gpt-5.6-luna
+OPENAI_BASE_URL=https://api.vilao.ai/v1
+```
+
+### AI Chart Pipeline v2 và quyền riêng tư
+
+Excel/CSV được parse và profile trong Web Worker bằng package SheetJS đi cùng source. Workbook nhiều sheet yêu cầu chọn sheet trước khi phân tích. Raw records vẫn nằm trong trình duyệt; server không lưu dataset và không nhận toàn bộ file.
+
+Mặc định request AI chỉ chứa tên cột, kiểu suy luận và thống kê như tỷ lệ null, số giá trị phân biệt, min/max. Tùy chọn **“Gửi giá trị mẫu cho AI”** mặc định tắt. Khi bật, request có tối đa 5 mẫu cho mỗi cột và 8 dòng đầu; chuỗi được loại control character và cắt ở 160 ký tự. Không có trường `samples` hoặc `head` khi tùy chọn này tắt.
+
+Mỗi dataset chỉ tạo đúng một request OpenAI. Server tự đưa registry được phép vào prompt, coi tên cột và mẫu là dữ liệu không tin cậy, rồi kiểm tra structured output trước khi trả về client. AI chỉ đề xuất bốn loại:
+
+- `bar`
+- `line`
+- `choropleth`
+- `hex_h3`
+
+Response AI lỗi, không hợp lệ hoặc không có suggestion dùng được sẽ chuyển ngay sang rule-based fallback với cùng contract; không retry. Pie, Half Pie và các biến thể bar vẫn là lựa chọn thủ công. Thay đổi filter, ngày, series, metric, palette hoặc H3 resolution chỉ dựng lại payload tại client và không gọi AI thêm lần nữa.
+
+`AI_DEBUG` mặc định tắt. Khi tắt, middleware không log sample/head hoặc raw profile. Chỉ bật `AI_DEBUG=true` trong môi trường phát triển có dữ liệu phù hợp để ghi log.
+
+Choropleth lấy geometry hành chính từ MapTiler và cho phép thiếu một phần địa danh, đồng thời báo `matched`, `unmatched` và `matchRate`. GADM chỉ được dùng làm mặt nạ đất liền, không ép tên hoặc số lượng tỉnh. Thiếu MapTiler key chỉ khóa choropleth; Bar, Line và H3 vẫn hoạt động nếu dữ liệu phù hợp.
 
 Các file GeoJSON độc lập cũng được xếp lớp theo nội dung thay vì thứ tự upload. Rule nền luôn đặt polygon/hexagon dưới line/route và đặt point/station trên cùng; AI nhận metadata của các lớp để đề xuất thứ tự chi tiết giữa những lớp cùng nhóm. Nếu chưa cấu hình OpenAI hoặc API lỗi, thứ tự hình học này vẫn được áp dụng ngay ở trình duyệt.
 
@@ -206,27 +229,29 @@ Rule engine giúp hệ thống hoạt động ổn định ngay cả khi chưa t
 
 ## 13. AI Recommendation
 
-AI nên được tích hợp sau khi pipeline cơ bản đã hoạt động.
-
-Vai trò chính của AI:
+AI được giới hạn ở vai trò:
 
 - Hiểu ý nghĩa các trường dữ liệu
 - Hỗ trợ lựa chọn visualization
 - Đề xuất cách mapping dữ liệu vào renderer
 - Đề xuất cấu hình ban đầu
 
-AI không nên trực tiếp sinh code render bản đồ.
+AI không trực tiếp sinh code render bản đồ.
 
-Thay vào đó AI nên trả về cấu hình có cấu trúc, ví dụ:
+Thay vào đó AI trả về contract có cấu trúc, ví dụ rút gọn:
 
 ```json
 {
-  "visualization": "column",
-  "mapping": {
-    "latitude": "lat",
-    "longitude": "lon",
-    "value": "population"
-  }
+  "datasetTitle": "Dân số theo tỉnh",
+  "grain": "Một dòng cho mỗi tỉnh",
+  "columns": [],
+  "suggestions": [{
+    "id": "population-by-region",
+    "chartType": "choropleth",
+    "bindings": { "region": "province", "value": "population" },
+    "agg": "sum",
+    "confidence": 0.9
+  }]
 }
 ```
 
@@ -243,21 +268,18 @@ Người dùng vẫn có thể:
 - Điều chỉnh style
 - Điều chỉnh các tham số hiển thị
 
-## 15. Hướng phát triển
+## 15. Pipeline hiện tại
 
-Thứ tự triển khai đề xuất:
+Luồng thực thi chính:
 
 ```text
-1. Upload và đọc dữ liệu
-2. Data Profiler
-3. Chuẩn hóa dữ liệu
-4. Renderer Registry
-5. Map Canvas dùng chung
-6. Dynamic Config Panel
-7. Data Preview
-8. Rule-based Recommendation
-9. Mở rộng renderer
-10. Tích hợp AI Recommendation
+1. Parse và profile trong Web Worker
+2. Một request AI theo registry dùng chung
+3. Soft validation và rule-based fallback
+4. Chuẩn hóa kiểu dữ liệu
+5. Tính feasibility/effective confidence
+6. Aggregate hoặc pivot tại client
+7. Render trên canvas hiện có
 ```
 
 ## 16. Nguyên tắc kiến trúc

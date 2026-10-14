@@ -1,6 +1,52 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, gadmLevelForFeature, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchGadmBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
+import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, gadmLevelForFeature, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, loadMapTilerAdministrativeBoundaries, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchGadmBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
+import { WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
+
+test("tolerant administrative loading trả match rate và giữ tên dữ liệu khi dùng alias", async () => {
+  const polygon = { type: "Polygon", coordinates: [[[105, 20], [106, 20], [105, 20]]] };
+  const fetchImpl = async url => {
+    const decoded = decodeURIComponent(String(url));
+    if (decoded.includes("Sai Gon")) return { ok: true, json: async () => ({ features: [{ id: "region.sg", text: "Sai Gon", place_type: ["region"], geometry: polygon }] }) };
+    return { ok: true, json: async () => ({ features: [] }) };
+  };
+  const result = await loadMapTilerAdministrativeBoundaries(["TP HCM", "Không tồn tại"], {
+    apiKey: "key", aliases: { "TP HCM": "Sai Gon" }, strict: false, fetchImpl
+  });
+  assert.equal(result.features.length, 1);
+  assert.equal(result.features[0].properties.__data_location, "TP HCM");
+  assert.deepEqual(result.unmatched, ["Không tồn tại"]);
+  assert.equal(result.matchRate, .5);
+});
+
+test("mock MapTiler kiểm đủ matched/unmatched trên bộ 34 địa danh", async () => {
+  const names = [...WEATHER_PROVINCES];
+  const missing = names.at(-1);
+  const result = await loadMapTilerAdministrativeBoundaries(names, {
+    apiKey: "key",
+    strict: false,
+    concurrency: 8,
+    fetchImpl: async rawUrl => {
+      const path = decodeURIComponent(new URL(rawUrl).pathname);
+      const name = names.find(candidate => path.includes(`${candidate}, Việt Nam`));
+      if (!name || name === missing) return { ok: true, json: async () => ({ features: [] }) };
+      return {
+        ok: true,
+        json: async () => ({ features: [{
+          id: `region.${name}`,
+          text: name,
+          place_name: `${name}, Việt Nam`,
+          place_type: ["region"],
+          geometry: { type: "Polygon", coordinates: [] }
+        }] })
+      };
+    }
+  });
+  assert.equal(result.matched.length, 33);
+  assert.deepEqual(result.unmatched, [missing]);
+  assert.equal(result.features.length, 33);
+  assert.equal(result.matchRate, 33 / 34);
+});
 
 test("buildGeocodingUrl limits administrative autocomplete to Vietnam", () => {
   const url = new URL(buildGeocodingUrl("Hưng Yên", "test-key", { lng: 105.85, lat: 20.65 }));

@@ -55,3 +55,14 @@ test("không tự ghép hoặc tự tạo polygon khi MapTiler thiếu địa ph
   );
   assert.deepEqual(result.features, []);
 });
+
+test("choropleth aggregate nhiều dòng cùng địa danh thay vì tạo polygon trùng", () => {
+  const recommendation = { geometry: { field: "province" }, metricField: "rain", aggregation: "sum" };
+  const result = joinRecordsToMapTilerBoundaries([
+    { province: "Hà Nội", rain: 2 },
+    { province: "Hà Nội", rain: 3 }
+  ], { type: "FeatureCollection", features: [boundary("Hà Nội", 0)] }, recommendation);
+  assert.equal(result.features.length, 1);
+  assert.equal(result.features[0].properties.rain, 5);
+  assert.equal(result.features[0].properties.__record_count, 2);
+});

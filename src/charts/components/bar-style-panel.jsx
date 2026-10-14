@@ -48,6 +48,7 @@ export function BarStylePanel({ config, chartKind = "bar", rowCount, series = []
             <span>Số cột hiển thị</span>
             <select value={value.limit} onChange={event => update({ limit: event.target.value === "all" ? "all" : Number(event.target.value) })}>
               <option value={10}>Top 10</option>
+              <option value={12}>Top 12</option>
               <option value={20}>Top 20</option>
               <option value={50}>Top 50</option>
               <option value="all">Tất cả ({rowCount})</option>

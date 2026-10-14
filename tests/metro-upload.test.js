@@ -8,6 +8,9 @@ import * as polygonStyle from "../src/renderers/polygon-style.js";
 import * as geojsonLayers from "../src/geojson-layers.js";
 import { PolygonRenderer } from "../src/renderers/polygon-renderer.js";
 import * as congestion from "../src/congestion-data.js";
+import * as transport from "../src/transport-style.js";
+import * as layerOrder from "../src/layer-order.js";
+import { metroFixture } from "./fixtures/metro-fixture.js";
 
 // Exercise the actual upload and UI handlers with a MapLibre/DOM adapter.
 function createHarness() {
@@ -36,7 +39,7 @@ function createHarness() {
     moveLayer() {}, on() {}, resize() {}, fitBounds() {}
   };
   const context = vm.createContext({
-    ...metro, ...capabilities, ...polygonStyle, ...geojsonLayers, ...congestion, PolygonRenderer,
+    ...metro, ...capabilities, ...polygonStyle, ...geojsonLayers, ...congestion, ...transport, ...layerOrder, PolygonRenderer,
     CONFIG: { DEFAULT_RESOLUTION: 5, MAX_RENDER_CELLS: 120000 },
     DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     mergeBarConfig: () => ({}), mergePieConfig: () => ({}),
@@ -68,9 +71,9 @@ function createHarness() {
 
 test("upload displays independent Metro layers, changes departure, and clears all sources", async () => {
   const { context, get, sources, layers } = createHarness();
-  context.file = { name: "metro.json", text: async () => readFileSync(new URL("../geomap_metro1_du_lieu_mo_phong.json", import.meta.url), "utf8") };
+  context.file = { name: "metro.json", text: async () => JSON.stringify(metroFixture) };
   await vm.runInContext("processSpatialFile(file)", context);
-  assert.equal(sources.get("polygon-data").data.features.length, 3980);
+  assert.equal(sources.get("polygon-data").data.features.length, metroFixture.hexagons.features.length);
   assert.equal(sources.get("vietnam-boundary").data.features.length, 1);
   assert.equal(sources.get("metro-station-data").data.features.length, 13);
   assert.equal(sources.get("line-data").data.features.length, 1);
@@ -79,7 +82,7 @@ test("upload displays independent Metro layers, changes departure, and clears al
   assert.equal(layers.get("metro-stations").layout.visibility, "visible");
   assert.equal(get("metro-time-section").hidden, false);
   assert.equal(get("metro-departure").children.length, 18);
-  assert.equal(get("display-config-section").hidden, true);
+  assert.equal(get("chart-data-mapping-section").hidden, true);
   get("metro-departure").value = "17:30";
   vm.runInContext("updateMetroTime()", context);
   const cell = sources.get("polygon-data").data.features[0].properties;
@@ -152,7 +155,7 @@ test("recognizes an Excel travel-time table as a Metro part", async () => {
 
 test("activates Metro with only hexagons and travel times, then adds optional overlays", async () => {
   const { context, sources } = createHarness();
-  const bundle = JSON.parse(readFileSync(new URL("../geomap_metro1_du_lieu_mo_phong.json", import.meta.url), "utf8"));
+  const bundle = metroFixture;
   const file = (name, data, stamp) => {
     const text = JSON.stringify(data);
     return { name, size: text.length, lastModified: stamp, type: "application/json", text: async () => text };
@@ -177,7 +180,7 @@ test("activates Metro with only hexagons and travel times, then adds optional ov
 
 test("clicks anywhere in a Metro cell focus its full geometry and anchor to the same center", async () => {
   const { context, sources, layers } = createHarness();
-  context.file = { name: "metro.json", text: async () => readFileSync(new URL("../geomap_metro1_du_lieu_mo_phong.json", import.meta.url), "utf8") };
+  context.file = { name: "metro.json", text: async () => JSON.stringify(metroFixture) };
   await vm.runInContext("processSpatialFile(file)", context);
   const feature = sources.get("polygon-data").data.features[0];
   context.clickedFeature = { ...feature, geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [0, 1], [0, 0]]] } };

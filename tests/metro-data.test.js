@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColors, TRAVEL_COLORS } from "../src/metro-data.js";
+import { metroFixture } from "./fixtures/metro-fixture.js";
 
-const source = JSON.parse(readFileSync(new URL("../geomap_metro1_du_lieu_mo_phong.json", import.meta.url), "utf8"));
+const source = metroFixture;
 
 test("loads the Metro bundle without classifying it as chart data", () => {
   const data = readMetroData(source);
-  assert.equal(data.hexagons.features.length, 3980);
+  assert.equal(data.hexagons.features.length, source.metadata.cell_count);
   assert.equal(data.stations.features.length, 13);
   assert.deepEqual(data.times, Array.from({ length: 18 }, (_, i) => `${String(i + 5).padStart(2, "0")}:30`));
   assert.deepEqual(data.times, source.metadata.departure_times);

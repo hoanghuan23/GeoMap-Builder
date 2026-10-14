@@ -1,3 +1,6 @@
+import { fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
+import { normalizeTabularRecords, profileTabularData } from "./tabular-data.js";
+
 const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area)/i;
 const TIME_HINT = /(ngày|date|time|tháng|month|năm|year)/i;
 
@@ -5,43 +8,26 @@ function isDate(value) {
   return Object.prototype.toString.call(value) === "[object Date]" && !Number.isNaN(value.getTime());
 }
 
-function jsonValue(value) {
-  if (isDate(value)) return value.toISOString().slice(0, 10);
-  return value;
-}
-
-export function summarizeTabularData(records, { maxSamples = 8, maxUnique = 80 } = {}) {
-  if (!Array.isArray(records) || !records.length) throw new Error("File không có bản ghi dữ liệu.");
-  const fields = [...new Set(records.flatMap(record => Object.keys(record || {})))];
-  const columns = fields.map(name => {
-    const values = records.map(record => record?.[name]).filter(value => value !== "" && value != null);
-    const uniqueValues = [...new Map(values.map(value => [String(jsonValue(value)), jsonValue(value)])).values()];
-    const numericCount = values.filter(value => typeof value === "number" && Number.isFinite(value)).length;
-    const dateCount = values.filter(isDate).length;
-    return {
-      name,
-      inferredType: dateCount === values.length ? "date" : numericCount === values.length ? "number" : "text",
-      uniqueCount: uniqueValues.length,
-      uniqueValues: uniqueValues.slice(0, maxUnique)
-    };
-  });
+/** Backward-compatible facade for callers that still use the old profile name. */
+export function summarizeTabularData(records, { maxSamples = 5, maxUnique = 10_000, includeSamples = true } = {}) {
+  const profile = profileTabularData(records, { includeSamples, maxSamples, uniqueCap: maxUnique });
   return {
-    rowCount: records.length,
-    columns,
-    samples: records.slice(0, maxSamples).map(record => Object.fromEntries(Object.entries(record).map(([key, value]) => [key, jsonValue(value)])))
+    ...profile,
+    columns: profile.columns.map(column => ({ ...column, uniqueValues: column.samples || [] })),
+    samples: profile.head || []
   };
 }
 
 export function fallbackMapRecommendation(records) {
-  const summary = summarizeTabularData(records);
-  const location = summary.columns.find(column => LOCATION_HINT.test(column.name) && column.inferredType === "text");
-  const time = summary.columns.find(column => TIME_HINT.test(column.name) || column.inferredType === "date");
-  const metrics = summary.columns.filter(column => column.inferredType === "number" && column.name !== time?.name);
+  const profile = profileTabularData(records, { includeSamples: false });
+  const location = profile.columns.find(column => LOCATION_HINT.test(column.name) && column.inferredType === "text");
+  const time = profile.columns.find(column => TIME_HINT.test(column.name) || column.inferredType === "date");
+  const metrics = profile.columns.filter(column => column.inferredType === "number" && column.name !== time?.name);
   if (!location || !metrics.length) return null;
   return {
     canRenderMap: true,
     visualization: "polygon",
-    geometry: { field: location.name, provider: "maptiler", placeType: "region" },
+    geometry: { field: location.name, provider: "maptiler", placeType: /quận|huyện|district/i.test(location.name) ? "county" : "region" },
     metricField: metrics[0].name,
     numericFields: metrics.map(column => column.name),
     filters: [
@@ -50,15 +36,15 @@ export function fallbackMapRecommendation(records) {
     ],
     title: `${metrics[0].name} theo ${location.name}`,
     explanation: "Nhận diện theo quy tắc dự phòng: dữ liệu có địa phương và các chỉ số số.",
-    confidence: 0.7,
+    confidence: .7,
     source: "rule"
   };
 }
 
-export async function requestAiMapRecommendation(records, { signal } = {}) {
-  const fallback = fallbackMapRecommendation(records);
-  if (!fallback) return null;
-  const profile = summarizeTabularData(records);
+export async function requestAiDataAnalysis(records, { signal, includeSamples = false, profile: suppliedProfile = null } = {}) {
+  const profile = suppliedProfile || profileTabularData(records, { includeSamples });
+  let analysis;
+  let fallbackReason = "";
   try {
     const response = await fetch("/api/ai/analyze-map-data", {
       method: "POST",
@@ -67,47 +53,43 @@ export async function requestAiMapRecommendation(records, { signal } = {}) {
       signal
     });
     if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || `AI HTTP ${response.status}`);
-    const recommendation = await response.json();
-    const fieldNames = new Set(Object.keys(records[0] || {}));
-    const numericFields = new Set(profile.columns.filter(column => column.inferredType === "number").map(column => column.name));
-    if (!recommendation.canRenderMap || recommendation.visualization !== "polygon") return null;
-    if (!fieldNames.has(recommendation.geometry?.field) || !fieldNames.has(recommendation.metricField)) return fallback;
-    if (!numericFields.has(recommendation.metricField)) return fallback;
-    recommendation.numericFields = [
-      recommendation.metricField,
-      ...recommendation.numericFields.filter(field => numericFields.has(field) && field !== recommendation.metricField)
-    ];
-    const seenFilters = new Set();
-    recommendation.filters = recommendation.filters.filter(filter => {
-      if (!fieldNames.has(filter.field) || seenFilters.has(filter.field)) return false;
-      seenFilters.add(filter.field);
-      return true;
-    });
-    if (!seenFilters.has(recommendation.geometry.field)) {
-      recommendation.filters.unshift({
-        field: recommendation.geometry.field,
-        label: recommendation.geometry.field,
-        control: "select",
-        allowAll: true
-      });
-      seenFilters.add(recommendation.geometry.field);
-    }
-    const temporalColumn = profile.columns.find(column =>
-      column.uniqueCount > 1 && (column.inferredType === "date" || TIME_HINT.test(column.name))
-    );
-    if (temporalColumn && !seenFilters.has(temporalColumn.name)) {
-      recommendation.filters.push({
-        field: temporalColumn.name,
-        label: temporalColumn.name,
-        control: "date-select",
-        allowAll: false
-      });
-    }
-    return { ...recommendation, source: "ai" };
+    analysis = validateAndNormalizeAnalysis(await response.json(), profile);
+    if (analysis.source !== "ai") fallbackReason = analysis.validationErrors?.join("; ") || "AI không có đề xuất hợp lệ.";
   } catch (error) {
-    console.warn("AI recommendation fallback:", error);
-    return { ...fallback, fallbackReason: error.message };
+    if (error?.name === "AbortError") throw error;
+    console.warn("AI analysis fallback:", error);
+    fallbackReason = error?.message || "Không thể gọi AI.";
+    analysis = fallbackAnalysis(profile);
   }
+  const normalized = normalizeTabularRecords(records, analysis.columns);
+  return { analysis, profile, records: normalized.records, validRowRate: normalized.validRowRate, fallbackReason };
+}
+
+/** Compatibility adapter for the former map-only pipeline. */
+export async function requestAiMapRecommendation(records, options = {}) {
+  const pipeline = await requestAiDataAnalysis(records, options);
+  const suggestion = pipeline.analysis.suggestions.find(item => item.chartType === "choropleth");
+  if (!suggestion) return null;
+  const columns = new Map(pipeline.analysis.columns.map(column => [column.name, column]));
+  const time = pipeline.analysis.columns.find(column => column.role === "time");
+  const region = columns.get(suggestion.bindings.region);
+  return {
+    canRenderMap: true,
+    visualization: "polygon",
+    geometry: { field: suggestion.bindings.region, provider: "maptiler", placeType: region?.geoLevel === "admin2" ? "county" : "region" },
+    metricField: suggestion.bindings.value,
+    numericFields: pipeline.analysis.columns.filter(column => column.role === "measure").map(column => column.name),
+    filters: [
+      { field: suggestion.bindings.region, label: region?.labelVi || suggestion.bindings.region, control: "select", allowAll: true },
+      ...(time ? [{ field: time.name, label: time.labelVi || time.name, control: "date-select", allowAll: false }] : [])
+    ],
+    title: suggestion.title,
+    explanation: suggestion.reason,
+    confidence: suggestion.confidence,
+    source: pipeline.analysis.source,
+    aggregation: suggestion.agg || columns.get(suggestion.bindings.value)?.aggDefault || "mean",
+    pipeline
+  };
 }
 
 export function displayFilterValue(value, control = "") {

@@ -82,6 +82,10 @@ export function normalizeLineChartConfig(input) {
     if (record[xField] == null || String(record[xField]).trim() === "") throw new Error(`Bản ghi data[${rowIndex}] thiếu trường "${xField}".`);
     const normalized = { ...record, [xField]: String(record[xField]) };
     for (const item of series) {
+      if (record[item.key] == null || record[item.key] === "") {
+        normalized[item.key] = null;
+        continue;
+      }
       const value = Number(record[item.key]);
       if (!Number.isFinite(value)) throw new Error(`Giá trị "${item.key}" tại data[${rowIndex}] phải là số.`);
       normalized[item.key] = value;

@@ -2,8 +2,9 @@ const TRANSPORT_FILES = Object.freeze({
   gis_osm_transport_free: "point",
   gis_osm_transport_a_free: "area",
   gis_osm_railways_free: "line",
-  dulieu_diem_phuontien: "point",
   dulieu_diem_phuongtien: "point",
+  // Backward-compatible alias used by older exported datasets.
+  dulieu_diem_phuontien: "point",
   dulieu_khuvuc_giaothong: "area",
   dulieu_duongsat: "line"
 });
