@@ -29,6 +29,7 @@ import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } f
 import { comparableFilterValue, displayFilterValue, requestAiMapRecommendation } from "./ai-data-analysis.js";
 import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
 import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
+import { CONGESTION_COLORS, congestionAtTime, congestionLineColorExpression, joinCongestionToRoads, normalizeCongestionRecords } from "./congestion-data.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -60,6 +61,7 @@ const state = {
   chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null,
   barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, polygonPalette: null,
   metroData: null, metroTime: null, metroPopup: null, lineData: EMPTY_FEATURE_COLLECTION,
+  congestionData: null, congestionTime: null, congestionPopup: null,
   dataOrigin: null,
   uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0,
   metroParts: {}, separateMetroActive: false,
@@ -293,8 +295,9 @@ function updateModelSections() {
   const hasModel = Boolean(state.mapType);
   const isChart = Boolean(state.chartConfig);
   $("metro-time-section").hidden = true;
+  $("congestion-time-section").hidden = !state.congestionData || isChart;
   $("metro-layer-controls").hidden = !state.metroData || isChart;
-  $("line-toggle-field").hidden = isChart || !state.lineData.features.length;
+  $("line-toggle-field").hidden = isChart || !state.lineData.features.length || Boolean(state.congestionData);
   $("travel-palette").hidden = !state.metroData;
   $("weather-toggle-field").hidden = state.dataOrigin !== "search" || isChart;
   $("chart-data-mapping-section").hidden = !isChart;
@@ -379,8 +382,14 @@ function applyStyle() {
     map.setPaintProperty("polygon-border", "line-color", borderColor);
     map.setPaintProperty("polygon-border", "line-width", borderWidth);
   }
+  if (map.getLayer("data-lines")) {
+    map.setPaintProperty("data-lines", "line-color", state.congestionData ? congestionLineColorExpression() : "#c52e64");
+    map.setPaintProperty("data-lines", "line-width", state.congestionData ? 5 : 3);
+    map.setPaintProperty("data-lines", "line-opacity", state.congestionData ? .9 : 1);
+  }
   applyMapLayerVisibility();
   renderMetroLegend();
+  renderCongestionLegend();
   renderWeatherLegend();
 }
 
@@ -400,13 +409,14 @@ function applyMapLayerVisibility() {
   for (const id of ["metro-stations", "metro-station-labels"]) {
     if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", showLayers && state.metroData && $("show-metro-stations").checked ? "visible" : "none");
   }
-  if (map.getLayer("data-lines")) map.setLayoutProperty("data-lines", "visibility", showLayers && $("show-map-lines").checked && (state.metroData || state.mapType === "line") ? "visible" : "none");
+  if (map.getLayer("data-lines")) map.setLayoutProperty("data-lines", "visibility", showLayers && (state.congestionData || ($("show-map-lines").checked && (state.metroData || state.mapType === "line"))) ? "visible" : "none");
   for (const layer of state.uploadLayers) {
     for (const layerId of layer.layerIds || []) {
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", showLayers ? "visible" : "none");
     }
   }
   $("metro-legend").hidden = !state.metroData || !showPolygon;
+  $("congestion-legend").hidden = !state.congestionData || !showLayers;
   if (!showPolygon) { state.metroPopup?.remove(); state.metroPopup = null; }
   if (!showH3 && !showPolygon) cellPopup?.remove();
   renderWeatherLegend();
@@ -494,6 +504,14 @@ function addMapLayers() {
     new maplibregl.Popup({ offset: 7 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
   });
   map.on("mouseenter", "point-marker", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "point-marker", () => map.getCanvas().style.cursor = "");
+  map.on("click", "data-lines", event => {
+    if (!state.congestionData) return;
+    const feature = event.features?.[0];
+    if (!feature) return;
+    showCongestionPopup(feature, event.lngLat);
+  });
+  map.on("mouseenter", "data-lines", () => { if (state.congestionData) map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "data-lines", () => { if (state.congestionData) map.getCanvas().style.cursor = ""; });
 }
 
 function addUploadedLayerToMap(layer) {
@@ -701,6 +719,122 @@ function selectMapStyle(styleKey) {
   }
 }
 
+let hanoiRoadsPromise = null;
+function loadHanoiRoads() {
+  if (!hanoiRoadsPromise) {
+    const roadsUrl = new URL("../roads/hanoi_roads.geojson", import.meta.url);
+    hanoiRoadsPromise = fetch(roadsUrl)
+      .then(response => {
+        if (!response.ok) throw new Error(`Không tải được mạng đường Hà Nội (${response.status}).`);
+        return response.json();
+      })
+      .catch(error => { hanoiRoadsPromise = null; throw error; });
+  }
+  return hanoiRoadsPromise;
+}
+
+function clearCongestionData() {
+  state.congestionPopup?.remove();
+  state.congestionPopup = null;
+  state.congestionData = null;
+  state.congestionTime = null;
+  $("congestion-time")?.replaceChildren();
+  if ($("congestion-time-section")) $("congestion-time-section").hidden = true;
+  if ($("congestion-legend")) $("congestion-legend").hidden = true;
+}
+
+function renderCongestionLegend() {
+  const legend = $("congestion-legend");
+  if (!legend || !state.congestionData || !state.congestionTime) { if (legend) legend.hidden = true; return; }
+  const current = congestionAtTime(state.congestionData, state.congestionTime);
+  const { stats } = current;
+  const heading = document.createElement("strong");
+  heading.textContent = `Mức độ ùn tắc · ${state.congestionTime}`;
+  const scale = document.createElement("div");
+  scale.className = "congestion-legend-scale";
+  for (const [label, color] of Object.entries(CONGESTION_COLORS)) {
+    const item = document.createElement("span");
+    const swatch = document.createElement("i");
+    swatch.style.backgroundColor = color;
+    item.append(swatch, label);
+    scale.append(item);
+  }
+  const note = document.createElement("small");
+  note.textContent = `${stats.matchedRows}/${stats.totalRows} tuyến khớp · ${stats.segmentCount.toLocaleString("vi-VN")} đoạn đường${stats.unmatched.length ? ` · Chưa khớp: ${stats.unmatched.join(", ")}` : ""}`;
+  legend.replaceChildren(heading, scale, note);
+  legend.hidden = !($("show-map-layers")?.checked ?? true);
+}
+
+function congestionPopupContent(feature) {
+  const p = feature.properties || {};
+  const card = document.createElement("div");
+  card.className = "congestion-popup";
+  const title = document.createElement("strong");
+  title.textContent = p.traffic_road_name || p.name || "Tuyến đường";
+  const details = [
+    ["Mức độ", p.traffic_level],
+    ["Thời điểm", p.traffic_timestamp],
+    ["Tốc độ TB", p.traffic_speed == null ? null : `${p.traffic_speed} km/h`],
+    ["Tốc độ thông thoáng", p.traffic_free_flow_speed == null ? null : `${p.traffic_free_flow_speed} km/h`],
+    ["Tỷ lệ tốc độ", p.traffic_ratio == null ? null : `${Math.round(Number(p.traffic_ratio) * 100)}%`],
+    ["Lưu lượng", p.traffic_volume == null ? null : `${Number(p.traffic_volume).toLocaleString("vi-VN")} xe/giờ`]
+  ].filter(([, value]) => value != null && value !== "");
+  const list = document.createElement("dl");
+  for (const [label, value] of details) {
+    const row = document.createElement("div");
+    const term = document.createElement("dt"); const description = document.createElement("dd");
+    term.textContent = label; description.textContent = String(value); row.append(term, description); list.append(row);
+  }
+  card.append(title, list);
+  return card;
+}
+
+function showCongestionPopup(feature, lngLat) {
+  state.congestionPopup?.remove();
+  state.congestionPopup = new maplibregl.Popup({ offset: 10, maxWidth: "330px" })
+    .setLngLat(lngLat)
+    .setDOMContent(congestionPopupContent(feature))
+    .addTo(map);
+}
+
+function updateCongestionTime() {
+  if (!state.congestionData) return;
+  state.congestionPopup?.remove(); state.congestionPopup = null;
+  state.congestionTime = $("congestion-time").value;
+  const current = congestionAtTime(state.congestionData, state.congestionTime);
+  state.lineData = { type: "FeatureCollection", features: current.features };
+  map.getSource("line-data")?.setData(state.lineData);
+  renderCongestionLegend();
+  applyStyle();
+  if (current.features.length) fitGeoJSON(state.lineData);
+}
+
+async function replaceCongestionData(records, name) {
+  setStatus("Đang tải và đối chiếu mạng đường Hà Nội…");
+  const roads = await loadHanoiRoads();
+  const congestionData = joinCongestionToRoads(records, roads);
+  clearAiMapState(); clearMetroData(); clearCongestionData();
+  state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null;
+  clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
+  state.dataOrigin = "congestion"; state.congestionData = congestionData; state.congestionTime = congestionData.times[0];
+  state.mapType = "line"; state.boundary = null; state.sourceBoundary = null; state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = EMPTY_FEATURE_COLLECTION;
+  $("congestion-time").replaceChildren(...congestionData.times.map(time => Object.assign(document.createElement("option"), { value: time, textContent: time })));
+  $("congestion-time").value = state.congestionTime;
+  $("file-name").textContent = name; $("file-note").textContent = `${records.length.toLocaleString("vi-VN")} bản ghi ùn tắc · ${congestionData.times.length} thời điểm`;
+  $("remove-current-file").hidden = false; $("selected-file").hidden = false;
+  map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+  const current = congestionAtTime(congestionData, state.congestionTime);
+  state.lineData = { type: "FeatureCollection", features: current.features };
+  map.getSource("line-data")?.setData(state.lineData);
+  renderCompatibleMapTypes(state.lineData);
+  state.mapType = "line";
+  updateModelSections(); applyStyle();
+  if (current.features.length) fitGeoJSON(state.lineData);
+  const missing = current.stats.unmatched.length;
+  setStatus(`Đã khớp ${current.stats.matchedRows}/${current.stats.totalRows} tuyến tại ${state.congestionTime}${missing ? ` · ${missing} tuyến chưa khớp` : ""}.`, true);
+}
+
 function clearMetroData() {
   state.metroPopup?.remove(); state.metroPopup = null;
   state.metroData = null; state.metroTime = null; state.lineData = EMPTY_FEATURE_COLLECTION;
@@ -821,6 +955,7 @@ function updateMetroTime() {
 }
 
 async function replaceMetroData(data, name) {
+  clearCongestionData();
   await replaceBoundary(metroCellsAtTime(data, data.times[0]), name, null, { preservePolygons: true });
   state.metroData = data; state.metroTime = data.times[0]; state.mapType = "polygon"; state.polygonPalette = "travel";
   state.lineData = data.metro_route;
@@ -987,6 +1122,7 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 function clearUploadedData() {
   weatherLoadRevision += 1;
   clearMetroData();
+  clearCongestionData();
   clearUploadLayers();
   state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
   state.pointData = { type: "FeatureCollection", features: [] };
@@ -1049,6 +1185,8 @@ async function resetConfiguration() {
     renderChartCanvas();
     renderChartDataMapping();
     renderChartStyleControls();
+  } else if (state.congestionData) {
+    $("congestion-time").value = state.congestionData.times[0]; updateCongestionTime();
   } else if (state.metroData) {
     $("metro-departure").value = state.metroData.times[0]; updateMetroTime();
   } else if (state.boundary) {
@@ -1236,6 +1374,8 @@ async function readSpatialFile(file) {
     const workbook = globalThis.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const records = globalThis.XLSX.utils.sheet_to_json(firstSheet, { defval: "", raw: true });
+    const congestionRecords = normalizeCongestionRecords(records);
+    if (congestionRecords) return { kind: "congestion", records: congestionRecords };
     const travelRecords = normalizeTravelTimeRecords(records);
     if (travelRecords) return { kind: "metro-part", role: "travel_times", data: travelRecords };
     try {
@@ -1252,6 +1392,8 @@ async function readSpatialFile(file) {
     if (!globalThis.XLSX) throw new Error("Không tải được thư viện đọc CSV. Vui lòng kiểm tra kết nối mạng.");
     const workbook = globalThis.XLSX.read(text, { type: "string", raw: true });
     const records = globalThis.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: true });
+    const congestionRecords = normalizeCongestionRecords(records);
+    if (congestionRecords) return { kind: "congestion", records: congestionRecords };
     const travelRecords = normalizeTravelTimeRecords(records);
     if (travelRecords) return { kind: "metro-part", role: "travel_times", data: travelRecords };
     try {
@@ -1440,6 +1582,7 @@ function selectChartOption(type) {
 function replaceChartData(analysis, name) {
   clearAiMapState();
   clearMetroData();
+  clearCongestionData();
   state.dataOrigin = "upload";
   const primaryDataset = analysis.datasets.find(dataset => dataset.path === analysis.sourcePath) || analysis.datasets[0];
   const lineOption = createLineOption(primaryDataset, analysis.titlePrefix);
@@ -1466,6 +1609,7 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   weatherLoadRevision += 1;
   if (!preserveAi) clearAiMapState();
   clearMetroData();
+  clearCongestionData();
   state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; clearDataMappingPanel($("data-mapping-controls")); clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
   showChartStyleControls(false);
   if (!data) throw new Error("Không tìm thấy dữ liệu.");
@@ -1556,6 +1700,7 @@ async function processSpatialFile(file) {
     setStatus(`Đang đọc ${file.name}…`);
     const result = await readSpatialFile(file);
     if (result.kind === "metro") await replaceMetroData(result.data, file.name);
+    else if (result.kind === "congestion") await replaceCongestionData(result.records, file.name);
     else if (result.kind === "ai-map") await replaceAiMapData(result.records, result.recommendation, file.name);
     else if (result.kind === "chart") replaceChartData(result.analysis, file.name);
     else await replaceBoundary(result.data, file.name, result.profile);
@@ -1698,6 +1843,12 @@ async function processSpatialFiles(files) {
       return;
     }
   }
+  const congestion = valid.find(item => item.result.kind === "congestion");
+  if (congestion) {
+    await replaceCongestionData(congestion.result.records, congestion.file.name);
+    if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
+    return;
+  }
   const spatial = valid.filter(item => !item.result.kind && item.result.data);
   const metroParts = valid.filter(item => item.result.kind === "metro-part");
   const aiMaps = valid.filter(item => item.result.kind === "ai-map");
@@ -1823,6 +1974,7 @@ function bindUI() {
     setStatus("Đã xóa dữ liệu.", true);
   });
   $("metro-departure").addEventListener("change", updateMetroTime);
+  $("congestion-time").addEventListener("change", updateCongestionTime);
   for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).addEventListener("change", applyMapLayerVisibility);
   $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
   $("opacity").addEventListener("input", e => { $("opacity-value").value = `${Math.round(e.target.value * 100)}%`; applyStyle(); }); $("line-width").addEventListener("input", e => { $("line-width-value").value = `${e.target.value} px`; applyStyle(); });

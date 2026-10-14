@@ -2,9 +2,9 @@ import polygonClipping from "polygon-clipping";
 
 const MAPTILER_GEOCODING_URL = "https://api.maptiler.com/geocoding";
 const VIETNAM_LAND_URLS = [
-  new URL("../gadm41_VNM_0.json", import.meta.url),
-  new URL("../gadm41_VNM_1.json", import.meta.url),
-  new URL("../gadm41_VNM_2.json", import.meta.url)
+  new URL("../administrative_division/gadm41_VNM_0.json", import.meta.url),
+  new URL("../administrative_division/gadm41_VNM_1.json", import.meta.url),
+  new URL("../administrative_division/gadm41_VNM_2.json", import.meta.url)
 ];
 const VIETNAM_BBOX = "102.14,8.18,109.47,23.4";
 const ADMIN_TYPES = "country,region,subregion,county,joint_municipality,joint_submunicipality,municipality,municipal_district,locality,place";
