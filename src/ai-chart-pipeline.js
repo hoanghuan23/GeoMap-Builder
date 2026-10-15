@@ -123,10 +123,14 @@ function lineSeriesKey(seriesValue, measure, multipleMeasures) {
   return multipleMeasures ? `${seriesValue} · ${measure}` : String(seriesValue);
 }
 
-export function buildLineChartOption(suggestion, records, columns, { selectedSeries = null, defaultSeriesLimit = 5, maxSeries = 8 } = {}) {
+export function buildLineChartOption(suggestion, records, columns, { selectedSeries = null, measure = null, defaultSeriesLimit = 5, maxSeries = 8 } = {}) {
   const { x, series } = suggestion.bindings;
-  const measures = Array.isArray(suggestion.bindings.y) ? suggestion.bindings.y : [suggestion.bindings.y];
-  const aggregation = resolveAggregation(suggestion, columns);
+  const allMeasures = Array.isArray(suggestion.bindings.y) ? suggestion.bindings.y : [suggestion.bindings.y];
+  // có series: chỉ 1 measure (mặc định cột đầu, hoặc cột người dùng chọn); không series: vẽ nhiều measure
+  const measures = series ? [allMeasures.includes(measure) ? measure : allMeasures[0]] : allMeasures;
+  const byName = columnMap(columns);
+  const labelOf = field => byName.get(field)?.labelVi || humanizeField(field);
+  const aggregation = resolveAggregation({ ...suggestion, bindings: { ...suggestion.bindings, y: measures } }, columns);
   const xGroups = groupRecords(records, x).sort((a, b) => {
     const left = a.value instanceof Date ? a.value.getTime() : String(a.value);
     const right = b.value instanceof Date ? b.value.getTime() : String(b.value);
@@ -137,16 +141,16 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
     const counts = new Map();
     for (const record of records) {
       if (record?.[series] == null || record[series] === "") continue;
-      for (const measure of measures) {
-        if (!Number.isFinite(Number(record?.[measure]))) continue;
-        const key = lineSeriesKey(record[series], measure, measures.length > 1);
-        const item = counts.get(key) || { key, label: key, seriesValue: record[series], measure, count: 0 };
+      for (const m of measures) {
+        if (!Number.isFinite(Number(record?.[m]))) continue;
+        const key = lineSeriesKey(record[series], m, measures.length > 1);
+        const item = counts.get(key) || { key, label: key, seriesValue: record[series], measure: m, count: 0 };
         item.count += 1; counts.set(key, item);
       }
     }
     available.push(...[...counts.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "vi")));
   } else {
-    available.push(...measures.map(measure => ({ key: measure, label: columnMap(columns).get(measure)?.labelVi || humanizeField(measure), measure, count: validMeasureRecords(records, measure).length })));
+    available.push(...measures.map(m => ({ key: m, label: labelOf(m), measure: m, count: validMeasureRecords(records, m).length })));
   }
   const requested = Array.isArray(selectedSeries) ? new Set(selectedSeries) : null;
   const selected = (requested ? available.filter(item => requested.has(item.key)) : available.slice(0, defaultSeriesLimit)).slice(0, maxSeries);
@@ -158,6 +162,7 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
     }
     return row;
   }).filter(row => selected.some(item => Number.isFinite(row[item.key])));
+  const rangeText = data.length ? ` · ${data[0][x]} – ${data.at(-1)[x]}` : "";
   return {
     id: suggestion.id,
     label: suggestion.title,
@@ -165,12 +170,15 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
     aiSuggestion: true,
     availableSeries: available,
     selectedSeries: selected.map(item => item.key),
+    availableMeasures: allMeasures.map(name => ({ key: name, label: labelOf(name) })),
+    activeMeasure: measures[0],
     config: {
       chartKind: "line",
       variant: "line",
-      title: suggestion.title,
-      subtitle: suggestion.reason,
-      unit: measures.length === 1 ? columnMap(columns).get(measures[0])?.unit || "" : "",
+      // khi có series và nhiều measure, tiêu đề theo measure đang chọn; ngược lại giữ tiêu đề AI
+      title: series && allMeasures.length > 1 ? `${labelOf(measures[0])} theo ${labelOf(x).toLowerCase()}` : suggestion.title,
+      subtitle: `${selected.length}/${available.length} chuỗi${rangeText}`,
+      unit: measures.length === 1 ? byName.get(measures[0])?.unit || "" : "",
       sourcePath: "$",
       xField: x,
       series: selected.map((item, index) => ({ key: item.key, label: item.label, color: LINE_COLORS[index % LINE_COLORS.length] })),

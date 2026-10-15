@@ -1,4 +1,5 @@
 import { polygonToCells, latLngToCell, cellToBoundary, cellToLatLng, cellToParent, getResolution } from "h3-js";
+import { summarizeFeatureProperties } from "./feature-properties.js";
 
 function geometriesFromGeoJSON(data) {
   if (!data) return [];
@@ -116,7 +117,7 @@ function aggregateNumbers(values, aggregation) {
   return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
 }
 
-export function recordsToAggregatedH3(records, { latField, lngField, valueField, aggregation = "mean", resolution = 6 } = {}) {
+export function recordsToAggregatedH3(records, { latField, lngField, valueField, aggregation = "mean", resolution = 6, columns = null } = {}) {
   const groups = new Map();
   let coordinateRows = 0;
   for (const record of records || []) {
@@ -133,6 +134,13 @@ export function recordsToAggregatedH3(records, { latField, lngField, valueField,
   const collection = cellsToFeatureCollection([...groups.keys()]);
   for (const feature of collection.features) {
     const group = groups.get(feature.properties.h3);
+    if (columns?.length) {
+      const { h3, center_lat, center_lng } = feature.properties;
+      Object.assign(feature.properties, summarizeFeatureProperties(group.records, columns, {
+        metricField: valueField,
+        metricAggregation: aggregation
+      }), { h3, center_lat, center_lng });
+    }
     feature.properties[valueField] = aggregateNumbers(group.values, aggregation);
     feature.properties.__metric = feature.properties[valueField];
     feature.properties.__record_count = group.records.length;

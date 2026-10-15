@@ -2759,6 +2759,7 @@ th:last-child {
 .weather-popup > strong { display: block; padding-right: 18px; color: #f8fafc; font-size: 14px; }
 .weather-popup > small { display: block; margin-top: 2px; color: #64748b; }
 .weather-popup dl { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 14px 0 0; }
+.ai-weather-popup .weather-popup dl { max-height: min(420px, 55vh); overflow-y: auto; padding-right: 2px; }
 .weather-popup dl > div { padding: 9px; border: 1px solid #ffffff12; border-radius: 8px; background: #ffffff08; }
 .weather-popup dt { color: #94a3b8; }
 .weather-popup dd { margin: 3px 0 0; color: #f8fafc; font-size: 14px; font-weight: 700; }

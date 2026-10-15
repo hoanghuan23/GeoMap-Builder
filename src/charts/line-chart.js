@@ -15,7 +15,7 @@ import { dataForBarMapping, humanizeField } from "./data-transformers.js";
 
 const roots = new WeakMap();
 const h = React.createElement;
-export const LINE_COLORS = Object.freeze(["#ff8354", "#57c785", "#ffd05b", "#5b8ff9", "#9270ca", "#6dc8ec"]);
+export const LINE_COLORS = Object.freeze(["#ff8354", "#57c785", "#ffd05b", "#5b8ff9", "#9270ca", "#6dc8ec", "#d9548a", "#2f9e9e"]);
 
 function requireString(value, field) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`Trường "${field}" phải là một chuỗi không rỗng.`);
@@ -109,23 +109,60 @@ export function normalizeLineChartConfig(input) {
   };
 }
 
-function tooltipValue(value, _name, item, unit) {
-  return [`${new Intl.NumberFormat("vi-VN").format(Number(value))}${unit ? ` ${unit}` : ""}`, item?.name || ""];
+const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/;
+const ISO_MONTH = /^(\d{4})-(\d{2})$/;
+const numberFormat = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 });
+
+// "2026-09-01" -> "01/09" (tick) hoặc "01/09/2026" (tooltip); giá trị khác giữ nguyên
+function formatX(value, full = false) {
+  const text = String(value ?? "");
+  const day = ISO_DAY.exec(text);
+  if (day) return full ? `${day[3]}/${day[2]}/${day[1]}` : `${day[3]}/${day[2]}`;
+  const month = ISO_MONTH.exec(text);
+  if (month) return `${month[2]}/${month[1]}`;
+  return text;
+}
+
+// co theo dữ liệu, không ép về 0; dữ liệu không âm thì không cho xuống dưới 0
+function paddedDomain() {
+  return [
+    min => { const pad = (Math.abs(min) * 0.03) || 1; const v = Math.floor(min - pad); return min >= 0 ? Math.max(0, v) : v; },
+    max => Math.ceil(max + ((Math.abs(max) * 0.03) || 1))
+  ];
+}
+
+function LineTooltip({ active, payload, label, unit }) {
+  if (!active || !payload?.length) return null;
+  const items = payload.filter(item => item.value != null).sort((a, b) => b.value - a.value);
+  return h("div", { style: { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 12, boxShadow: "0 8px 24px rgba(15,23,42,.10)" } },
+    h("div", { style: { fontWeight: 600, marginBottom: 4 } }, formatX(label, true)),
+    ...items.map(item => h("div", { key: item.dataKey, style: { display: "flex", gap: 8, alignItems: "center" } },
+      h("span", { style: { width: 8, height: 8, borderRadius: 4, background: item.color } }),
+      h("span", { style: { flex: 1 } }, item.name),
+      h("b", null, `${numberFormat.format(item.value)}${unit ? ` ${unit}` : ""}`)
+    ))
+  );
 }
 
 function Chart({ config }) {
+  const [hover, setHover] = React.useState(null);
+  const showDots = config.data.length <= 31 && config.series.length <= 8;
+  // nhãn số chỉ hợp lý khi ít điểm và ít chuỗi; vượt ngưỡng thì tự tắt, giá trị xem ở tooltip
+  const labels = config.showDataLabels && config.data.length <= 12 && config.series.length <= 2;
+
   const lines = config.series.map(item => h(Line, {
     key: item.key,
-    type: "linear",
+    type: "monotone",
     dataKey: item.key,
     name: item.label,
     stroke: item.color,
-    strokeWidth: 2,
-    dot: { r: 4, fill: item.color, stroke: "#fff", strokeWidth: 1.5 },
-    activeDot: { r: 6, stroke: "#fff", strokeWidth: 2 },
-    animationDuration: 600,
+    strokeWidth: hover === item.key ? 3 : 2,
+    strokeOpacity: hover && hover !== item.key ? 0.2 : 1,
+    dot: showDots ? { r: 2.5, fill: item.color, strokeWidth: 0 } : false,
+    activeDot: { r: 5, stroke: "#fff", strokeWidth: 2 },
+    isAnimationActive: false,
     connectNulls: false
-  }, config.showDataLabels ? h(LabelList, { dataKey: item.key, position: "top", formatter: compactNumber, fill: "#526174", fontSize: 10 }) : null));
+  }, labels ? h(LabelList, { dataKey: item.key, position: "top", formatter: compactNumber, fill: "#526174", fontSize: 10 }) : null));
 
   return h("section", { className: "bar-chart-card line-chart-card", "aria-label": config.title || "Biểu đồ đường" },
     h("header", { className: "bar-chart-heading" },
@@ -138,13 +175,28 @@ function Chart({ config }) {
       h(ResponsiveContainer, { width: "100%", height: "100%" },
         h(LineChart, { data: config.data, margin: { top: 18, right: 18, left: 4, bottom: 8 } },
           config.showGrid ? h(CartesianGrid, { stroke: "#e9edf2", strokeDasharray: "3 3", vertical: false }) : null,
-          h(XAxis, { type: "category", dataKey: config.xField, axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, interval: 0, height: 38 }),
-          h(YAxis, { type: "number", axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, tickFormatter: compactNumber, width: 54 }),
+          h(XAxis, {
+            type: "category", dataKey: config.xField, axisLine: false, tickLine: false,
+            tick: { fill: "#697586", fontSize: 11 },
+            tickFormatter: value => formatX(value),
+            interval: "preserveStartEnd", minTickGap: 24, height: 38
+          }),
+          h(YAxis, {
+            type: "number", axisLine: false, tickLine: false,
+            tick: { fill: "#697586", fontSize: 11 },
+            tickFormatter: compactNumber, width: 54,
+            domain: paddedDomain(), allowDecimals: true
+          }),
           config.showTooltip ? h(Tooltip, {
-            formatter: (value, name, item) => tooltipValue(value, name, item, config.unit),
-            contentStyle: { border: "1px solid #e2e8f0", borderRadius: 8, boxShadow: "0 8px 24px rgba(15,23,42,.10)" }
+            content: h(LineTooltip, { unit: config.unit }),
+            cursor: { stroke: "#9ca3af", strokeDasharray: "3 3" }
           }) : null,
-          config.showLegend ? h(Legend, { verticalAlign: "bottom", iconType: "circle", iconSize: 9, wrapperStyle: { paddingTop: 14, fontSize: 12 } }) : null,
+          config.showLegend ? h(Legend, {
+            verticalAlign: "bottom", iconType: "circle", iconSize: 9,
+            wrapperStyle: { paddingTop: 14, fontSize: 12 },
+            onMouseEnter: entry => setHover(entry.dataKey ?? null),
+            onMouseLeave: () => setHover(null)
+          }) : null,
           ...lines
         )
       )

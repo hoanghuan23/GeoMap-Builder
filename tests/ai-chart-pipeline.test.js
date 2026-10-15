@@ -28,6 +28,39 @@ test("line long format chỉ chọn năm series có nhiều điểm nhất và p
   assert.equal(option.config.data[0].date, "2026-09-01");
 });
 
+test("line long format nhiều measure chỉ dựng chuỗi theo measure đang chọn", () => {
+  const metricColumns = [
+    { name: "date", role: "time", labelVi: "Ngày" },
+    { name: "province", role: "geo", labelVi: "Tỉnh" },
+    { name: "rain", role: "measure", labelVi: "Lượng mưa", aggDefault: "sum", unit: "mm" },
+    { name: "temperature", role: "measure", labelVi: "Nhiệt độ trung bình", aggDefault: "mean", unit: "°C" }
+  ];
+  const records = [];
+  for (let province = 0; province < 3; province++) {
+    for (let day = 1; day <= 2; day++) records.push({
+      date: new Date(`2026-09-0${day}T00:00:00Z`),
+      province: `P${province}`,
+      rain: province + day,
+      temperature: 20 + province + day
+    });
+  }
+  const suggestion = { id: "line", title: "Thời tiết", reason: "Lý do dài", bindings: { x: "date", y: ["rain", "temperature"], series: "province" }, agg: null };
+  const initial = buildLineChartOption(suggestion, records, metricColumns);
+  assert.equal(initial.availableSeries.length, 3);
+  assert.deepEqual(initial.availableMeasures.map(item => item.key), ["rain", "temperature"]);
+  assert.equal(initial.activeMeasure, "rain");
+  assert.equal(initial.config.aggregation, "sum");
+
+  const changed = buildLineChartOption(suggestion, records, metricColumns, { selectedSeries: ["P1", "P2"], measure: "temperature" });
+  assert.deepEqual(changed.selectedSeries, ["P1", "P2"]);
+  assert.equal(changed.activeMeasure, "temperature");
+  assert.equal(changed.config.aggregation, "mean");
+  assert.equal(changed.config.title, "Nhiệt độ trung bình theo ngày");
+  assert.equal(changed.config.subtitle, "2/3 chuỗi · 2026-09-01 – 2026-09-02");
+  assert.equal(changed.config.unit, "°C");
+  assert.equal(changed.config.data[0].P1, 22);
+});
+
 test("feasibility kết hợp coverage với confidence và khóa line chỉ có một mốc", () => {
   const result = evaluateSuggestion(
     { id: "line", chartType: "line", title: "L", bindings: { x: "date", y: ["rain"] }, confidence: .9 },

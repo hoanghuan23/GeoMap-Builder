@@ -66,3 +66,41 @@ test("choropleth aggregate nhiều dòng cùng địa danh thay vì tạo polygo
   assert.equal(result.features[0].properties.rain, 5);
   assert.equal(result.features[0].properties.__record_count, 2);
 });
+
+test("choropleth copy schema nguồn và không chọn ngẫu nhiên giá trị phân loại", () => {
+  const recommendation = { geometry: { field: "province" }, metricField: "revenue", aggregation: "sum" };
+  const columns = [
+    { name: "province", role: "geo" },
+    { name: "month", role: "time", granularity: "month" },
+    { name: "revenue", role: "measure", aggDefault: "sum" },
+    { name: "orders", role: "measure", aggDefault: "sum" },
+    { name: "channel", role: "category" },
+    { name: "note", role: "text" },
+    { name: "ignored", role: "ignore" }
+  ];
+  const result = joinRecordsToMapTilerBoundaries([
+    { province: "Lào Cai", month: new Date("2026-12-01T00:00:00Z"), revenue: 2, orders: 3, channel: "Website", note: "ổn định", ignored: "a" },
+    { province: "Lào Cai", month: new Date("2026-12-01T00:00:00Z"), revenue: 4, orders: 5, channel: "Cửa hàng", note: "ổn định", ignored: "b" }
+  ], { type: "FeatureCollection", features: [boundary("Lào Cai", 0)] }, recommendation, { columns });
+  const properties = result.features[0].properties;
+  assert.equal(properties.revenue, 6);
+  assert.equal(properties.orders, 8);
+  assert.equal(properties.month, "2026-12-01T00:00:00.000Z");
+  assert.equal(properties.channel, "Nhiều giá trị (2)");
+  assert.equal(properties.note, "ổn định");
+  assert.equal(properties.ignored, undefined);
+});
+
+test("choropleth giữ Kênh bán chính khi các dòng đồng nhất", () => {
+  const result = joinRecordsToMapTilerBoundaries([
+    { province: "Lào Cai", value: 2, channel: "Website" },
+    { province: "Lào Cai", value: 4, channel: "Website" }
+  ], { type: "FeatureCollection", features: [boundary("Lào Cai", 0)] }, {
+    geometry: { field: "province" }, metricField: "value", aggregation: "sum"
+  }, { columns: [
+    { name: "province", role: "geo" },
+    { name: "value", role: "measure", aggDefault: "sum" },
+    { name: "channel", role: "category", labelVi: "Kênh bán chính" }
+  ] });
+  assert.equal(result.features[0].properties.channel, "Website");
+});

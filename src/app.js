@@ -27,6 +27,7 @@ import { fetchCurrentWeather, formatVisibility, readCachedWeather, WEATHER_CACHE
 import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient } from "./renderers/weather-style.js";
 import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } from "./geojson-layers.js";
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
+import { createAiPopupContent } from "./ai-popup.js";
 import { applyPipelineFilters, chartOptionForSuggestion, defaultTimeFilter, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-client.js";
@@ -1024,22 +1025,7 @@ function showMetroComparison(event) {
 
 function aiWeatherPopupContent(feature) {
   const { recommendation } = state.aiDataset;
-  const card = document.createElement("div");
-  card.className = "weather-popup";
-  const title = document.createElement("strong");
-  title.textContent = feature.properties?.[recommendation.geometry?.field] || feature.properties?.h3 || "Khu vực dữ liệu";
-  const list = document.createElement("dl");
-  const detailFields = [...new Set([...(recommendation.filters || []).map(filter => filter.field), ...recommendation.numericFields])];
-  for (const field of detailFields) {
-    if (feature.properties?.[field] == null || feature.properties[field] === "") continue;
-    const row = document.createElement("div");
-    const term = document.createElement("dt"); const value = document.createElement("dd");
-    const filter = recommendation.filters.find(item => item.field === field);
-    term.textContent = filter?.label || field; value.textContent = displayFilterValue(feature.properties[field], filter?.control);
-    row.append(term, value); list.append(row);
-  }
-  card.append(title, list);
-  return card;
+  return createAiPopupContent(document, feature, state.aiDataset.analysis?.columns || [], recommendation.geometry?.field);
 }
 
 function showAiPolygonDetails(event) {
@@ -1363,6 +1349,7 @@ function renderChartStyleControls() {
     series: state.chartConfig.series,
     onChange(nextConfig) {
       state.barStyle = mergeBarConfig(nextConfig);
+      if (state.chartConfig.chartKind === "line") state.lineLabelsOn = Boolean(nextConfig.showDataLabels);
       if (isAiBar && nextConfig.limit !== panelConfig.limit) {
         state.aiDataset.barLimits[activeAiSuggestion.id] = nextConfig.limit;
         activateAiChartSuggestion(activeAiSuggestion);
@@ -1747,6 +1734,22 @@ function populateAiLineSeries(option) {
   toggle.append(toggleText, chevron); multiselect.append(toggle, menu); label.append(caption, multiselect); controls.append(label); $("ai-data-filters").hidden = false;
 }
 
+function appendAiLineMeasure(option) {
+  if ((option.availableMeasures?.length || 0) < 2) return;
+  const label = document.createElement("label");
+  const caption = document.createElement("span");
+  const select = document.createElement("select");
+  caption.textContent = "Chỉ số";
+  select.className = "ai-line-measure-selector";
+  select.setAttribute("aria-label", "Chọn chỉ số cho biểu đồ đường");
+  select.replaceChildren(...option.availableMeasures.map(item =>
+    Object.assign(document.createElement("option"), { value: item.key, textContent: item.label })));
+  select.value = option.activeMeasure;
+  label.append(caption, select);
+  $("ai-filter-controls").prepend(label);
+  $("ai-data-filters").hidden = false;
+}
+
 function populateAiBarMetric(suggestion) {
   const controls = $("ai-filter-controls");
   const measures = state.aiDataset.analysis.columns.filter(column => column.role === "measure");
@@ -1765,8 +1768,9 @@ function populateAiBarMetric(suggestion) {
 function activateAiChartSuggestion(suggestion) {
   const dataset = state.aiDataset;
   const selectedSeries = dataset.seriesSelections?.[suggestion.id] || null;
+  const measure = dataset.lineMeasures?.[suggestion.id] ?? null;
   const top = suggestion.chartType === "bar" ? dataset.barLimits?.[suggestion.id] ?? 12 : undefined;
-  const option = chartOptionForSuggestion(suggestion, dataset.records, dataset.analysis.columns, { selectedSeries, top });
+  const option = chartOptionForSuggestion(suggestion, dataset.records, dataset.analysis.columns, { selectedSeries, top, measure });
   if (!option?.config?.data?.length) throw new Error("Không còn dữ liệu hợp lệ để dựng biểu đồ.");
   dataset.activeChartOption = option;
   if (!dataset.seriesSelections) dataset.seriesSelections = {};
@@ -1774,10 +1778,12 @@ function activateAiChartSuggestion(suggestion) {
   clearMapForAiChart();
   state.mapType = suggestion.id; state.chartMapping = null; state.mappingWarning = "";
   const chartStyle = option.config.chartKind === "pie" ? state.pieStyle : state.barStyle;
-  state.chartConfig = { ...option.config, ...chartStyle, ...(suggestion.chartType === "bar" ? { limit: "all" } : {}) };
+  // line dùng chung barStyle nhưng nhãn số mặc định tắt; chỉ bật khi người dùng tự bật
+  const lineOverrides = option.config.chartKind === "line" ? { showDataLabels: state.lineLabelsOn ?? false } : {};
+  state.chartConfig = { ...option.config, ...chartStyle, ...lineOverrides, ...(suggestion.chartType === "bar" ? { limit: "all" } : {}) };
   $("chart-canvas").hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
   setDataPanelVisible(false); showChartStyleControls(true); renderChartCanvas();
-  if (suggestion.chartType === "line") populateAiLineSeries(option);
+  if (suggestion.chartType === "line") { populateAiLineSeries(option); appendAiLineMeasure(option); }
   else populateAiBarMetric(suggestion);
   updateModelSections(); renderAiSuggestionGrid();
   setStatus(`Đang hiển thị ${suggestion.title}.`, true);
@@ -1808,7 +1814,8 @@ async function refreshAiH3({ fit = false } = {}) {
     lngField: suggestion.bindings.lng,
     valueField: suggestion.bindings.value,
     aggregation,
-    resolution: state.resolution
+    resolution: state.resolution,
+    columns: dataset.analysis.columns
   });
   if (result.stats.coordinateRate < .7 || result.stats.cellCount < 2) throw new Error("Không đủ tọa độ hợp lệ để tạo ít nhất hai ô H3.");
   if (!dataset.spatialData) {
@@ -1876,7 +1883,7 @@ async function filteredAiBoundary({ fit = false } = {}) {
   if (selected?.chartType !== "choropleth") return;
   const { records, boundaries, recommendation } = state.aiDataset;
   const filters = selectedAiFilters(); state.aiDataset.filters = filters;
-  const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters });
+  const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters, columns: state.aiDataset.analysis.columns });
   state.boundary = data; state.sourceBoundary = data;
   state.baselineCount = null;
   const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)];
@@ -1947,7 +1954,7 @@ async function activateAiChoropleth(suggestion) {
     setStatus(suggestion.unavailableReason, true);
     return false;
   }
-  const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters: initialFilters });
+  const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters: initialFilters, columns: dataset.analysis.columns });
   if (!data.features.length) throw new Error(`Không ghép được trường ${geometryLabel} với ranh giới hành chính.`);
   const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)];
   const profile = analyzeSpatialData(data, { numericFields });
@@ -1992,6 +1999,7 @@ async function replaceAiPipelineData(pipeline, name) {
     selectedSuggestionId: null,
     geoAliases: {},
     seriesSelections: {},
+    lineMeasures: {},
     barLimits: {},
     recommendation: null,
     boundaries: null
@@ -2027,7 +2035,8 @@ function selectChartOption(type) {
     $("ai-filter-controls").replaceChildren(); $("ai-data-filters").hidden = true;
   }
   const chartStyle = option.config.chartKind === "pie" ? state.pieStyle : state.barStyle;
-  state.mapType = option.id; state.chartConfig = { ...option.config, ...chartStyle };
+  const lineOverrides = option.config.chartKind === "line" ? { showDataLabels: state.lineLabelsOn ?? false } : {};
+  state.mapType = option.id; state.chartConfig = { ...option.config, ...chartStyle, ...lineOverrides };
   state.chartMapping = { datasetPath: option.config.sourcePath, xField: option.config.xField, metrics: option.config.series.map(item => item.key) };
   state.mappingWarning = "";
   document.querySelectorAll("#map-type-grid .map-type").forEach(button => button.classList.toggle("active", button.dataset.type === type));
@@ -2466,6 +2475,14 @@ function bindUI() {
       dataset.recommendation = recommendationForSuggestion(suggestion);
       if (suggestion.chartType === "hex_h3") await refreshAiH3();
       else await filteredAiBoundary();
+      return;
+    }
+    if (event.target.matches(".ai-line-measure-selector")) {
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+      if (suggestion?.chartType !== "line") return;
+      dataset.lineMeasures = { ...dataset.lineMeasures, [suggestion.id]: event.target.value };
+      activateAiChartSuggestion(suggestion);
       return;
     }
     if (event.target.matches(".ai-series-filter")) {
