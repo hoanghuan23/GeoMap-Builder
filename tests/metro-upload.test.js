@@ -6,6 +6,7 @@ import * as metro from "../src/metro-data.js";
 import * as capabilities from "../src/data-capabilities.js";
 import * as polygonStyle from "../src/renderers/polygon-style.js";
 import * as geojsonLayers from "../src/geojson-layers.js";
+import { PointRenderer } from "../src/renderers/point-renderer.js";
 import { PolygonRenderer } from "../src/renderers/polygon-renderer.js";
 import * as congestion from "../src/congestion-data.js";
 import * as transport from "../src/transport-style.js";
@@ -39,7 +40,7 @@ function createHarness() {
     moveLayer() {}, on() {}, resize() {}, fitBounds() {}
   };
   const context = vm.createContext({
-    ...metro, ...capabilities, ...polygonStyle, ...geojsonLayers, ...congestion, ...transport, ...layerOrder, PolygonRenderer,
+    ...metro, ...capabilities, ...polygonStyle, ...geojsonLayers, ...congestion, ...transport, ...layerOrder, PointRenderer, PolygonRenderer,
     CONFIG: { DEFAULT_RESOLUTION: 5, MAX_RENDER_CELLS: 120000 },
     DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     mergeBarConfig: () => ({}), mergePieConfig: () => ({}),

@@ -10,13 +10,19 @@ const SUM_HINT = /(tổng|total|amount|doanh thu|revenue|lượng mưa|rain|coun
 
 export const AI_CHART_REGISTRY = Object.freeze({
   choropleth: Object.freeze({
-    label: "Bản đồ vùng",
+    label: "Biểu đồ vùng",
     slots: Object.freeze({ region: Object.freeze(["geo"]), value: Object.freeze(["measure"]) }),
     icon: "polygon",
     renderer: "MapLibre"
   }),
+  point: Object.freeze({
+    label: "Biểu đồ điểm",
+    slots: Object.freeze({ lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]) }),
+    icon: "point",
+    renderer: "MapLibre"
+  }),
   hex_h3: Object.freeze({
-    label: "Bản đồ lục giác H3",
+    label: "Biểu đồ lục giác",
     slots: Object.freeze({ lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]), value: Object.freeze(["measure"]) }),
     icon: "hexagon",
     renderer: "H3"
@@ -163,8 +169,9 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds) {
   if (!spec || typeof raw.id !== "string" || !raw.id.trim() || seenIds.has(raw.id)) return null;
   const b = raw.bindings || {};
   const required = raw.chartType === "choropleth" ? ["region", "value"]
-    : raw.chartType === "hex_h3" ? ["lat", "lng", "value"]
-      : raw.chartType === "line" ? ["x", "y"] : ["x", "y"];
+    : raw.chartType === "point" ? ["lat", "lng"]
+      : raw.chartType === "hex_h3" ? ["lat", "lng", "value"]
+        : raw.chartType === "line" ? ["x", "y"] : ["x", "y"];
   const normalizedBindings = {};
   for (const slot of required) {
     const value = b[slot];
@@ -205,7 +212,7 @@ export function fallbackAnalysis(profile, { datasetTitle = "Dữ liệu tải l�
   const region = geo.find(column => ["admin1", "admin2", "country"].includes(column.geoLevel));
   const suggestions = [];
   if (region && measures[0]) suggestions.push({ id: "rule-choropleth", chartType: "choropleth", title: `${measures[0].name} theo ${region.name}`, bindings: { region: region.name, value: measures[0].name }, agg: measures[0].aggDefault, confidence: .72, reason: "Nhận diện theo quy tắc từ cột địa danh và chỉ số số.", source: "rule" });
-  if (lat && lng && measures[0]) suggestions.push({ id: "rule-h3", chartType: "hex_h3", title: `${measures[0].name} theo ô H3`, bindings: { lat: lat.name, lng: lng.name, value: measures[0].name }, agg: measures[0].aggDefault, confidence: .75, reason: "Nhận diện theo quy tắc từ cặp tọa độ và chỉ số số.", source: "rule" });
+  if (lat && lng) suggestions.push({ id: "rule-point", chartType: "point", title: "Vị trí các bản ghi", bindings: { lat: lat.name, lng: lng.name }, agg: null, confidence: .95, reason: "Mỗi dòng có một cặp kinh độ, vĩ độ nên được hiển thị trực tiếp bằng điểm.", source: "rule" });
   if (time && measures.length) suggestions.push({ id: "rule-line", chartType: "line", title: `Xu hướng theo ${time.name}`, bindings: { x: time.name, y: measures.slice(0, 3).map(column => column.name), ...(region || category ? { series: (region || category).name } : {}) }, agg: null, confidence: .68, reason: "Nhận diện theo quy tắc từ cột thời gian và chỉ số số.", source: "rule" });
   const x = region || category;
   if (x) suggestions.push({ id: "rule-bar", chartType: "bar", title: measures[0] ? `${measures[0].name} theo ${x.name}` : `Số bản ghi theo ${x.name}`, bindings: { x: x.name, y: measures[0]?.name || "count" }, agg: measures[0]?.aggDefault || "count", confidence: .65, reason: "Nhận diện theo quy tắc từ cột phân loại.", source: "rule" });

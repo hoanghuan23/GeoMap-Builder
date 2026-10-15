@@ -5,6 +5,8 @@ import { latLngToCell } from "h3-js";
 
 const AGGREGATIONS = new Set(["sum", "mean", "min", "max", "count"]);
 const SUM_HINT = /(tổng|total|amount|doanh thu|revenue|lượng mưa|rain|count|số lượng)/i;
+const LATITUDE_HINT = /(^|[\s_.-])(lat|latitude|vĩ độ|vi do)([\s_.-]|$)/i;
+const LONGITUDE_HINT = /(^|[\s_.-])(lng|lon|long|longitude|kinh độ|kinh do)([\s_.-]|$)/i;
 
 function columnMap(columns) {
   return new Map((columns || []).map(column => [column.name, column]));
@@ -252,6 +254,17 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
     feasibilityScore = Math.min(feasibilityScore, Math.min(1, groups / 2));
     if (!mapTilerAvailable) { available = false; unavailableReason = "Chưa cấu hình MAPTILER_API_KEY."; }
     else if (groups < 2) { available = false; unavailableReason = "Cần ít nhất hai địa danh hợp lệ."; }
+  } else if (suggestion.chartType === "point") {
+    const { lat, lng } = suggestion.bindings;
+    const coordinateRows = records.filter(record => {
+      if (!isFiniteValue(record?.[lat]) || !isFiniteValue(record?.[lng])) return false;
+      const latitude = Number(record[lat]); const longitude = Number(record[lng]);
+      return Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180;
+    });
+    const coordinateRate = records.length ? coordinateRows.length / records.length : 0;
+    feasibilityScore = Math.min(feasibilityScore, coordinateRate);
+    if (coordinateRate < .7) { available = false; unavailableReason = "Ít hơn 70% dòng có tọa độ hợp lệ."; }
+    else if (!coordinateRows.length) { available = false; unavailableReason = "Không có tọa độ hợp lệ để hiển thị."; }
   } else if (suggestion.chartType === "hex_h3") {
     const { lat, lng, value } = suggestion.bindings;
     const coordinateRows = records.filter(record => {
@@ -273,8 +286,28 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
 }
 
 export function prepareSuggestions(analysis, records, validRowRate, options = {}) {
-  return analysis.suggestions.map(suggestion => evaluateSuggestion(suggestion, records, analysis.columns, validRowRate, options))
-    .sort((a, b) => b.effectiveConfidence - a.effectiveConfidence || a.title.localeCompare(b.title, "vi"));
+  const latitude = analysis.columns.find(column => column.geoLevel === "point_lat" || LATITUDE_HINT.test(column.name));
+  const longitude = analysis.columns.find(column => column.geoLevel === "point_lng" || LONGITUDE_HINT.test(column.name));
+  let suggestions = analysis.suggestions || [];
+  if (latitude && longitude) {
+    suggestions = suggestions.filter(suggestion => suggestion.chartType !== "hex_h3");
+    if (!suggestions.some(suggestion => suggestion.chartType === "point")) {
+      suggestions = [{
+        id: "coordinate-point",
+        chartType: "point",
+        title: "Vị trí các bản ghi",
+        bindings: { lat: latitude.name, lng: longitude.name },
+        agg: null,
+        confidence: .95,
+        reason: "Mỗi dòng có một cặp kinh độ, vĩ độ nên được hiển thị trực tiếp bằng điểm.",
+        source: "rule"
+      }, ...suggestions];
+    }
+  }
+  return suggestions.map(suggestion => evaluateSuggestion(suggestion, records, analysis.columns, validRowRate, options))
+    .sort((a, b) => latitude && longitude
+      ? Number(b.chartType === "point") - Number(a.chartType === "point") || b.effectiveConfidence - a.effectiveConfidence || a.title.localeCompare(b.title, "vi")
+      : b.effectiveConfidence - a.effectiveConfidence || a.title.localeCompare(b.title, "vi"));
 }
 
 export function chartOptionForSuggestion(suggestion, records, columns, options = {}) {

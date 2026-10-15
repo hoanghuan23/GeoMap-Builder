@@ -111,3 +111,53 @@ test("fallback ưu tiên chiều địa phương thay vì thuộc tính mô tả
   ] });
   assert.equal(result.suggestions.find(item => item.chartType === "bar").bindings.x, "province");
 });
+
+test("fallback dùng Point và không đề xuất H3 cho bảng có kinh độ, vĩ độ", () => {
+  const coordinateProfile = {
+    rowCount: 2,
+    columns: [
+      { name: "Mã cửa hàng", inferredType: "text", uniqueCount: 2 },
+      { name: "Tên cửa hàng", inferredType: "text", uniqueCount: 2 },
+      { name: "Vĩ độ", inferredType: "number", uniqueCount: 2 },
+      { name: "Kinh độ", inferredType: "number", uniqueCount: 2 },
+      { name: "Doanh thu", inferredType: "number", uniqueCount: 2 }
+    ]
+  };
+  const result = fallbackAnalysis(coordinateProfile);
+  const point = result.suggestions.find(item => item.chartType === "point");
+
+  assert.deepEqual(point.bindings, { lat: "Vĩ độ", lng: "Kinh độ" });
+  assert.equal(result.suggestions.some(item => item.chartType === "hex_h3"), false);
+});
+
+test("validator chấp nhận đề xuất Point với binding kinh độ, vĩ độ", () => {
+  const coordinateProfile = {
+    rowCount: 2,
+    columns: [
+      { name: "lat", inferredType: "number", uniqueCount: 2 },
+      { name: "lng", inferredType: "number", uniqueCount: 2 },
+      { name: "name", inferredType: "text", uniqueCount: 2 }
+    ]
+  };
+  const result = validateAndNormalizeAnalysis({
+    datasetTitle: "Cửa hàng",
+    grain: "một cửa hàng",
+    columns: [
+      { name: "lat", role: "geo", geoLevel: "point_lat" },
+      { name: "lng", role: "geo", geoLevel: "point_lng" },
+      { name: "name", role: "text" }
+    ],
+    suggestions: [{
+      id: "stores-point",
+      chartType: "point",
+      title: "Vị trí cửa hàng",
+      bindings: { lat: "lat", lng: "lng" },
+      confidence: .98,
+      reason: "Mỗi dòng là một cửa hàng có tọa độ."
+    }]
+  }, coordinateProfile);
+
+  assert.equal(result.source, "ai");
+  assert.equal(result.suggestions[0].chartType, "point");
+  assert.deepEqual(result.suggestions[0].bindings, { lat: "lat", lng: "lng" });
+});

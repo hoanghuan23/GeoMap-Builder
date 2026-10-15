@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBarChartOption, buildLineChartOption, evaluateSuggestion, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
+import { buildBarChartOption, buildLineChartOption, evaluateSuggestion, prepareSuggestions, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
 
 const columns = [
   { name: "date", role: "time" },
@@ -148,6 +148,39 @@ test("H3 bị khóa nếu các điểm hợp lệ chỉ tạo thành một cell"
   );
   assert.equal(result.available, false);
   assert.match(result.unavailableReason, /hai ô H3/);
+});
+
+test("cặp tọa độ luôn tạo đề xuất Point và loại đề xuất H3", () => {
+  const analysis = {
+    columns: [
+      { name: "Vĩ độ", role: "geo", geoLevel: "point_lat" },
+      { name: "Kinh độ", role: "geo", geoLevel: "point_lng" },
+      { name: "Doanh thu", role: "measure", aggDefault: "sum" }
+    ],
+    suggestions: [
+      {
+        id: "h3",
+        chartType: "hex_h3",
+        title: "Doanh thu theo ô H3",
+        bindings: { lat: "Vĩ độ", lng: "Kinh độ", value: "Doanh thu" },
+        confidence: .99
+      },
+      {
+        id: "bar",
+        chartType: "bar",
+        title: "Doanh thu",
+        bindings: { x: "Doanh thu", y: "Doanh thu" },
+        confidence: 1
+      }
+    ]
+  };
+  const suggestions = prepareSuggestions(analysis, [
+    { "Vĩ độ": 21.02, "Kinh độ": 105.83, "Doanh thu": 10 },
+    { "Vĩ độ": 21.05, "Kinh độ": 105.79, "Doanh thu": 20 }
+  ], { "Vĩ độ": 1, "Kinh độ": 1, "Doanh thu": 1 });
+
+  assert.deepEqual(suggestions.map(item => item.chartType), ["point", "bar"]);
+  assert.equal(suggestions[0].available, true);
 });
 
 test("đổi chỉ số cập nhật phép gộp và tiêu đề cho bar, polygon và H3", () => {

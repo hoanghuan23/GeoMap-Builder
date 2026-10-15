@@ -19,6 +19,7 @@ import { clearDataMappingPanel, renderDataMappingPanel } from "./charts/componen
 import { BAR_COLORS, dataForBarMapping, humanizeField, reconcileSeriesColors, seriesFromFields, validateBarMapping } from "./charts/data-transformers.js";
 import { renderChartIcon } from "./charts/chart-icons.js";
 import { renderMapIcon } from "./renderers/map-icons.js";
+import { PointRenderer } from "./renderers/point-renderer.js";
 import { PolygonRenderer } from "./renderers/polygon-renderer.js";
 import { polygonColorField, polygonFillExpression, polygonLegendScale } from "./renderers/polygon-style.js";
 import { createMapSearch, landOnlyBoundary, loadMapTilerAdministrativeBoundaries } from "./map-search.js";
@@ -452,7 +453,11 @@ function addMapLayers() {
     "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 12, 28], "heatmap-opacity": .82
   } });
   map.addLayer({ id: "point-circle", type: "circle", source: "point-data", paint: { "circle-radius": 7, "circle-color": "#7c5cff", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.25, "circle-opacity": .86 } });
-  map.addLayer({ id: "point-marker", type: "circle", source: "point-data", paint: { "circle-radius": 4, "circle-color": "#00d084", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1, "circle-opacity": .95 } });
+  PointRenderer.render(map, state.pointData, {
+    sourceId: "point-data",
+    layerId: "point-marker",
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 6, 16, 10] }
+  });
   map.addSource("vietnam-boundary", { type: "geojson", data: state.boundary || EMPTY_FEATURE_COLLECTION });
   map.addLayer({ id: "vietnam-border", type: "line", source: "vietnam-boundary", paint: { "line-color": "#00e65c", "line-width": 2 } });
   PolygonRenderer.render(map, state.boundary || EMPTY_FEATURE_COLLECTION, {
@@ -519,6 +524,19 @@ function addMapLayers() {
   map.on("mouseenter", "point-circle", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "point-circle", () => map.getCanvas().style.cursor = "");
   map.on("click", "point-marker", event => {
     const feature = event.features?.[0]; if (!feature) return;
+    const activeSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
+    if (activeSuggestion?.chartType === "point") {
+      const columns = state.aiDataset.analysis?.columns || [];
+      const titleColumn = columns.find(column => /(^|[\s_.-])(tên|ten|name)([\s_.-]|$)/i.test(column.name))
+        || columns.find(column => column.role === "id")
+        || columns.find(column => ["category", "text"].includes(column.role));
+      const card = createAiPopupContent(document, feature, columns, titleColumn?.name);
+      new maplibregl.Popup({ offset: 10, maxWidth: "360px", className: "ai-weather-popup" })
+        .setLngLat(feature.geometry.coordinates)
+        .setDOMContent(card)
+        .addTo(map);
+      return;
+    }
     const rows = Object.entries(feature.properties || {}).map(([key, value]) => `<b>${key}:</b> ${String(value)}`).join("<br>");
     new maplibregl.Popup({ offset: 7 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
   });
@@ -1681,10 +1699,10 @@ function recommendationForSuggestion(suggestion) {
   const timeFilter = defaultTimeFilter(dataset.records, dataset.analysis.columns, suggestion.chartType);
   return {
     canRenderMap: true,
-    visualization: suggestion.chartType === "choropleth" ? "polygon" : "h3",
+    visualization: suggestion.chartType === "choropleth" ? "polygon" : suggestion.chartType === "point" ? "point" : "h3",
     geometry: regionField
       ? { field: regionField, provider: "maptiler", placeType: region?.geoLevel === "admin2" ? "county" : "region" }
-      : { field: null, provider: "coordinates", placeType: "point" },
+      : { field: null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: "point" },
     metricField: valueField,
     numericFields: dataset.analysis.columns.filter(column => column.role === "measure").map(column => column.name),
     filters: [
@@ -1695,7 +1713,7 @@ function recommendationForSuggestion(suggestion) {
     explanation: suggestion.reason,
     confidence: suggestion.effectiveConfidence,
     source: dataset.analysis.source,
-    aggregation: resolveAggregation(suggestion, dataset.analysis.columns)
+    aggregation: valueField ? resolveAggregation(suggestion, dataset.analysis.columns) : null
   };
 }
 
@@ -1711,7 +1729,9 @@ function createAiSuggestionButton(suggestion) {
   button.dataset.type = suggestion.id;
   button.disabled = !suggestion.available && !suggestion.repairable;
   button.title = suggestion.available ? suggestion.reason : suggestion.repairable ? `${suggestion.unavailableReason} Bấm để sửa alias.` : suggestion.unavailableReason;
-  if (["choropleth", "hex_h3"].includes(suggestion.chartType)) renderMapIcon(icon, suggestion.chartType === "choropleth" ? "polygon" : "hexagon");
+  if (["choropleth", "point", "hex_h3"].includes(suggestion.chartType)) {
+    renderMapIcon(icon, suggestion.chartType === "choropleth" ? "polygon" : suggestion.chartType === "point" ? "point" : "hexagon");
+  }
   else renderChartIcon(icon, suggestion.chartType === "line" ? "line" : "singleBar");
   title.className = "ai-suggestion-title"; title.textContent = AI_CHART_REGISTRY[suggestion.chartType].label;
   reason.className = "ai-suggestion-reason"; reason.textContent = suggestion.available ? suggestion.reason : suggestion.unavailableReason;
@@ -1908,6 +1928,37 @@ function renderGeoRepair(unmatched = []) {
   button.type = "button"; button.className = "secondary-button apply-geo-aliases"; button.textContent = "Thử ghép lại"; panel.append(button); controls.append(panel); $("ai-data-filters").hidden = false;
 }
 
+function activateAiPoint(suggestion) {
+  cancelAiBoundaryLoad();
+  const dataset = state.aiDataset;
+  const pointData = recordsToPointGeoJSON(dataset.records, {
+    latField: suggestion.bindings.lat,
+    lngField: suggestion.bindings.lng
+  });
+  const coordinateRate = dataset.records.length ? pointData.features.length / dataset.records.length : 0;
+  dataset.recommendation = recommendationForSuggestion(suggestion);
+  dataset.spatialData = pointData;
+  dataset.filters = {};
+  $("ai-filter-controls").replaceChildren(); $("ai-data-filters").hidden = true;
+  state.chartConfig = null; state.chartMapping = null; state.mappingWarning = "";
+  clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
+  setDataPanelVisible(false); showChartStyleControls(false);
+  state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = pointData;
+  state.boundary = pointData; state.sourceBoundary = pointData; state.mapType = "point";
+  state.dataProfile = analyzeSpatialData(pointData, {
+    numericFields: dataset.analysis.columns.filter(column => column.role === "measure").map(column => column.name)
+  });
+  map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION);
+  map.getSource("point-data")?.setData(pointData);
+  map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+  updateModelSections(); applyStyle(); renderAiSuggestionGrid();
+  fitGeoJSON(pointData);
+  $("file-note").textContent = `${pointData.features.length.toLocaleString("vi-VN")} điểm · ${Math.round(coordinateRate * 100)}% tọa độ hợp lệ`;
+  setStatus(`Đã hiển thị ${pointData.features.length.toLocaleString("vi-VN")} điểm dữ liệu.`, true);
+  return true;
+}
+
 async function refreshAiH3({ fit = false } = {}) {
   const dataset = state.aiDataset; const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
   if (!dataset || suggestion?.chartType !== "hex_h3") return;
@@ -1977,6 +2028,7 @@ async function selectAiSuggestion(id) {
     activateAiChartSuggestion(suggestion);
     return true;
   }
+  if (suggestion.chartType === "point") return activateAiPoint(suggestion);
   if (suggestion.chartType === "choropleth") return activateAiChoropleth(suggestion);
   return activateAiH3(suggestion);
 }
