@@ -60,7 +60,7 @@
         </div>
       </section>
       <section id="ai-data-filters" class="panel-section ai-data-filters" hidden>
-        <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p>Chọn chỉ số, địa phương và khoảng thời gian</p></div></div>
+        <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p id="ai-filter-description">Chọn chỉ số, địa phương và khoảng thời gian</p></div></div>
         <div id="ai-filter-controls" class="ai-filter-controls"></div>
       </section>
       <section id="resolution-section" class="panel-section" hidden>
@@ -116,6 +116,16 @@
             <label id="border-color-field" class="field inline-field">Màu viền<span class="color-control"><input id="border-color" type="color" value="#ffffff"><code id="border-color-value">#FFFFFF</code></span></label>
             <div id="line-width-field" class="field range-field compact"><div class="field-label"><label for="line-width">Độ dày đường viền</label><output id="line-width-value">0.5 px</output></div><input id="line-width" type="range" min=".1" max="4" step=".1" value=".5"></div>
           </div>
+          <div id="point-style-controls" hidden>
+            <div class="field range-field compact"><div class="field-label"><label for="point-size">Kích thước điểm</label><output id="point-size-value">100%</output></div><input id="point-size" type="range" min="50" max="200" step="10" value="100"></div>
+            <label id="point-fixed-color-field" class="field inline-field">Màu điểm<span class="color-control"><input id="point-color" type="color" value="#00d084"><code id="point-color-value">#00D084</code></span></label>
+            <div id="point-group-color-field" class="field" hidden><div class="field-label">Màu từng nhóm</div><div id="point-group-colors" class="bar-color-list"></div></div>
+            <div class="field range-field compact"><div class="field-label"><label for="point-opacity">Độ mờ</label><output id="point-opacity-value">95%</output></div><input id="point-opacity" type="range" min="0" max="1" step=".01" value=".95"></div>
+            <label class="toggle-row"><span>Hiển thị đường viền</span><input id="point-show-border" type="checkbox" checked><i></i></label>
+            <label class="field inline-field">Màu viền<span class="color-control"><input id="point-border-color" type="color" value="#ffffff"><code id="point-border-color-value">#FFFFFF</code></span></label>
+            <div class="field range-field compact"><div class="field-label"><label for="point-border-width">Độ dày đường viền</label><output id="point-border-width-value">1 px</output></div><input id="point-border-width" type="range" min="0" max="4" step=".1" value="1"></div>
+            <label id="point-show-legend-field" class="toggle-row"><span>Hiển thị chú giải</span><input id="point-show-legend" type="checkbox" checked><i></i></label>
+          </div>
           <div id="bar-style-controls" hidden></div>
           <div class="builder-actions"><button id="reset-config">♙&nbsp; Đặt lại cấu hình</button><button id="clear-data">↻&nbsp; Xóa dữ liệu</button></div>
         </div>
@@ -126,6 +136,7 @@
         <div id="metro-legend" class="metro-legend" hidden aria-live="polite"></div>
         <div id="congestion-legend" class="congestion-legend" hidden aria-live="polite"></div>
         <div id="transport-legend" class="transport-legend" hidden aria-live="polite"></div>
+        <div id="point-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ điểm" aria-live="polite"></div>
         <div id="weather-legend" class="weather-legend" hidden aria-live="polite">
           <strong id="weather-legend-title">Nhiệt độ không khí (°C)</strong>
           <div id="weather-legend-scale" class="weather-legend-scale"></div>

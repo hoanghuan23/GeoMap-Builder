@@ -29,6 +29,7 @@ import { fetchCurrentWeather, formatVisibility, readCachedWeather, WEATHER_CACHE
 import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient } from "./renderers/weather-style.js";
 import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } from "./geojson-layers.js";
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
+import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
 import { applyPipelineFilters, chartOptionForSuggestion, defaultTimeFilter, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
@@ -1628,7 +1629,7 @@ function populateAiFilters(dataset) {
   const metricControls = [];
   const measureColumns = dataset.analysis?.columns?.filter(column => column.role === "measure") || [];
   if (recommendation.metricField && measureColumns.length > 1) {
-    const label = document.createElement("label"); const caption = document.createElement("span"); const select = document.createElement("select");
+    const label = document.createElement("label"); const caption = document.createElement("span"); const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
     caption.textContent = "Chỉ số"; select.className = "ai-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số hiển thị");
     select.replaceChildren(...measureColumns.map(column => Object.assign(document.createElement("option"), {
       value: column.name,
@@ -1678,7 +1679,7 @@ function populateAiFilters(dataset) {
       label.append(caption, multiselect);
       return [label];
     }
-    const select = document.createElement("select");
+    const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
     select.className = "ai-generated-filter";
     select.dataset.field = filter.field;
     select.setAttribute("aria-label", `Lọc theo ${caption.textContent}`);
@@ -1802,7 +1803,7 @@ function aiSelect(className, choices, value) {
   select.replaceChildren(...choices.map(([optionValue, text]) =>
     Object.assign(document.createElement("option"), { value: optionValue, textContent: text })));
   select.value = value;
-  return select;
+  return keepSelectOpenAfterMouseClick(select);
 }
 
 function buildAiSeriesPicker(option) {
@@ -1894,7 +1895,7 @@ function populateAiBarMetric(suggestion) {
   const measures = state.aiDataset.analysis.columns.filter(column => column.role === "measure");
   controls.replaceChildren();
   if (!measures.length) { $("ai-data-filters").hidden = true; return; }
-  const label = document.createElement("label"); const caption = document.createElement("span"); const select = document.createElement("select");
+  const label = document.createElement("label"); const caption = document.createElement("span"); const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
   caption.textContent = "Chỉ số"; select.className = "ai-chart-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số cho biểu đồ cột");
   const choices = [{ name: "count", labelVi: "Số bản ghi" }, ...measures];
   select.replaceChildren(...choices.map(column => Object.assign(document.createElement("option"), {
