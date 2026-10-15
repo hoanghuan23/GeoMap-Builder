@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBarChartOption, buildLineChartOption, evaluateSuggestion, prepareSuggestions, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
+import { buildBarChartOption, buildLineChartOption, defaultTimeFilter, evaluateSuggestion, prepareSuggestions, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
+import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { normalizeTabularRecords } from "../src/tabular-data.js";
+import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
+import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { createWeather34Workbook, WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
 
 const columns = [
   { name: "date", role: "time" },
@@ -148,6 +153,72 @@ test("H3 bị khóa nếu các điểm hợp lệ chỉ tạo thành một cell"
   );
   assert.equal(result.available, false);
   assert.match(result.unavailableReason, /hai ô H3/);
+});
+
+test("bảng thời tiết 34 tỉnh vẫn có biểu đồ vùng khi AI bỏ sót, lọc ngày rồi ghép đúng vùng", () => {
+  const parsed = parseSpreadsheetBuffer(createWeather34Workbook(), { sheetName: "Thoi_tiet_thang_9" });
+  const line = {
+    id: "weather-line", chartType: "line", title: "Xu hướng nhiệt độ", confidence: .95,
+    bindings: { x: "Ngày", y: ["Nhiệt độ trung bình"], series: "Tỉnh/thành phố" }
+  };
+  const analysis = validateAndNormalizeAnalysis({
+    datasetTitle: "Thời tiết", grain: "một tỉnh một ngày",
+    columns: [{ name: "Tỉnh/thành phố", role: "category" }],
+    suggestions: [line]
+  }, parsed.profile);
+  const normalized = normalizeTabularRecords(parsed.records, analysis.columns);
+  const suggestions = prepareSuggestions(analysis, normalized.records, normalized.validRowRate, { mapTilerAvailable: true });
+  const choropleth = suggestions.find(item => item.chartType === "choropleth");
+  assert.equal(choropleth.available, true);
+  assert.deepEqual(choropleth.bindings, { region: "Tỉnh/thành phố", value: "Nhiệt độ trung bình" });
+  assert.equal(choropleth.agg, "mean");
+  assert.equal(choropleth.source, "rule");
+  assert.equal(suggestions.find(item => item.chartType === "line").id, line.id);
+  assert.equal(suggestions.some(item => ["point", "hex_h3"].includes(item.chartType)), false);
+
+  const time = defaultTimeFilter(normalized.records, analysis.columns, choropleth.chartType);
+  assert.equal(time.default, "2026-09-30T00:00:00.000Z");
+  const boundaries = { type: "FeatureCollection", features: WEATHER_PROVINCES.map((name, index) => ({
+    type: "Feature", properties: { __data_location: name },
+    geometry: { type: "Polygon", coordinates: [[[index, 0], [index + 1, 0], [index + 1, 1], [index, 0]]] }
+  })) };
+  const data = joinRecordsToMapTilerBoundaries(normalized.records, boundaries, {
+    geometry: { field: choropleth.bindings.region },
+    metricField: choropleth.bindings.value,
+    aggregation: choropleth.agg
+  }, { filters: { [time.column]: time.default }, columns: analysis.columns });
+  assert.equal(data.features.length, 34);
+  for (const feature of data.features) {
+    const record = normalized.records.find(record => record["Tỉnh/thành phố"] === feature.properties.__location
+      && record["Ngày"].toISOString() === time.default);
+    assert.equal(feature.properties["Nhiệt độ trung bình"], record["Nhiệt độ trung bình"]);
+    assert.equal(feature.properties.__record_count, 1);
+  }
+});
+
+test("chỉ bổ sung biểu đồ vùng khi có số liệu hợp lệ ở ít nhất hai địa phương", () => {
+  const regionColumns = [
+    { name: "province", role: "geo", geoLevel: "admin1" },
+    { name: "temperature", role: "measure", aggDefault: "mean" }
+  ];
+  const analysis = { columns: regionColumns, suggestions: [] };
+  const coverage = { province: 1, temperature: 1 };
+  for (const records of [
+    [{ province: "Hà Nội", temperature: 29 }, { province: "Hà Nội", temperature: 30 }],
+    [{ province: "Hà Nội", temperature: 29 }, { province: "Huế", temperature: null }]
+  ]) {
+    assert.deepEqual(prepareSuggestions(analysis, records, coverage), []);
+  }
+  const records = [{ province: "Hà Nội", temperature: 29 }, { province: "Huế", temperature: 30 }];
+  const [unavailable] = prepareSuggestions(analysis, records, coverage, { mapTilerAvailable: false });
+  assert.equal(unavailable.chartType, "choropleth");
+  assert.equal(unavailable.available, false);
+  assert.match(unavailable.unavailableReason, /MAPTILER_API_KEY/);
+  const [available] = prepareSuggestions(analysis, records, coverage);
+  const preserved = prepareSuggestions({ ...analysis, suggestions: [available] }, records, coverage);
+  assert.equal(preserved.length, 1);
+  assert.equal(preserved[0].id, available.id);
+  assert.deepEqual(analysis.suggestions, []);
 });
 
 test("cặp tọa độ luôn tạo đề xuất Point và loại đề xuất H3", () => {

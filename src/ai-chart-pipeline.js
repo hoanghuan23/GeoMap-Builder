@@ -289,6 +289,25 @@ export function prepareSuggestions(analysis, records, validRowRate, options = {}
   const latitude = analysis.columns.find(column => column.geoLevel === "point_lat" || LATITUDE_HINT.test(column.name));
   const longitude = analysis.columns.find(column => column.geoLevel === "point_lng" || LONGITUDE_HINT.test(column.name));
   let suggestions = analysis.suggestions || [];
+  const region = analysis.columns.find(column => column.role === "geo" && ["country", "admin1", "admin2"].includes(column.geoLevel));
+  if (!latitude && !longitude && region && !suggestions.some(suggestion => suggestion.chartType === "choropleth")) {
+    const groups = groupRecords(records, region.name);
+    const measure = analysis.columns.find(column => column.role === "measure"
+      && groups.filter(group => group.records.some(record => isFiniteValue(record?.[column.name]))).length >= 2);
+    if (measure) {
+      const regionLabel = region.labelVi || humanizeField(region.name);
+      suggestions = [{
+        id: "regional-choropleth",
+        chartType: "choropleth",
+        title: `Biểu đồ vùng theo ${regionLabel.toLocaleLowerCase("vi")}`,
+        bindings: { region: region.name, value: measure.name },
+        agg: resolveAggregation({ bindings: { value: measure.name } }, analysis.columns),
+        confidence: .85,
+        reason: "Dữ liệu có địa danh hành chính và chỉ số theo từng vùng; có thể so sánh các vùng bằng màu sắc và lọc theo thời gian.",
+        source: "rule"
+      }, ...suggestions];
+    }
+  }
   if (latitude && longitude) {
     suggestions = suggestions.filter(suggestion => suggestion.chartType !== "hex_h3");
     if (!suggestions.some(suggestion => suggestion.chartType === "point")) {

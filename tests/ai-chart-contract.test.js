@@ -36,6 +36,30 @@ test("validator loại cột lạ/trùng, bù cột thiếu và chỉ loại sug
   assert.ok(result.validationErrors.length >= 3);
 });
 
+test("giữ nhận diện tỉnh/thành phố khi AI gán category hoặc thiếu geoLevel", () => {
+  const regionProfile = { rowCount: 2, columns: [
+    { name: "Tỉnh/thành phố", inferredType: "text", uniqueCount: 2 },
+    { name: "Nhiệt độ trung bình", inferredType: "number", uniqueCount: 2 }
+  ] };
+  for (const role of ["category", "text", "geo"]) {
+    const result = validateAndNormalizeAnalysis({
+      columns: [
+        { name: "Tỉnh/thành phố", role, geoLevel: null, labelVi: "Tỉnh/thành phố" },
+        { name: "Nhiệt độ trung bình", role: "measure", aggDefault: "mean", unit: "°C" }
+      ],
+      suggestions: [{
+        id: "weather-map", chartType: "choropleth", confidence: .9,
+        bindings: { region: "Tỉnh/thành phố", value: "Nhiệt độ trung bình" }
+      }]
+    }, regionProfile);
+    assert.equal(result.columns[0].role, "geo");
+    assert.equal(result.columns[0].geoLevel, "admin1");
+    assert.equal(result.suggestions[0].id, "weather-map");
+    assert.equal(result.source, "ai");
+    assert.deepEqual(result.validationErrors, []);
+  }
+});
+
 test("fallback dùng cùng AnalysisResult và không biến id thành measure", () => {
   const result = fallbackAnalysis({
     rowCount: 2,

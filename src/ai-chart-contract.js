@@ -2,6 +2,7 @@ const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
 
 const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area|state)/i;
+const ADMINISTRATIVE_LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện)/i;
 const TIME_HINT = /(ngày|date|time|tháng|month|năm|year|quarter|quý|week|tuần)/i;
 const ID_HINT = /(^|[\s_.-])(id|mã|ma|code|index|rank)([\s_.-]|$)/i;
 const LAT_HINT = /(^|[\s_.-])(lat|latitude|vĩ độ|vi do)([\s_.-]|$)/i;
@@ -146,11 +147,16 @@ export function inferColumnInfo(column) {
 
 function normalizeColumn(raw, fallback) {
   if (!raw || !ROLE_VALUES.includes(raw.role)) return fallback;
+  // Administrative names remain geographic dimensions even if AI calls them categories.
+  const isAdministrativeRegion = fallback.role === "geo" && ADMINISTRATIVE_LOCATION_HINT.test(fallback.name)
+    && ["geo", "category", "text"].includes(raw.role);
   return {
     name: fallback.name,
-    role: raw.role,
+    role: isAdministrativeRegion ? "geo" : raw.role,
     labelVi: typeof raw.labelVi === "string" && raw.labelVi.trim() ? raw.labelVi.trim() : null,
-    geoLevel: cleanOptional(raw.geoLevel, ["country", "admin1", "admin2", "point_lat", "point_lng", "h3"]),
+    geoLevel: isAdministrativeRegion
+      ? cleanOptional(raw.geoLevel, ["country", "admin1", "admin2"]) || fallback.geoLevel
+      : cleanOptional(raw.geoLevel, ["country", "admin1", "admin2", "point_lat", "point_lng", "h3"]),
     country: typeof raw.country === "string" && raw.country.trim() ? raw.country.trim().toUpperCase() : null,
     timeParse: cleanOptional(raw.timeParse, ["iso", "excel_serial", "unix_s", "unix_ms", "text"]),
     granularity: cleanOptional(raw.granularity, ["day", "week", "month", "year"]),

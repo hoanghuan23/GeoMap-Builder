@@ -1746,10 +1746,13 @@ function renderAiSuggestionGrid() {
   const suggestionButtons = state.aiDataset.suggestions.map(createAiSuggestionButton);
   const suggestionHeading = document.createElement("div");
   suggestionHeading.className = "ai-manual-heading ai-suggestion-heading";
-  suggestionHeading.textContent = state.aiDataset.suggestions.length ? "AI đề xuất" : "Chưa có kiểu biểu đồ phù hợp được đề xuất";
+  const hasRuleSuggestions = state.aiDataset.suggestions.some(suggestion => suggestion.source === "rule");
+  suggestionHeading.textContent = state.aiDataset.suggestions.length
+    ? hasRuleSuggestions ? "Đề xuất biểu đồ" : "AI đề xuất"
+    : "Chưa có kiểu biểu đồ phù hợp được đề xuất";
   grid.className = "map-type-grid has-ai-suggestions";
   grid.replaceChildren(suggestionHeading, ...suggestionButtons);
-  const source = state.aiDataset.analysis.source === "ai" ? "AI" : "quy tắc dự phòng";
+  const source = state.aiDataset.analysis.source === "ai" ? hasRuleSuggestions ? "AI và phân tích dữ liệu" : "AI" : "phân tích dữ liệu";
   $("map-type-summary").textContent = `${state.aiDataset.analysis.datasetTitle} · ${state.aiDataset.analysis.grain} · ${state.aiDataset.suggestions.length} đề xuất từ ${source}`;
   showSupportedChartCatalog(false);
 }
