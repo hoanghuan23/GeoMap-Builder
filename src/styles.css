@@ -441,11 +441,7 @@ button {
 }
 
 .ai-data-filters {
-    width: 100%;
-    display: grid;
-    grid-template-columns: auto minmax(150px, 1fr) auto minmax(100px, .52fr) 28px;
-    align-items: center;
-    gap: 8px
+    display: block
 }
 
 .ai-data-filters[hidden] {
@@ -453,82 +449,81 @@ button {
 }
 
 .ai-filter-controls {
-    display: contents
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-left: 31px
 }
 
-.ai-filter-controls label {
-    display: contents
-}
-
-.ai-filter-controls label > span {
-    color: #9ca3b5;
+.ai-filter-controls > label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--ink);
     font-size: 10px;
-    white-space: nowrap
+    font-weight: 600
 }
 
-.ai-filter-controls label:nth-child(1) > span { grid-column: 1; }
-.ai-filter-controls label:nth-child(1) > select,
-.ai-filter-controls label:nth-child(1) > .ai-multiselect { grid-column: 2; }
-.ai-filter-controls label:nth-child(2) > span { grid-column: 3; }
-.ai-filter-controls label:nth-child(2) > select { grid-column: 4; }
-
-.ai-filter-controls select {
+.ai-filter-controls select,
+.ai-series-search {
+    width: 100%;
     min-width: 0;
-    height: 34px;
-    padding: 0 28px 0 11px;
-    border: 1px solid #303645;
-    border-radius: 18px;
+    height: 32px;
+    padding: 0 9px;
+    border: 1px solid #dce3ed;
+    border-radius: 6px;
     outline: 0;
-    background: #10131c;
-    color: #f3f5fa;
-    font: inherit
+    background: #fff;
+    color: #354052;
+    font: inherit;
+    font-weight: 400
 }
 
 .ai-filter-controls select:hover,
-.ai-filter-controls select:focus {
-    border-color: #a23378;
-    box-shadow: 0 0 0 2px #a233782e
+.ai-filter-controls select:focus,
+.ai-series-search:hover,
+.ai-series-search:focus {
+    border-color: #8ab7f5;
+    box-shadow: 0 0 0 2px #0b6ff014
 }
 
 .ai-multiselect {
-    position: relative;
+    position: static;
+    width: 100%;
     min-width: 0
 }
 
 .ai-multiselect-toggle {
     width: 100%;
-    height: 34px;
-    padding: 0 11px;
+    height: 32px;
+    padding: 0 9px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    border: 1px solid #303645;
-    border-radius: 18px;
-    background: #10131c;
-    color: #f3f5fa;
+    border: 1px solid #dce3ed;
+    border-radius: 6px;
+    background: #fff;
+    color: #354052;
+    font-size: 10px;
     cursor: pointer
 }
 
 .ai-multiselect-toggle:hover,
 .ai-multiselect-toggle[aria-expanded="true"] {
-    border-color: #a23378;
-    box-shadow: 0 0 0 2px #a233782e
+    border-color: #8ab7f5;
+    box-shadow: 0 0 0 2px #0b6ff014
 }
 
 .ai-multiselect-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    right: 0;
-    z-index: 12;
-    max-height: 250px;
+    position: static;
+    max-height: 240px;
+    margin-top: 6px;
     padding: 6px;
-    overflow-y: auto;
-    border: 1px solid #303645;
-    border-radius: 12px;
-    background: #10131c;
-    box-shadow: 0 12px 28px #0009
+    overflow: auto;
+    border: 1px solid #dce3ed;
+    border-radius: 6px;
+    background: #fff
 }
 
 .ai-multiselect-menu[hidden] { display: none }
@@ -540,32 +535,59 @@ button {
     align-items: center;
     gap: 8px;
     border-radius: 7px;
-    color: #f3f5fa;
+    color: #354052;
+    font-size: 10px;
+    font-weight: 400;
     cursor: pointer
 }
 
-.ai-multiselect-menu label:hover { background: #232838 }
-.ai-multiselect-menu input { accent-color: #d946a2 }
+.ai-multiselect-menu label:hover { background: #f3f7fc }
+.ai-multiselect-menu input { accent-color: var(--blue) }
 
-.clear-ai-data {
-    grid-column: 5;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 1px solid #3a4050;
-    border-radius: 50%;
-    background: #151925;
-    color: #c9cfda;
-    cursor: pointer;
-    font-size: 19px;
-    line-height: 1
+.ai-series-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 7px
 }
 
-.clear-ai-data:hover {
-    border-color: #ef4444;
-    background: #3a161d;
-    color: #fff
+.ai-series-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 10px
 }
+
+.ai-series-reset.secondary-button {
+    width: auto;
+    margin: 0;
+    padding: 5px 8px;
+    font-size: 9px
+}
+
+.ai-series-list {
+    max-height: 220px;
+    overflow: auto;
+    border: 1px solid #e1e7ef;
+    border-radius: 6px;
+    background: #fff
+}
+
+.ai-series-list label {
+    min-height: 30px;
+    padding: 5px 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #354052;
+    font-size: 10px;
+    font-weight: 400;
+    cursor: pointer
+}
+
+.ai-series-list label:hover { background: #f3f7fc }
+.ai-series-list input { accent-color: var(--blue) }
 
 .supported-chart-catalog {
     margin-top: 17px;
@@ -1533,6 +1555,12 @@ input[type=range] {
     color: var(--blue)
 }
 
+.chart-zoom-controls button:disabled {
+    cursor: default;
+    background: #f8fafc;
+    color: #b7c0cc
+}
+
 .bar-chart-heading p {
     margin: 5px 0 0;
     color: #7a8699;
@@ -1678,10 +1706,9 @@ input[type=range] {
 }
 
 .geo-repair {
-    grid-column: 1 / -1;
     padding-top: 7px;
-    border-top: 1px solid #2b3040;
-    color: #e5e7eb;
+    border-top: 1px solid #e5e7eb;
+    color: var(--ink);
     font-size: 10px
 }
 
@@ -1697,18 +1724,10 @@ input[type=range] {
     min-width: 0;
     height: 30px;
     padding: 0 9px;
-    border: 1px solid #303645;
-    border-radius: 8px;
-    background: #10131c;
-    color: #fff
-}
-
-.map-panel.chart-mode .map-query-panel:has(.ai-data-filters:not([hidden])) {
-    display: block
-}
-
-.map-panel.chart-mode .map-query-panel:has(.ai-data-filters:not([hidden])) .map-search {
-    display: none
+    border: 1px solid #dce3ed;
+    border-radius: 6px;
+    background: #fff;
+    color: #354052
 }
 
 .status-pill {
@@ -1734,28 +1753,7 @@ input[type=range] {
     z-index: 6
 }
 
-.map-query-panel:has(.ai-data-filters:not([hidden])) {
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(560px, calc(100% - 82px));
-    padding: 10px;
-    border: 1px solid #292d39;
-    border-radius: 15px;
-    background: #0c0e17f5;
-    box-shadow: 0 14px 38px #0008;
-    backdrop-filter: blur(11px)
-}
-
 .map-search { width: 100%; }
-
-.map-query-panel:has(.ai-data-filters:not([hidden])) .map-search-form {
-    height: 44px;
-    margin-bottom: 8px;
-    border-color: #242936;
-    border-radius: 13px;
-    background: #080a12;
-    box-shadow: none
-}
 
 .map-search-form {
     height: 44px;
@@ -2528,8 +2526,7 @@ th:last-child {
         height: 480px
     }
 
-    .map-query-panel,
-    .map-query-panel:has(.ai-data-filters:not([hidden])) {
+    .map-query-panel {
         top: 10px;
         left: 10px;
         transform: none;
@@ -2538,29 +2535,6 @@ th:last-child {
 
     .map-search-form {
         height: 41px
-    }
-
-    .ai-data-filters {
-        grid-template-columns: minmax(0, 1fr);
-        gap: 8px;
-    }
-
-    .ai-filter-controls label {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 3px
-    }
-
-    .ai-filter-controls label:first-child { grid-column: 1 / -1; }
-    .ai-filter-controls label:nth-child(2) { grid-column: 1; }
-    .ai-filter-controls label > span,
-    .ai-filter-controls label > select,
-    .ai-filter-controls label > .ai-multiselect { grid-column: auto !important; }
-
-    .clear-ai-data {
-        position: absolute;
-        top: 18px;
-        right: 18px
     }
 
     .chart-canvas {

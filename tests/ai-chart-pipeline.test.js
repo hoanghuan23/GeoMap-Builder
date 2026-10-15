@@ -61,6 +61,75 @@ test("line long format nhiều measure chỉ dựng chuỗi theo measure đang c
   assert.equal(changed.config.data[0].P1, 22);
 });
 
+test("line gộp tất cả theo aggDefault của chỉ số người dùng chọn", () => {
+  const metricColumns = [
+    { name: "month", role: "time", labelVi: "Tháng" },
+    { name: "province", role: "geo", labelVi: "Tỉnh/thành phố" },
+    { name: "revenue", role: "measure", labelVi: "Doanh thu", aggDefault: "sum" },
+    { name: "return_rate", role: "measure", labelVi: "Tỷ lệ hoàn đơn (%)", aggDefault: "mean", unit: "%" }
+  ];
+  const records = [
+    { month: new Date("2026-01-01T00:00:00Z"), province: "A", revenue: 10, return_rate: 2 },
+    { month: new Date("2026-01-01T00:00:00Z"), province: "B", revenue: 20, return_rate: 4 },
+    { month: new Date("2026-02-01T00:00:00Z"), province: "A", revenue: 30, return_rate: 3 },
+    { month: new Date("2026-02-01T00:00:00Z"), province: "B", revenue: 40, return_rate: 5 }
+  ];
+  const suggestion = {
+    id: "sales-line",
+    title: "Doanh thu theo tháng",
+    bindings: { x: "month", y: ["revenue"], series: "province" },
+    agg: "sum"
+  };
+  const option = buildLineChartOption(suggestion, records, metricColumns, {
+    seriesField: null,
+    measure: "return_rate",
+    scopeLabel: "2 tỉnh/thành phố"
+  });
+
+  assert.equal(option.config.aggregation, "mean");
+  assert.equal(option.config.data[0].return_rate, 3);
+  assert.equal(option.config.series.length, 1);
+  assert.equal(option.config.subtitle, "Trung bình 2 tỉnh/thành phố · 2026-01-01 – 2026-02-01");
+});
+
+test("line cho phép chọn measure nằm ngoài bindings.y", () => {
+  const metricColumns = [
+    ...columns,
+    { name: "temperature", role: "measure", labelVi: "Nhiệt độ", aggDefault: "mean", unit: "°C" }
+  ];
+  const suggestion = { id: "line", title: "Mưa", bindings: { x: "date", y: ["rain"], series: "province" }, agg: "sum" };
+  const records = [
+    { date: new Date("2026-09-01T00:00:00Z"), province: "A", rain: 1, temperature: 29 },
+    { date: new Date("2026-09-02T00:00:00Z"), province: "A", rain: 2, temperature: 30 }
+  ];
+  const option = buildLineChartOption(suggestion, records, metricColumns, { measure: "temperature" });
+
+  assert.deepEqual(option.availableMeasures.map(item => item.key), ["rain", "temperature"]);
+  assert.equal(option.activeMeasure, "temperature");
+  assert.equal(option.config.series[0].key, "A");
+  assert.equal(option.config.data[0].A, 29);
+  assert.equal(option.config.aggregation, "mean");
+});
+
+test("line giới hạn selectedSeries theo maxSeries", () => {
+  const records = Array.from({ length: 10 }, (_, index) => ({
+    date: new Date("2026-09-01T00:00:00Z"),
+    province: `P${index}`,
+    rain: index + 1
+  }));
+  const selectedSeries = records.map(record => record.province);
+  const option = buildLineChartOption(
+    { id: "line", title: "Mưa", bindings: { x: "date", y: ["rain"], series: "province" }, agg: "sum" },
+    records,
+    columns,
+    { selectedSeries, maxSeries: 3 }
+  );
+
+  assert.equal(option.maxSeries, 3);
+  assert.deepEqual(option.selectedSeries, ["P0", "P1", "P2"]);
+  assert.equal(option.config.series.length, 3);
+});
+
 test("feasibility kết hợp coverage với confidence và khóa line chỉ có một mốc", () => {
   const result = evaluateSuggestion(
     { id: "line", chartType: "line", title: "L", bindings: { x: "date", y: ["rain"] }, confidence: .9 },

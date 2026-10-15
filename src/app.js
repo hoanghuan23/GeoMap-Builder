@@ -1338,7 +1338,9 @@ function renderChartStyleControls() {
   const isAiBar = activeAiSuggestion?.chartType === "bar" && state.chartConfig.chartKind === "bar";
   const panelConfig = isAiBar
     ? { ...state.barStyle, limit: state.aiDataset.barLimits?.[activeAiSuggestion.id] ?? 12 }
-    : state.barStyle;
+    : state.chartConfig.chartKind === "line"
+      ? { ...state.barStyle, showDataLabels: Boolean(state.chartConfig.showDataLabels) }
+      : state.barStyle;
   $("style-description").textContent = state.chartConfig.chartKind === "line"
     ? "Màu đường, nhãn, chú giải và tooltip"
     : "Dữ liệu, màu sắc, kích thước cột, nhãn và trục";
@@ -1546,6 +1548,35 @@ function uniqueRecordValues(records, field) {
   return [...values.entries()];
 }
 
+function lineSelectionFor(dataset, suggestion) {
+  dataset.lineSelections ||= {};
+  return dataset.lineSelections[suggestion.id] ||= {
+    measure: null,
+    scope: suggestion.bindings.series ? "pick" : "all",
+    picked: [],
+    from: null,
+    to: null
+  };
+}
+
+function aiLineRegionField(dataset, suggestion) {
+  if (suggestion.bindings.series) return suggestion.bindings.series;
+  const columns = dataset.analysis.columns;
+  const geo = columns.find(column => column.role === "geo" && ["admin1", "admin2", "country"].includes(column.geoLevel));
+  return (geo || columns.find(column => column.role === "category"))?.name || null;
+}
+
+function filterByTimeRange(records, field, from, to) {
+  const lo = Date.parse(from);
+  const hi = Date.parse(to);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return records;
+  return records.filter(record => {
+    const value = record?.[field];
+    const time = value instanceof Date ? value.getTime() : Date.parse(value);
+    return Number.isFinite(time) && time >= lo && time <= hi;
+  });
+}
+
 function populateAiFilters(dataset) {
   const { records, recommendation } = dataset;
   const controls = $("ai-filter-controls");
@@ -1696,17 +1727,8 @@ function renderAiSuggestionGrid() {
   const suggestionHeading = document.createElement("div");
   suggestionHeading.className = "ai-manual-heading ai-suggestion-heading";
   suggestionHeading.textContent = state.aiDataset.suggestions.length ? "AI đề xuất" : "Chưa có kiểu biểu đồ phù hợp được đề xuất";
-  const manualHeading = document.createElement("div");
-  manualHeading.className = "ai-manual-heading";
-  manualHeading.textContent = state.chartOptions.length ? "Các lựa chọn khác" : "";
-  const manualButtons = state.chartOptions.map(option => {
-    const button = document.createElement("button"); const icon = document.createElement("span");
-    button.type = "button"; button.className = `map-type${state.mapType === option.id ? " active" : ""}`;
-    button.dataset.type = option.id; button.dataset.label = option.label;
-    button.title = `${option.label} · Recharts`; renderChartIcon(icon, option.icon); button.append(icon, option.label); return button;
-  });
   grid.className = "map-type-grid has-ai-suggestions";
-  grid.replaceChildren(suggestionHeading, ...suggestionButtons, ...(state.chartOptions.length ? [manualHeading, ...manualButtons] : []));
+  grid.replaceChildren(suggestionHeading, ...suggestionButtons);
   const source = state.aiDataset.analysis.source === "ai" ? "AI" : "quy tắc dự phòng";
   $("map-type-summary").textContent = `${state.aiDataset.analysis.datasetTitle} · ${state.aiDataset.analysis.grain} · ${state.aiDataset.suggestions.length} đề xuất từ ${source}`;
   showSupportedChartCatalog(false);
@@ -1718,36 +1740,105 @@ function clearMapForAiChart() {
   map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
 }
 
-function populateAiLineSeries(option) {
-  const controls = $("ai-filter-controls");
-  controls.replaceChildren();
-  if (!option.availableSeries?.length) { $("ai-data-filters").hidden = true; return; }
-  const label = document.createElement("label"); const caption = document.createElement("span"); const multiselect = document.createElement("div");
-  const toggle = document.createElement("button"); const toggleText = document.createElement("span"); const chevron = document.createElement("span"); const menu = document.createElement("div");
-  caption.textContent = "Chuỗi hiển thị"; multiselect.className = "ai-multiselect"; toggle.type = "button"; toggle.className = "ai-multiselect-toggle"; toggle.setAttribute("aria-expanded", "false");
-  toggleText.textContent = `${option.selectedSeries.length} chuỗi đã chọn`; chevron.textContent = "⌄"; menu.className = "ai-multiselect-menu"; menu.hidden = true;
-  menu.replaceChildren(...option.availableSeries.map(item => {
-    const row = document.createElement("label"); const input = document.createElement("input"); const text = document.createElement("span");
-    input.type = "checkbox"; input.className = "ai-series-filter"; input.value = item.key; input.checked = option.selectedSeries.includes(item.key); text.textContent = item.label;
-    row.append(input, text); return row;
-  }));
-  toggle.append(toggleText, chevron); multiselect.append(toggle, menu); label.append(caption, multiselect); controls.append(label); $("ai-data-filters").hidden = false;
+function aiField(caption, control) {
+  const label = document.createElement("label");
+  const text = document.createElement("span");
+  text.textContent = caption;
+  label.append(text, control);
+  return label;
 }
 
-function appendAiLineMeasure(option) {
-  if ((option.availableMeasures?.length || 0) < 2) return;
-  const label = document.createElement("label");
-  const caption = document.createElement("span");
+function aiSelect(className, choices, value) {
   const select = document.createElement("select");
-  caption.textContent = "Chỉ số";
-  select.className = "ai-line-measure-selector";
-  select.setAttribute("aria-label", "Chọn chỉ số cho biểu đồ đường");
-  select.replaceChildren(...option.availableMeasures.map(item =>
-    Object.assign(document.createElement("option"), { value: item.key, textContent: item.label })));
-  select.value = option.activeMeasure;
-  label.append(caption, select);
-  $("ai-filter-controls").prepend(label);
-  $("ai-data-filters").hidden = false;
+  select.className = className;
+  select.replaceChildren(...choices.map(([optionValue, text]) =>
+    Object.assign(document.createElement("option"), { value: optionValue, textContent: text })));
+  select.value = value;
+  return select;
+}
+
+function buildAiSeriesPicker(option) {
+  const box = document.createElement("div");
+  box.className = "ai-series-picker";
+  const search = Object.assign(document.createElement("input"), {
+    type: "search",
+    className: "ai-series-search",
+    placeholder: "Tìm…"
+  });
+  const counter = document.createElement("span");
+  counter.dataset.role = "series-count";
+  counter.textContent = `${option.selectedSeries.length}/${option.maxSeries}`;
+  const reset = Object.assign(document.createElement("button"), {
+    type: "button",
+    className: "ai-series-reset secondary-button",
+    textContent: "Đặt lại (top 5)"
+  });
+  const head = document.createElement("div");
+  head.className = "ai-series-head";
+  head.append(counter, reset);
+  const list = document.createElement("div");
+  list.className = "ai-series-list";
+  list.replaceChildren(...option.availableSeries.map(item => {
+    const row = document.createElement("label");
+    const input = document.createElement("input");
+    const text = document.createElement("span");
+    input.type = "checkbox";
+    input.className = "ai-series-filter";
+    input.value = item.key;
+    input.checked = option.selectedSeries.includes(item.key);
+    text.textContent = item.label;
+    row.append(input, text);
+    return row;
+  }));
+  box.append(search, head, list);
+  return box;
+}
+
+function populateAiLineSelection(option, suggestion) {
+  const dataset = state.aiDataset;
+  const sel = lineSelectionFor(dataset, suggestion);
+  const columns = new Map(dataset.analysis.columns.map(column => [column.name, column]));
+  const labelOf = name => columns.get(name)?.labelVi || humanizeField(name);
+  const nodes = [];
+  if (option.availableMeasures.length > 1) {
+    nodes.push(aiField("Chỉ số", aiSelect(
+      "ai-line-measure-selector",
+      option.availableMeasures.map(item => [item.key, item.label]),
+      option.activeMeasure
+    )));
+  }
+  const regionField = aiLineRegionField(dataset, suggestion);
+  if (regionField) {
+    const regionLabel = labelOf(regionField);
+    nodes.push(aiField(regionLabel, aiSelect("ai-line-scope", [
+      ["all", `Gộp tất cả ${regionLabel.toLowerCase()}`],
+      ["pick", `Chọn từng ${regionLabel.toLowerCase()}`]
+    ], sel.scope)));
+    if (sel.scope === "pick") nodes.push(buildAiSeriesPicker(option));
+  }
+  const timeColumn = dataset.analysis.columns.find(column => column.role === "time")?.name;
+  const times = timeColumn
+    ? uniqueRecordValues(dataset.records, timeColumn).sort((a, b) => a[0].localeCompare(b[0]))
+    : [];
+  if (times.length > 1) {
+    const choices = times.map(([value, raw]) => [value, displayFilterValue(raw, "date-select")]);
+    const from = aiSelect("ai-line-range", choices, sel.from ?? choices[0][0]);
+    const to = aiSelect("ai-line-range", choices, sel.to ?? choices.at(-1)[0]);
+    from.dataset.edge = "from";
+    to.dataset.edge = "to";
+    nodes.push(aiField(`${labelOf(timeColumn)} từ`, from), aiField("đến", to));
+  }
+  $("ai-filter-controls").replaceChildren(...nodes);
+  $("ai-data-filters").hidden = nodes.length === 0;
+}
+
+function syncAiLineSelection(option) {
+  const selected = new Set(option.selectedSeries);
+  document.querySelectorAll("#ai-filter-controls .ai-series-filter").forEach(input => {
+    input.checked = selected.has(input.value);
+  });
+  const counter = document.querySelector("#ai-filter-controls [data-role='series-count']");
+  if (counter) counter.textContent = `${option.selectedSeries.length}/${option.maxSeries}`;
 }
 
 function populateAiBarMetric(suggestion) {
@@ -1765,16 +1856,27 @@ function populateAiBarMetric(suggestion) {
   select.value = suggestion.bindings.y; label.append(caption, select); controls.append(label); $("ai-data-filters").hidden = false;
 }
 
-function activateAiChartSuggestion(suggestion) {
+function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) {
   const dataset = state.aiDataset;
-  const selectedSeries = dataset.seriesSelections?.[suggestion.id] || null;
-  const measure = dataset.lineMeasures?.[suggestion.id] ?? null;
+  const isLine = suggestion.chartType === "line";
+  const sel = isLine ? lineSelectionFor(dataset, suggestion) : null;
+  const regionField = isLine ? aiLineRegionField(dataset, suggestion) : null;
+  const timeColumn = dataset.analysis.columns.find(column => column.role === "time")?.name;
+  const records = isLine && timeColumn && sel.from && sel.to
+    ? filterByTimeRange(dataset.records, timeColumn, sel.from, sel.to)
+    : dataset.records;
   const top = suggestion.chartType === "bar" ? dataset.barLimits?.[suggestion.id] ?? 12 : undefined;
-  const option = chartOptionForSuggestion(suggestion, dataset.records, dataset.analysis.columns, { selectedSeries, top, measure });
+  const lineOptions = isLine ? {
+    measure: sel.measure,
+    seriesField: !regionField || sel.scope === "all" ? null : regionField,
+    selectedSeries: sel.scope === "pick" && sel.picked.length ? sel.picked : null,
+    scopeLabel: regionField && sel.scope === "all"
+      ? `${uniqueRecordValues(dataset.records, regionField).length} ${(dataset.analysis.columns.find(column => column.name === regionField)?.labelVi || humanizeField(regionField)).toLowerCase()}`
+      : ""
+  } : {};
+  const option = chartOptionForSuggestion(suggestion, records, dataset.analysis.columns, { top, ...lineOptions });
   if (!option?.config?.data?.length) throw new Error("Không còn dữ liệu hợp lệ để dựng biểu đồ.");
   dataset.activeChartOption = option;
-  if (!dataset.seriesSelections) dataset.seriesSelections = {};
-  if (suggestion.chartType === "line") dataset.seriesSelections[suggestion.id] = option.selectedSeries;
   clearMapForAiChart();
   state.mapType = suggestion.id; state.chartMapping = null; state.mappingWarning = "";
   const chartStyle = option.config.chartKind === "pie" ? state.pieStyle : state.barStyle;
@@ -1783,7 +1885,10 @@ function activateAiChartSuggestion(suggestion) {
   state.chartConfig = { ...option.config, ...chartStyle, ...lineOverrides, ...(suggestion.chartType === "bar" ? { limit: "all" } : {}) };
   $("chart-canvas").hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
   setDataPanelVisible(false); showChartStyleControls(true); renderChartCanvas();
-  if (suggestion.chartType === "line") { populateAiLineSeries(option); appendAiLineMeasure(option); }
+  if (isLine) {
+    if (rebuildControls) populateAiLineSelection(option, suggestion);
+    else syncAiLineSelection(option);
+  }
   else populateAiBarMetric(suggestion);
   updateModelSections(); renderAiSuggestionGrid();
   setStatus(`Đang hiển thị ${suggestion.title}.`, true);
@@ -1998,8 +2103,7 @@ async function replaceAiPipelineData(pipeline, name) {
     suggestions,
     selectedSuggestionId: null,
     geoAliases: {},
-    seriesSelections: {},
-    lineMeasures: {},
+    lineSelections: {},
     barLimits: {},
     recommendation: null,
     boundaries: null
@@ -2017,7 +2121,7 @@ async function replaceAiPipelineData(pipeline, name) {
   }
   if (!selected && !suggestions.length && pipeline.analysis.source === "ai") {
     updateModelSections();
-    setStatus(`AI chưa tìm thấy kiểu biểu đồ phù hợp với dữ liệu này.${manualOptions.length ? " Bạn có thể chọn thủ công trong Các lựa chọn khác." : ""}`);
+    setStatus("AI chưa tìm thấy kiểu biểu đồ phù hợp với dữ liệu này.");
     return;
   }
   if (!selected && manualOptions.length) selectChartOption(manualOptions[0].id);
@@ -2461,6 +2565,11 @@ function bindUI() {
     if (option) selectMapStyle(option.dataset.mapStyle);
   });
   $("ai-filter-controls").addEventListener("change", async event => {
+    const activeLine = () => {
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+      return suggestion?.chartType === "line" ? suggestion : null;
+    };
     if (event.target.matches(".ai-chart-metric-selector")) {
       const suggestion = state.aiDataset?.suggestions.find(item => item.id === state.aiDataset.selectedSuggestionId);
       if (suggestion?.chartType !== "bar") return;
@@ -2478,21 +2587,42 @@ function bindUI() {
       return;
     }
     if (event.target.matches(".ai-line-measure-selector")) {
-      const dataset = state.aiDataset;
-      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-      if (suggestion?.chartType !== "line") return;
-      dataset.lineMeasures = { ...dataset.lineMeasures, [suggestion.id]: event.target.value };
+      const suggestion = activeLine();
+      if (!suggestion) return;
+      lineSelectionFor(state.aiDataset, suggestion).measure = event.target.value;
+      activateAiChartSuggestion(suggestion, { rebuildControls: false });
+      return;
+    }
+    if (event.target.matches(".ai-line-scope")) {
+      const suggestion = activeLine();
+      if (!suggestion) return;
+      lineSelectionFor(state.aiDataset, suggestion).scope = event.target.value;
       activateAiChartSuggestion(suggestion);
       return;
     }
-    if (event.target.matches(".ai-series-filter")) {
-      const checked = [...document.querySelectorAll("#ai-filter-controls .ai-series-filter:checked")];
-      if (checked.length > 8) { event.target.checked = false; showToast("Chỉ có thể hiển thị tối đa 8 chuỗi."); return; }
-      if (!checked.length) { event.target.checked = true; showToast("Cần chọn ít nhất một chuỗi."); return; }
-      const suggestion = state.aiDataset?.suggestions.find(item => item.id === state.aiDataset.selectedSuggestionId);
+    if (event.target.matches(".ai-line-range")) {
+      const suggestion = activeLine();
       if (!suggestion) return;
-      state.aiDataset.seriesSelections[suggestion.id] = checked.map(input => input.value);
-      activateAiChartSuggestion(suggestion);
+      const sel = lineSelectionFor(state.aiDataset, suggestion);
+      const [from, to] = ["from", "to"].map(edge => document.querySelector(`#ai-filter-controls .ai-line-range[data-edge='${edge}']`));
+      if (!from || !to) return;
+      if (from.value > to.value) (event.target === from ? to : from).value = event.target.value;
+      sel.from = from.value;
+      sel.to = to.value;
+      activateAiChartSuggestion(suggestion, { rebuildControls: false });
+      return;
+    }
+    if (event.target.matches(".ai-series-filter")) {
+      const suggestion = activeLine();
+      if (!suggestion) return;
+      const checked = [...document.querySelectorAll("#ai-filter-controls .ai-series-filter:checked")];
+      const limit = state.aiDataset.activeChartOption?.maxSeries ?? 8;
+      if (checked.length > limit) { event.target.checked = false; showToast(`Chỉ có thể hiển thị tối đa ${limit} chuỗi.`); return; }
+      if (!checked.length) { event.target.checked = true; showToast("Cần chọn ít nhất một chuỗi."); return; }
+      const sel = lineSelectionFor(state.aiDataset, suggestion);
+      sel.scope = "pick";
+      sel.picked = checked.map(input => input.value);
+      activateAiChartSuggestion(suggestion, { rebuildControls: false });
       return;
     }
     if (!event.target.matches(".ai-generated-filter")) return;
@@ -2500,6 +2630,14 @@ function bindUI() {
     await filteredAiBoundary({ fit: shouldFit });
   });
   $("ai-filter-controls").addEventListener("click", event => {
+    if (event.target.closest(".ai-series-reset")) {
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+      if (suggestion?.chartType !== "line") return;
+      lineSelectionFor(dataset, suggestion).picked = [];
+      activateAiChartSuggestion(suggestion);
+      return;
+    }
     const applyAliases = event.target.closest(".apply-geo-aliases");
     if (applyAliases) {
       const dataset = state.aiDataset; const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
@@ -2519,9 +2657,12 @@ function bindUI() {
     menu.hidden = !open;
     toggle.setAttribute("aria-expanded", String(open));
   });
-  $("clear-ai-data").addEventListener("click", () => {
-    deleteData();
-    setStatus("Đã xóa dữ liệu.", true);
+  $("ai-filter-controls").addEventListener("input", event => {
+    if (!event.target.matches(".ai-series-search")) return;
+    const query = event.target.value.trim().toLocaleLowerCase("vi");
+    event.target.closest(".ai-series-picker").querySelectorAll(".ai-series-list label").forEach(row => {
+      row.hidden = Boolean(query) && !row.textContent.toLocaleLowerCase("vi").includes(query);
+    });
   });
   $("metro-departure").addEventListener("change", updateMetroTime);
   $("congestion-time").addEventListener("change", updateCongestionTime);

@@ -116,7 +116,11 @@ function Chart({ config }) {
   const initialWindow = Math.min(data.length, 24);
   const [range, setRange] = useState({ startIndex: 0, endIndex: Math.max(0, initialWindow - 1) });
   const isHorizontal = config.orientation === "horizontal";
-  const canZoom = data.length > 12;
+  const minimumWindow = Math.min(6, data.length);
+  const canZoom = data.length > minimumWindow;
+  const visibleCount = range.endIndex - range.startIndex + 1;
+  const canZoomIn = canZoom && visibleCount > minimumWindow;
+  const canZoomOut = canZoom && visibleCount < data.length;
 
   useEffect(() => {
     setRange({ startIndex: 0, endIndex: Math.max(0, Math.min(data.length, 24) - 1) });
@@ -124,7 +128,7 @@ function Chart({ config }) {
 
   const zoom = direction => setRange(current => {
     const size = current.endIndex - current.startIndex + 1;
-    const nextSize = Math.max(6, Math.min(data.length, direction > 0 ? Math.ceil(size * .7) : Math.ceil(size * 1.4)));
+    const nextSize = Math.max(minimumWindow, Math.min(data.length, direction > 0 ? Math.ceil(size * .7) : Math.ceil(size * 1.4)));
     const center = (current.startIndex + current.endIndex) / 2;
     let startIndex = Math.max(0, Math.round(center - nextSize / 2));
     let endIndex = Math.min(data.length - 1, startIndex + nextSize - 1);
@@ -154,11 +158,17 @@ function Chart({ config }) {
         h("h2", null, config.title || "Biểu đồ cột"),
         config.unit ? h("p", null, `Đơn vị: ${config.unit}`) : null
       ),
-      canZoom ? h("div", { className: "chart-zoom-controls", "aria-label": "Điều khiển thu phóng biểu đồ" },
-        h("button", { type: "button", onClick: () => zoom(1), title: "Phóng to" }, "+"),
-        h("button", { type: "button", onClick: () => zoom(-1), title: "Thu nhỏ" }, "−"),
-        h("button", { type: "button", onClick: () => setRange({ startIndex: 0, endIndex: data.length - 1 }), title: "Hiển thị tất cả" }, "↺")
-      ) : null
+      h("div", { className: "chart-zoom-controls", "aria-label": "Điều khiển thu phóng biểu đồ" },
+        h("button", { type: "button", onClick: () => zoom(1), disabled: !canZoomIn, title: "Phóng to", "aria-label": "Phóng to biểu đồ" }, "+"),
+        h("button", { type: "button", onClick: () => zoom(-1), disabled: !canZoomOut, title: "Thu nhỏ", "aria-label": "Thu nhỏ biểu đồ" }, "−"),
+        h("button", {
+          type: "button",
+          onClick: () => setRange({ startIndex: 0, endIndex: data.length - 1 }),
+          disabled: !canZoomOut,
+          title: "Hiển thị tất cả",
+          "aria-label": "Hiển thị tất cả cột"
+        }, "↺")
+      )
     ),
     h("div", { className: "bar-chart-plot" },
       h(ResponsiveContainer, { width: "100%", height: "100%" },

@@ -123,14 +123,23 @@ function lineSeriesKey(seriesValue, measure, multipleMeasures) {
   return multipleMeasures ? `${seriesValue} · ${measure}` : String(seriesValue);
 }
 
-export function buildLineChartOption(suggestion, records, columns, { selectedSeries = null, measure = null, defaultSeriesLimit = 5, maxSeries = 8 } = {}) {
-  const { x, series } = suggestion.bindings;
-  const allMeasures = Array.isArray(suggestion.bindings.y) ? suggestion.bindings.y : [suggestion.bindings.y];
-  // có series: chỉ 1 measure (mặc định cột đầu, hoặc cột người dùng chọn); không series: vẽ nhiều measure
-  const measures = series ? [allMeasures.includes(measure) ? measure : allMeasures[0]] : allMeasures;
+export function buildLineChartOption(suggestion, records, columns, { selectedSeries = null, measure = null, seriesField, scopeLabel = "", defaultSeriesLimit = 5, maxSeries = 8 } = {}) {
+  const { x } = suggestion.bindings;
+  // undefined keeps the AI suggestion, null aggregates all records, and a field splits the lines by that dimension.
+  const series = seriesField === undefined ? suggestion.bindings.series : seriesField;
   const byName = columnMap(columns);
   const labelOf = field => byName.get(field)?.labelVi || humanizeField(field);
-  const aggregation = resolveAggregation({ ...suggestion, bindings: { ...suggestion.bindings, y: measures } }, columns);
+  const aiMeasures = Array.isArray(suggestion.bindings.y) ? suggestion.bindings.y : [suggestion.bindings.y];
+  const columnMeasures = (columns || []).filter(column => column.role === "measure").map(column => column.name);
+  const measureNames = columnMeasures.length ? columnMeasures : aiMeasures;
+  const picked = measure && measureNames.includes(measure) ? measure : null;
+  const measures = picked ? [picked] : series ? [aiMeasures[0]] : aiMeasures;
+  // A user-picked metric must use that column's aggregation instead of the original AI suggestion's aggregation.
+  const aggregation = resolveAggregation({
+    ...suggestion,
+    agg: picked ? null : suggestion.agg,
+    bindings: { ...suggestion.bindings, y: measures }
+  }, columns);
   const xGroups = groupRecords(records, x).sort((a, b) => {
     const left = a.value instanceof Date ? a.value.getTime() : String(a.value);
     const right = b.value instanceof Date ? b.value.getTime() : String(b.value);
@@ -162,7 +171,18 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
     }
     return row;
   }).filter(row => selected.some(item => Number.isFinite(row[item.key])));
+
+  const aggWord = { sum: "Tổng", mean: "Trung bình", max: "Cao nhất", min: "Thấp nhất", count: "Số lượng" }[aggregation] || "";
+  const xLabel = labelOf(x).toLowerCase();
+  let title = suggestion.title;
+  if (measures.length === 1 && (picked || !series)) {
+    title = series ? `${labelOf(measures[0])} theo ${xLabel}` : `${aggWord} ${labelOf(measures[0]).toLowerCase()} theo ${xLabel}`;
+  }
   const rangeText = data.length ? ` · ${data[0][x]} – ${data.at(-1)[x]}` : "";
+  const subtitle = series
+    ? `${selected.length}/${available.length} chuỗi${rangeText}`
+    : `${scopeLabel ? `${aggWord} ${scopeLabel}` : "Gộp tất cả dòng dữ liệu"}${rangeText}`;
+
   return {
     id: suggestion.id,
     label: suggestion.title,
@@ -170,14 +190,14 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
     aiSuggestion: true,
     availableSeries: available,
     selectedSeries: selected.map(item => item.key),
-    availableMeasures: allMeasures.map(name => ({ key: name, label: labelOf(name) })),
+    availableMeasures: measureNames.map(name => ({ key: name, label: labelOf(name) })),
     activeMeasure: measures[0],
+    maxSeries,
     config: {
       chartKind: "line",
       variant: "line",
-      // khi có series và nhiều measure, tiêu đề theo measure đang chọn; ngược lại giữ tiêu đề AI
-      title: series && allMeasures.length > 1 ? `${labelOf(measures[0])} theo ${labelOf(x).toLowerCase()}` : suggestion.title,
-      subtitle: `${selected.length}/${available.length} chuỗi${rangeText}`,
+      title,
+      subtitle,
       unit: measures.length === 1 ? byName.get(measures[0])?.unit || "" : "",
       sourcePath: "$",
       xField: x,

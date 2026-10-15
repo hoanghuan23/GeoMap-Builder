@@ -59,6 +59,10 @@
           <div id="supported-chart-grid" class="supported-chart-grid" role="list" aria-label="Các kiểu bản đồ và biểu đồ được hỗ trợ"></div>
         </div>
       </section>
+      <section id="ai-data-filters" class="panel-section ai-data-filters" hidden>
+        <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p>Chọn chỉ số, địa phương và khoảng thời gian</p></div></div>
+        <div id="ai-filter-controls" class="ai-filter-controls"></div>
+      </section>
       <section id="resolution-section" class="panel-section" hidden>
         <div class="section-title"><span class="step">3</span><div><h2>Điều chỉnh Resolution</h2><p>Chọn độ chi tiết cho lưới H3 Hexagon</p></div></div>
         <div class="field range-field resolution-control">
@@ -142,10 +146,6 @@
             <button id="map-search-clear-all" class="map-search-clear-all" type="button">Xóa tất cả</button>
           </div>
           <div id="map-search-results" class="map-search-results" role="listbox" aria-label="Kết quả tìm kiếm" hidden></div>
-        </div>
-        <div id="ai-data-filters" class="ai-data-filters" hidden>
-          <div id="ai-filter-controls" class="ai-filter-controls"></div>
-          <button id="clear-ai-data" class="clear-ai-data" type="button" aria-label="Xóa dữ liệu" title="Xóa dữ liệu">×</button>
         </div>
         </div>
         <div class="map-toolbar" id="map-toolbar"><button class="active" data-tool="select" title="Chọn">↖</button><button data-tool="pan" title="Di chuyển">✥</button><i></i><button data-tool="rectangle" title="Hình chữ nhật">▭</button><button data-tool="circle" title="Hình tròn">○</button><button data-tool="line" title="Đường">╱</button><button data-tool="polygon" title="Đa giác">⬠</button><button data-tool="delete" title="Xóa">⌫</button></div><div class="map-controls"><button id="zoom-in">+</button><button id="zoom-out">−</button><button id="fullscreen">⛶</button></div>
