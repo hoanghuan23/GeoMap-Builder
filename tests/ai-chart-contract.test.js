@@ -57,3 +57,57 @@ test("fallback dùng cùng AnalysisResult và không biến id thành measure", 
     ]
   }).source, "rule");
 });
+
+test("mỗi kiểu chỉ giữ cấu hình hợp lệ có confidence cao nhất", () => {
+  const result = validateAndNormalizeAnalysis({
+    datasetTitle: "Thời tiết",
+    grain: "một tỉnh một ngày",
+    columns: [],
+    suggestions: [
+      { id: "bad-map", chartType: "choropleth", bindings: { region: "missing", value: "temperature" }, confidence: 1 },
+      { id: "map-low", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, confidence: .7 },
+      { id: "map-high", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, confidence: .95 },
+      { id: "bar-note", chartType: "bar", bindings: { x: "note", y: "temperature" }, confidence: .6 },
+      { id: "bar-province", chartType: "bar", bindings: { x: "province", y: "temperature" }, confidence: .8 },
+      { id: "line", chartType: "line", bindings: { x: "date", y: ["temperature"] }, confidence: .9 }
+    ]
+  }, profile);
+  assert.equal(result.source, "ai");
+  assert.deepEqual(result.suggestions.map(item => item.id), ["map-high", "line", "bar-province"]);
+  assert.equal(new Set(result.suggestions.map(item => item.chartType)).size, result.suggestions.length);
+});
+
+test("AI có thể không đề xuất kiểu nào và quyết định vẫn giữ nguyên khi normalize lần nữa", () => {
+  const raw = {
+    datasetTitle: "Không có kiểu phù hợp",
+    grain: "một tỉnh một ngày",
+    columns: [{ name: "temperature", role: "measure", labelVi: "Nhiệt độ", unit: "°C", aggDefault: "mean" }],
+    suggestions: []
+  };
+  const result = validateAndNormalizeAnalysis(raw, profile);
+  assert.equal(result.source, "ai");
+  assert.deepEqual(result.suggestions, []);
+  assert.deepEqual(result.validationErrors, []);
+  assert.equal(result.columns.find(column => column.name === "temperature").unit, "°C");
+  const normalizedAgain = validateAndNormalizeAnalysis(result, profile);
+  assert.equal(normalizedAgain.source, "ai");
+  assert.deepEqual(normalizedAgain.suggestions, []);
+  assert.deepEqual(normalizedAgain.validationErrors, []);
+});
+
+test("suggestions sai contract vẫn fallback thay vì coi là quyết định không đề xuất", () => {
+  for (const suggestions of [null, {}, [{ id: "invalid", chartType: "unsupported" }]]) {
+    const result = validateAndNormalizeAnalysis({ columns: [], suggestions }, profile);
+    assert.equal(result.source, "rule");
+    assert.ok(result.suggestions.length);
+    assert.ok(result.validationErrors.length);
+  }
+});
+
+test("fallback ưu tiên chiều địa phương thay vì thuộc tính mô tả khi chọn bar", () => {
+  const result = fallbackAnalysis({ rowCount: 2, columns: [
+    { name: "weather_status", inferredType: "text", uniqueCount: 2 },
+    ...profile.columns
+  ] });
+  assert.equal(result.suggestions.find(item => item.chartType === "bar").bindings.x, "province");
+});

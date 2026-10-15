@@ -10,21 +10,25 @@ const SUM_HINT = /(tổng|total|amount|doanh thu|revenue|lượng mưa|rain|coun
 
 export const AI_CHART_REGISTRY = Object.freeze({
   choropleth: Object.freeze({
+    label: "Bản đồ vùng",
     slots: Object.freeze({ region: Object.freeze(["geo"]), value: Object.freeze(["measure"]) }),
     icon: "polygon",
     renderer: "MapLibre"
   }),
   hex_h3: Object.freeze({
+    label: "Bản đồ lục giác H3",
     slots: Object.freeze({ lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]), value: Object.freeze(["measure"]) }),
     icon: "hexagon",
     renderer: "H3"
   }),
   line: Object.freeze({
+    label: "Biểu đồ đường",
     slots: Object.freeze({ x: Object.freeze(["time"]), y: Object.freeze(["measure"]), series: Object.freeze(["category", "geo"]) }),
     icon: "line",
     renderer: "Recharts"
   }),
   bar: Object.freeze({
+    label: "Biểu đồ cột",
     slots: Object.freeze({ x: Object.freeze(["category", "geo"]), y: Object.freeze(["measure"]) }),
     icon: "singleBar",
     renderer: "Recharts"
@@ -67,7 +71,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
     },
     suggestions: {
       type: "array",
-      maxItems: 5,
+      maxItems: Object.keys(AI_CHART_REGISTRY).length,
       items: {
         type: "object",
         additionalProperties: false,
@@ -203,9 +207,9 @@ export function fallbackAnalysis(profile, { datasetTitle = "Dữ liệu tải l�
   if (region && measures[0]) suggestions.push({ id: "rule-choropleth", chartType: "choropleth", title: `${measures[0].name} theo ${region.name}`, bindings: { region: region.name, value: measures[0].name }, agg: measures[0].aggDefault, confidence: .72, reason: "Nhận diện theo quy tắc từ cột địa danh và chỉ số số.", source: "rule" });
   if (lat && lng && measures[0]) suggestions.push({ id: "rule-h3", chartType: "hex_h3", title: `${measures[0].name} theo ô H3`, bindings: { lat: lat.name, lng: lng.name, value: measures[0].name }, agg: measures[0].aggDefault, confidence: .75, reason: "Nhận diện theo quy tắc từ cặp tọa độ và chỉ số số.", source: "rule" });
   if (time && measures.length) suggestions.push({ id: "rule-line", chartType: "line", title: `Xu hướng theo ${time.name}`, bindings: { x: time.name, y: measures.slice(0, 3).map(column => column.name), ...(region || category ? { series: (region || category).name } : {}) }, agg: null, confidence: .68, reason: "Nhận diện theo quy tắc từ cột thời gian và chỉ số số.", source: "rule" });
-  const x = category || region;
+  const x = region || category;
   if (x) suggestions.push({ id: "rule-bar", chartType: "bar", title: measures[0] ? `${measures[0].name} theo ${x.name}` : `Số bản ghi theo ${x.name}`, bindings: { x: x.name, y: measures[0]?.name || "count" }, agg: measures[0]?.aggDefault || "count", confidence: .65, reason: "Nhận diện theo quy tắc từ cột phân loại.", source: "rule" });
-  return { datasetTitle, grain: "Một dòng tương ứng một bản ghi dữ liệu", columns, suggestions: suggestions.slice(0, 5), source: "rule" };
+  return { datasetTitle, grain: "Một dòng tương ứng một bản ghi dữ liệu", columns, suggestions, source: "rule" };
 }
 
 export function validateAndNormalizeAnalysis(raw, profile) {
@@ -224,13 +228,20 @@ export function validateAndNormalizeAnalysis(raw, profile) {
   const columns = actualColumns.map(column => normalizeColumn(rawByName.get(column.name), inferColumnInfo(column)));
   const roleOf = new Map(columns.map(column => [column.name, column.role]));
   const seenIds = new Set();
-  const suggestions = [];
-  for (const rawSuggestion of Array.isArray(raw.suggestions) ? raw.suggestions.slice(0, 5) : []) {
+  const rawSuggestions = Array.isArray(raw.suggestions) ? raw.suggestions : null;
+  const suggestionsByType = new Map();
+  for (const rawSuggestion of rawSuggestions || []) {
     const suggestion = validateSuggestion(rawSuggestion, roleOf, fieldNames, seenIds);
-    if (suggestion) suggestions.push(suggestion);
-    else errors.push(`Bỏ suggestion không hợp lệ: ${rawSuggestion?.id || rawSuggestion?.chartType || "(trống)"}`);
+    if (!suggestion) {
+      errors.push(`Bỏ suggestion không hợp lệ: ${rawSuggestion?.id || rawSuggestion?.chartType || "(trống)"}`);
+      continue;
+    }
+    const existing = suggestionsByType.get(suggestion.chartType);
+    if (!existing || suggestion.confidence > existing.confidence) suggestionsByType.set(suggestion.chartType, suggestion);
   }
-  if (!suggestions.length) return { ...fallback, validationErrors: errors.length ? errors : ["AI không có suggestion hợp lệ."] };
+  const suggestions = [...suggestionsByType.values()].sort((a, b) => b.confidence - a.confidence);
+  // An explicit empty list is the AI's suitability decision, not a failed response.
+  if (!suggestions.length && rawSuggestions?.length !== 0) return { ...fallback, validationErrors: errors.length ? errors : ["AI không có suggestion hợp lệ."] };
   const source = raw.source === "rule" ? "rule" : "ai";
   return {
     datasetTitle: typeof raw.datasetTitle === "string" && raw.datasetTitle.trim() ? raw.datasetTitle.trim() : fallback.datasetTitle,

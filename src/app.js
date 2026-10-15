@@ -27,7 +27,8 @@ import { fetchCurrentWeather, formatVisibility, readCachedWeather, WEATHER_CACHE
 import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient } from "./renderers/weather-style.js";
 import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } from "./geojson-layers.js";
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
-import { applyPipelineFilters, chartOptionForSuggestion, defaultTimeFilter, prepareSuggestions, resolveAggregation } from "./ai-chart-pipeline.js";
+import { applyPipelineFilters, chartOptionForSuggestion, defaultTimeFilter, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
+import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-client.js";
 import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
 import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
@@ -1694,7 +1695,7 @@ function createAiSuggestionButton(suggestion) {
   button.title = suggestion.available ? suggestion.reason : suggestion.repairable ? `${suggestion.unavailableReason} Bấm để sửa alias.` : suggestion.unavailableReason;
   if (["choropleth", "hex_h3"].includes(suggestion.chartType)) renderMapIcon(icon, suggestion.chartType === "choropleth" ? "polygon" : "hexagon");
   else renderChartIcon(icon, suggestion.chartType === "line" ? "line" : "singleBar");
-  title.className = "ai-suggestion-title"; title.textContent = suggestion.title;
+  title.className = "ai-suggestion-title"; title.textContent = AI_CHART_REGISTRY[suggestion.chartType].label;
   reason.className = "ai-suggestion-reason"; reason.textContent = suggestion.available ? suggestion.reason : suggestion.unavailableReason;
   score.className = "ai-suggestion-score"; score.textContent = `${Math.round(suggestion.effectiveConfidence * 100)}%${suggestion.effectiveConfidence < .6 ? " ⚠" : ""}`;
   button.append(icon, title, reason, score);
@@ -1707,7 +1708,7 @@ function renderAiSuggestionGrid() {
   const suggestionButtons = state.aiDataset.suggestions.map(createAiSuggestionButton);
   const suggestionHeading = document.createElement("div");
   suggestionHeading.className = "ai-manual-heading ai-suggestion-heading";
-  suggestionHeading.textContent = "AI đề xuất";
+  suggestionHeading.textContent = state.aiDataset.suggestions.length ? "AI đề xuất" : "Chưa có kiểu biểu đồ phù hợp được đề xuất";
   const manualHeading = document.createElement("div");
   manualHeading.className = "ai-manual-heading";
   manualHeading.textContent = state.chartOptions.length ? "Các lựa chọn khác" : "";
@@ -1970,6 +1971,7 @@ async function replaceAiMapData(records, recommendation, name) {
 async function replaceAiPipelineData(pipeline, name) {
   clearAiMapState(); clearMetroData(); clearCongestionData(); clearChartCanvas();
   state.chartConfig = null; state.chartMapping = null; state.mappingWarning = ""; state.activeChartKind = null;
+  state.mapType = null; state.dataProfile = null;
   state.dataOrigin = "ai"; state.boundary = null; state.sourceBoundary = null; state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = EMPTY_FEATURE_COLLECTION;
   map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
@@ -2004,6 +2006,11 @@ async function replaceAiPipelineData(pipeline, name) {
     const result = await selectAiSuggestion(suggestion.id);
     if (result === null) return;
     if (result) { selected = true; break; }
+  }
+  if (!selected && !suggestions.length && pipeline.analysis.source === "ai") {
+    updateModelSections();
+    setStatus(`AI chưa tìm thấy kiểu biểu đồ phù hợp với dữ liệu này.${manualOptions.length ? " Bạn có thể chọn thủ công trong Các lựa chọn khác." : ""}`);
+    return;
   }
   if (!selected && manualOptions.length) selectChartOption(manualOptions[0].id);
   else if (!selected) {
@@ -2448,14 +2455,14 @@ function bindUI() {
     if (event.target.matches(".ai-chart-metric-selector")) {
       const suggestion = state.aiDataset?.suggestions.find(item => item.id === state.aiDataset.selectedSuggestionId);
       if (suggestion?.chartType !== "bar") return;
-      suggestion.bindings.y = event.target.value;
+      Object.assign(suggestion, withSuggestionMetric(suggestion, event.target.value, state.aiDataset.analysis.columns));
       activateAiChartSuggestion(suggestion);
       return;
     }
     if (event.target.matches(".ai-metric-selector")) {
       const dataset = state.aiDataset; const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
       if (!suggestion || !["choropleth", "hex_h3"].includes(suggestion.chartType)) return;
-      suggestion.bindings.value = event.target.value;
+      Object.assign(suggestion, withSuggestionMetric(suggestion, event.target.value, dataset.analysis.columns));
       dataset.recommendation = recommendationForSuggestion(suggestion);
       if (suggestion.chartType === "hex_h3") await refreshAiH3();
       else await filteredAiBoundary();

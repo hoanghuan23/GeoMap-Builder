@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBarChartOption, buildLineChartOption, evaluateSuggestion } from "../src/ai-chart-pipeline.js";
+import { buildBarChartOption, buildLineChartOption, evaluateSuggestion, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
 
 const columns = [
   { name: "date", role: "time" },
@@ -46,4 +46,38 @@ test("H3 bị khóa nếu các điểm hợp lệ chỉ tạo thành một cell"
   );
   assert.equal(result.available, false);
   assert.match(result.unavailableReason, /hai ô H3/);
+});
+
+test("đổi chỉ số cập nhật phép gộp và tiêu đề cho bar, polygon và H3", () => {
+  const metricColumns = [
+    ...columns,
+    { name: "temperature", role: "measure", aggDefault: "mean", labelVi: "Nhiệt độ trung bình", unit: "°C" }
+  ];
+  for (const chartType of ["bar", "choropleth", "hex_h3"]) {
+    const original = { id: chartType, chartType, title: "Lượng mưa", agg: "sum", bindings: chartType === "bar"
+      ? { x: "province", y: "rain" }
+      : chartType === "choropleth" ? { region: "province", value: "rain" } : { lat: "lat", lng: "lng", value: "rain" } };
+    const changed = withSuggestionMetric(original, "temperature", metricColumns);
+    assert.equal(changed.agg, "mean");
+    assert.match(changed.title, /^Nhiệt độ trung bình theo /);
+    assert.equal(original.agg, "sum");
+    assert.equal(original.bindings[chartType === "bar" ? "y" : "value"], "rain");
+    if (chartType === "bar") {
+      const option = buildBarChartOption(changed, [
+        { province: "A", temperature: 20 }, { province: "A", temperature: 30 }
+      ], metricColumns);
+      assert.equal(option.config.data[0].temperature, 25);
+      assert.equal(option.config.title, changed.title);
+      assert.equal(option.config.unit, "°C");
+    }
+    assert.equal(withSuggestionMetric(changed, "rain", metricColumns).agg, "sum");
+  }
+});
+
+test("đổi từ đếm sang chỉ số dùng lại phép gộp của cột mới", () => {
+  const original = { chartType: "bar", bindings: { x: "province", y: "rain" }, agg: "sum" };
+  const counted = withSuggestionMetric(original, "count", columns);
+  assert.equal(counted.agg, "count");
+  assert.match(counted.title, /^Số bản ghi theo /);
+  assert.equal(withSuggestionMetric(counted, "rain", columns).agg, "sum");
 });

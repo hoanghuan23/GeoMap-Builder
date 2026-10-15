@@ -22,6 +22,18 @@ export function resolveAggregation(suggestion, columns) {
   return SUM_HINT.test(valueName || "") ? "sum" : "mean";
 }
 
+export function withSuggestionMetric(suggestion, metric, columns) {
+  const slot = suggestion.chartType === "bar" ? "y" : "value";
+  const updated = { ...suggestion, bindings: { ...suggestion.bindings, [slot]: metric }, agg: null };
+  const byName = columnMap(columns);
+  const label = field => byName.get(field)?.labelVi || humanizeField(field);
+  const metricLabel = metric === "count" ? "Số bản ghi" : label(metric);
+  const dimension = suggestion.chartType === "bar" ? suggestion.bindings.x : suggestion.bindings.region;
+  updated.agg = metric === "count" ? "count" : resolveAggregation(updated, columns);
+  updated.title = dimension ? `${metricLabel} theo ${label(dimension)}` : `${metricLabel} theo ô H3`;
+  return updated;
+}
+
 function aggregate(values, aggregation) {
   const numbers = values.map(Number).filter(Number.isFinite);
   if (aggregation === "count") return values.length;

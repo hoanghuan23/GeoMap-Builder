@@ -24,7 +24,7 @@ test("middleware chỉ gọi OpenAI một lần và fallback ngay khi output kh�
   globalThis.fetch = async (url, options) => {
     upstreamUrl = url;
     calls += 1; upstreamBody = JSON.parse(options.body);
-    return { ok: true, json: async () => ({ output_text: JSON.stringify({ datasetTitle: "bad", grain: "bad", columns: [], suggestions: [] }) }) };
+    return { ok: true, json: async () => ({ output_text: JSON.stringify({ datasetTitle: "bad", grain: "bad", columns: [], suggestions: [{ id: "bad", chartType: "unsupported" }] }) }) };
   };
   try {
     const profile = {
@@ -48,6 +48,34 @@ test("middleware chỉ gọi OpenAI một lần và fallback ngay khi output kh�
     const sent = JSON.parse(upstreamBody.input);
     assert.equal(sent.profile.rowCount, 2);
     assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "hex_h3", "line", "bar"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("middleware giữ quyết định không đề xuất và vẫn gửi schema trong prompt lẫn text.format", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls += 1;
+    const payload = JSON.parse(options.body);
+    assert.ok(payload.instructions.includes(JSON.stringify(payload.text.format.schema)));
+    assert.equal(payload.text.format.strict, true);
+    return { ok: true, json: async () => ({ output_text: JSON.stringify({
+      datasetTitle: "Không có kiểu phù hợp", grain: "một bản ghi", columns: [], suggestions: []
+    }) }) };
+  };
+  try {
+    const response = await call(middlewareFor({ OPENAI_API_KEY: "test" }), {
+      profile: { rowCount: 2, columns: [
+        { name: "province", inferredType: "text", uniqueCount: 2 },
+        { name: "value", inferredType: "number", uniqueCount: 2 }
+      ] }
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.source, "ai");
+    assert.deepEqual(response.body.suggestions, []);
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
