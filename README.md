@@ -43,7 +43,9 @@ Mỗi dataset chỉ tạo đúng một request OpenAI. Server tự đưa registr
 - `choropleth`
 - `hex_h3`
 
-Response AI lỗi, không hợp lệ hoặc không có suggestion dùng được sẽ chuyển ngay sang rule-based fallback với cùng contract; không retry. Pie, Half Pie và các biến thể bar vẫn là lựa chọn thủ công. Thay đổi filter, ngày, series, metric, palette hoặc H3 resolution chỉ dựng lại payload tại client và không gọi AI thêm lần nữa.
+AI đánh giá mức phù hợp của kiểu hiển thị theo grain, role và ý nghĩa dữ liệu; mỗi kiểu chỉ xuất hiện một lần, với bindings làm cấu hình mặc định. Không tách đề xuất theo chỉ số hoặc tự nhóm theo thuộc tính mô tả để tạo thêm bài toán thống kê. Kết quả AI không có đề xuất vẫn được giữ ở bước chuẩn hóa. Khi chuẩn bị hiển thị bảng có địa danh hành chính và chỉ số hợp lệ tại ít nhất hai địa phương (không phải bảng tọa độ), client bổ sung Choropleth nếu AI bỏ sót; đề xuất bổ sung mang nguồn `rule`. Bảng có tọa độ được ưu tiên Point. Không tự chọn một biểu đồ thủ công thay thế cho quyết định không đề xuất.
+
+Response AI lỗi, không hợp lệ hoặc chỉ chứa suggestion sai contract sẽ chuyển ngay sang rule-based fallback với cùng contract; không retry. Pie, Half Pie và các biến thể bar vẫn là lựa chọn thủ công. Thay đổi filter, ngày, series, metric, palette hoặc H3 resolution chỉ dựng lại payload tại client và không gọi AI thêm lần nữa.
 
 `AI_DEBUG` mặc định tắt. Khi tắt, middleware không log sample/head hoặc raw profile. Chỉ bật `AI_DEBUG=true` trong môi trường phát triển có dữ liệu phù hợp để ghi log.
 
