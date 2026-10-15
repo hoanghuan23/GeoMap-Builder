@@ -5,6 +5,7 @@ import vm from "node:vm";
 import * as metro from "../src/metro-data.js";
 import * as capabilities from "../src/data-capabilities.js";
 import * as polygonStyle from "../src/renderers/polygon-style.js";
+import * as pointStyle from "../src/renderers/point-style.js";
 import * as geojsonLayers from "../src/geojson-layers.js";
 import { PointRenderer } from "../src/renderers/point-renderer.js";
 import { PolygonRenderer } from "../src/renderers/polygon-renderer.js";
@@ -40,7 +41,7 @@ function createHarness() {
     moveLayer() {}, on() {}, resize() {}, fitBounds() {}
   };
   const context = vm.createContext({
-    ...metro, ...capabilities, ...polygonStyle, ...geojsonLayers, ...congestion, ...transport, ...layerOrder, PointRenderer, PolygonRenderer,
+    ...metro, ...capabilities, ...polygonStyle, ...pointStyle, ...geojsonLayers, ...congestion, ...transport, ...layerOrder, PointRenderer, PolygonRenderer,
     CONFIG: { DEFAULT_RESOLUTION: 5, MAX_RENDER_CELLS: 120000 },
     DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     mergeBarConfig: () => ({}), mergePieConfig: () => ({}),
@@ -108,6 +109,50 @@ test("upload displays independent Metro layers, changes departure, and clears al
   for (const id of ["polygon-data", "vietnam-boundary", "metro-station-data", "line-data"]) assert.equal(sources.get(id).data.features.length, 0);
   assert.equal(get("metro-time-section").hidden, true);
   assert.equal(get("metro-legend").hidden, true);
+});
+
+test("Point style panel applies appearance and resets it without rebuilding H3 or changing filters", async () => {
+  const { context, get, sources, layers } = createHarness();
+  context.pointRecords = [
+    { lat: 21, lng: 105, type: "A", value: 10 },
+    { lat: 21.1, lng: 105.1, type: "B", value: 20 }
+  ];
+  vm.runInContext(`
+    state.mapType = "point";
+    state.aiDataset = {
+      records: pointRecords,
+      analysis: { columns: [{ name: "type", role: "category" }, { name: "value", role: "measure" }] },
+      suggestions: [{ id: "point-test", chartType: "point", bindings: { lat: "lat", lng: "lng" } }],
+      selectedSuggestionId: "point-test"
+    };
+    state.pointData = buildActivePointView(state.aiDataset.suggestions[0]).data;
+    state.boundary = state.pointData;
+    map.getSource("point-data").setData(state.pointData);
+    updateModelSections(); applyStyle();
+  `, context);
+  assert.equal(get("style-section").hidden, false);
+  assert.equal(get("point-style-controls").hidden, false);
+  assert.equal(get("map-style-controls").hidden, true);
+  assert.equal(get("point-group-colors").children.length, 2);
+  const data = sources.get("point-data").data;
+  const selection = vm.runInContext("JSON.stringify(state.aiDataset.activePointView.selection)", context);
+  vm.runInContext(`
+    state.pointStyle = mergePointStyle({ size: 150, opacity: .4, showBorder: false, showLegend: false });
+    pointColorOverridesFor(state.aiDataset.suggestions[0]).A = "#ff0000";
+    refreshPointStyle();
+  `, context);
+  assert.equal(layers.get("point-marker").paint["circle-opacity"], .4);
+  assert.equal(layers.get("point-marker").paint["circle-stroke-width"], 0);
+  assert.equal(get("point-legend").hidden, true);
+  assert.equal(vm.runInContext("state.aiDataset.activePointView.colors.A", context), "#ff0000");
+  assert.equal(sources.get("point-data").data, data);
+  await vm.runInContext("resetConfiguration()", context);
+  assert.equal(layers.get("point-marker").paint["circle-opacity"], .95);
+  assert.equal(layers.get("point-marker").paint["circle-stroke-width"], 1);
+  assert.equal(get("point-legend").hidden, false);
+  assert.notEqual(vm.runInContext("state.aiDataset.activePointView.colors.A", context), "#ff0000");
+  assert.equal(vm.runInContext("JSON.stringify(state.aiDataset.activePointView.selection)", context), selection);
+  assert.equal(sources.get("point-data").data, data);
 });
 
 test("skips a file uploaded more than once and allows it again after removal", async () => {

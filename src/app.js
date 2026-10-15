@@ -20,6 +20,7 @@ import { BAR_COLORS, dataForBarMapping, humanizeField, reconcileSeriesColors, se
 import { renderChartIcon } from "./charts/chart-icons.js";
 import { renderMapIcon } from "./renderers/map-icons.js";
 import { PointRenderer } from "./renderers/point-renderer.js";
+import { buildPointView, createPointModel, DEFAULT_POINT_STYLE, mergePointStyle, normalizePointSelection, pointPaint, POINT_DEFAULT_GROUPS, POINT_GROUP_LIMIT } from "./renderers/point-style.js";
 import { PolygonRenderer } from "./renderers/polygon-renderer.js";
 import { polygonColorField, polygonFillExpression, polygonLegendScale } from "./renderers/polygon-style.js";
 import { createMapSearch, landOnlyBoundary, loadMapTilerAdministrativeBoundaries } from "./map-search.js";
@@ -65,7 +66,7 @@ const state = {
   mapType: null, dataProfile: null,
   pointData: { type: "FeatureCollection", features: [] },
   chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null,
-  barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, polygonPalette: null,
+  barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, pointStyle: { ...DEFAULT_POINT_STYLE }, polygonPalette: null,
   metroData: null, metroTime: null, metroPopup: null, lineData: EMPTY_FEATURE_COLLECTION,
   congestionData: null, congestionTime: null, congestionPopup: null,
   dataOrigin: null,
@@ -74,7 +75,7 @@ const state = {
   aiDataset: null, pendingSheet: null,
   mapStyle: "liberty"
 };
-let map; let toastTimer; let cellPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
+let map; let toastTimer; let cellPopup; let pointPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
 let layerOrderRevision = 0;
 let mapLayerEventsBound = false;
 const uploadedPointerLayerIds = new Set();
@@ -313,6 +314,7 @@ function showSupportedChartCatalog(visible) {
 function updateModelSections() {
   const hasModel = Boolean(state.mapType);
   const isChart = Boolean(state.chartConfig);
+  const isPoint = !isChart && state.mapType === "point";
   $("metro-time-section").hidden = !state.metroData || isChart;
   $("congestion-time-section").hidden = !state.congestionData || isChart;
   $("metro-layer-controls").hidden = !state.metroData || isChart;
@@ -322,19 +324,27 @@ function updateModelSections() {
   $("chart-data-mapping-section").hidden = !isChart || !state.chartMapping;
   $("resolution-section").hidden = !hasModel || isChart || state.mapType !== "h3";
   $("feature-section").hidden = !hasModel || isChart;
-  $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon"].includes(state.mapType));
+  $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon", "point"].includes(state.mapType));
+  $("map-style-controls").hidden = isChart || isPoint;
+  $("point-style-controls").hidden = !isPoint;
   $("cell-stats-card").hidden = !hasModel || isChart || state.mapType !== "h3";
+  $("ai-filter-description").textContent = activePointSuggestion()
+    ? "Chọn chỉ số, nhóm điểm và khoảng thời gian"
+    : "Chọn chỉ số, địa phương và khoảng thời gian";
   if (!isChart) {
     const isPolygon = state.mapType === "polygon";
     const isWeather = state.dataOrigin === "search" && state.mapType === "h3";
     const isAiThematic = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
-    $("style-description").textContent = isWeather ? "Bảng màu nhiệt độ, độ mờ và đường viền" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
+    $("style-description").textContent = isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isWeather ? "Bảng màu nhiệt độ, độ mờ và đường viền" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
     $("polygon-color-ramp").hidden = !isPolygon && !isWeather && !isAiThematic;
     $("border-color-field").hidden = isPolygon && !state.metroData;
     $("show-border-field").hidden = false;
     $("line-width-field").hidden = false;
     if (isPolygon || isWeather || isAiThematic) syncPolygonPaletteControls();
   }
+  if (isPoint) renderPointStyleControls();
+  renderPointLegend();
+  if (!activePointSuggestion()) { pointPopup?.remove(); pointPopup = null; }
 }
 
 function fillExpression() {
@@ -406,6 +416,10 @@ function applyStyle() {
     map.setPaintProperty("data-lines", "line-width", state.congestionData ? 5 : 3);
     map.setPaintProperty("data-lines", "line-opacity", state.congestionData ? .9 : 1);
   }
+  if (map.getLayer("point-marker")) {
+    const view = activePointSuggestion() ? state.aiDataset.activePointView : null;
+    for (const [property, value] of Object.entries(view?.paint || pointPaint(state.pointStyle))) map.setPaintProperty("point-marker", property, value);
+  }
   applyMapLayerVisibility();
   renderMetroLegend();
   renderCongestionLegend();
@@ -440,6 +454,8 @@ function applyMapLayerVisibility() {
   if (!showPolygon) { state.metroPopup?.remove(); state.metroPopup = null; }
   if (!showH3 && !showPolygon) cellPopup?.remove();
   renderWeatherLegend();
+  renderPointLegend();
+  if (state.mapType !== "point" || !showLayers) { pointPopup?.remove(); pointPopup = null; }
 }
 
 function addMapLayers() {
@@ -531,7 +547,8 @@ function addMapLayers() {
         || columns.find(column => column.role === "id")
         || columns.find(column => ["category", "text"].includes(column.role));
       const card = createAiPopupContent(document, feature, columns, titleColumn?.name);
-      new maplibregl.Popup({ offset: 10, maxWidth: "360px", className: "ai-weather-popup" })
+      pointPopup?.remove();
+      pointPopup = new maplibregl.Popup({ offset: 10, maxWidth: "360px", className: "ai-weather-popup" })
         .setLngLat(feature.geometry.coordinates)
         .setDOMContent(card)
         .addTo(map);
@@ -1260,6 +1277,7 @@ async function resetConfiguration() {
   state.resolution = CONFIG.DEFAULT_RESOLUTION;
   state.barStyle = mergeBarConfig();
   state.pieStyle = mergePieConfig();
+  state.pointStyle = mergePointStyle();
   state.polygonPalette = state.metroData ? "travel" : (state.dataOrigin === "search" || state.aiDataset) ? "diverging" : null;
 
   $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
@@ -1300,6 +1318,9 @@ async function resetConfiguration() {
     renderChartCanvas();
     renderChartDataMapping();
     renderChartStyleControls();
+  } else if (state.mapType === "point") {
+    if (state.aiDataset) state.aiDataset.pointColorOverrides = Object.create(null);
+    refreshPointStyle(); renderPointStyleControls();
   } else if (state.congestionData) {
     $("congestion-time").value = state.congestionData.times[0]; updateCongestionTime();
   } else if (state.metroData) {
@@ -1453,7 +1474,9 @@ function applyChartMappingChange(change) {
 }
 
 function showChartStyleControls(show) {
-  $("map-style-controls").hidden = show;
+  const isPoint = !show && state.mapType === "point";
+  $("map-style-controls").hidden = show || isPoint;
+  $("point-style-controls").hidden = !isPoint;
   $("bar-style-controls").hidden = !show;
   $("style-description").textContent = show ? "Tùy chỉnh biểu đồ" : "Màu sắc, độ mờ và đường viền";
   if (show) renderChartStyleControls();
@@ -1465,7 +1488,9 @@ function showChartStyleControls(show) {
 
 function clearAiMapState() {
   cancelAiBoundaryLoad();
+  pointPopup?.remove(); pointPopup = null;
   state.aiDataset = null;
+  $("point-legend").hidden = true;
   $("ai-data-filters").hidden = true;
   $("ai-filter-controls").replaceChildren();
 }
@@ -1931,34 +1956,200 @@ function renderGeoRepair(unmatched = []) {
   button.type = "button"; button.className = "secondary-button apply-geo-aliases"; button.textContent = "Thử ghép lại"; panel.append(button); controls.append(panel); $("ai-data-filters").hidden = false;
 }
 
+function activePointSuggestion() {
+  if (state.mapType !== "point" || state.chartConfig) return null;
+  const dataset = state.aiDataset;
+  const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+  return suggestion?.chartType === "point" ? suggestion : null;
+}
+
+function pointModelFor(suggestion) {
+  const dataset = state.aiDataset;
+  dataset.pointModels ||= Object.create(null);
+  return dataset.pointModels[suggestion.id] ||= createPointModel(dataset.records, dataset.analysis.columns, suggestion.bindings);
+}
+
+function pointSelectionFor(suggestion) {
+  const dataset = state.aiDataset;
+  dataset.pointSelections ||= Object.create(null);
+  return dataset.pointSelections[suggestion.id] ||= normalizePointSelection(pointModelFor(suggestion));
+}
+
+function populatePointControls(suggestion) {
+  const model = pointModelFor(suggestion);
+  const selection = pointSelectionFor(suggestion);
+  const group = model.groups.find(column => column.name === selection.groupField);
+  const nodes = [];
+  if (model.measures.length) {
+    nodes.push(aiField("Chỉ số", aiSelect("ai-point-metric", model.measures.map(column => [column.name, column.label]), selection.metricField)));
+  }
+  if (model.groups.length > 1) {
+    nodes.push(aiField("Phân nhóm theo", aiSelect("ai-point-group", model.groups.map(column => [column.name, column.label]), selection.groupField)));
+  }
+  if (group) {
+    const label = group.label.toLocaleLowerCase("vi");
+    nodes.push(aiField(group.label, aiSelect("ai-point-mode", [["all", `Gộp tất cả ${label}`], ["pick", `Chọn từng ${label}`]], selection.mode)));
+    if (selection.mode === "pick") {
+      const box = document.createElement("div"); box.className = "ai-series-picker ai-point-picker";
+      const search = Object.assign(document.createElement("input"), { type: "search", className: "ai-series-search", placeholder: "Tìm…" });
+      search.setAttribute("aria-label", `Tìm ${label}`);
+      const counter = document.createElement("span"); counter.dataset.role = "point-group-count";
+      counter.textContent = `${selection.selectedValues.length}/${POINT_GROUP_LIMIT}`;
+      const reset = Object.assign(document.createElement("button"), { type: "button", className: "ai-point-reset secondary-button", textContent: `Đặt lại (top ${POINT_DEFAULT_GROUPS})` });
+      const head = document.createElement("div"); head.className = "ai-series-head"; head.append(counter, reset);
+      const list = document.createElement("div"); list.className = "ai-series-list";
+      list.replaceChildren(...group.values.map(item => {
+        const row = document.createElement("label");
+        const input = Object.assign(document.createElement("input"), { type: "checkbox", className: "ai-point-value", value: item.key, checked: selection.selectedValues.includes(item.key) });
+        const swatch = document.createElement("i"); swatch.className = "point-group-swatch"; swatch.setAttribute("aria-hidden", "true");
+        const text = document.createElement("span"); text.textContent = item.label;
+        const count = document.createElement("small"); count.textContent = item.count.toLocaleString("vi-VN");
+        row.append(input, swatch, text, count);
+        return row;
+      }));
+      box.append(search, head, list); nodes.push(box);
+    }
+  }
+  if (model.timeColumn) {
+    const choices = model.times.map(value => [value, displayFilterValue(value, "date-select")]);
+    const from = aiSelect("ai-point-range", choices, selection.from); from.dataset.edge = "from";
+    const to = aiSelect("ai-point-range", choices, selection.to); to.dataset.edge = "to";
+    const label = model.timeColumn.labelVi || humanizeField(model.timeColumn.name);
+    nodes.push(aiField(`${label} từ`, from), aiField("đến", to));
+  }
+  $("ai-filter-controls").replaceChildren(...nodes);
+  $("ai-data-filters").hidden = nodes.length === 0;
+  syncPointControls();
+}
+
+function syncPointControls() {
+  const view = state.aiDataset?.activePointView;
+  if (!view) return;
+  const selected = new Set(view.selection.selectedValues);
+  document.querySelectorAll("#ai-filter-controls .ai-point-value").forEach(input => {
+    input.checked = selected.has(input.value);
+    const swatch = input.parentElement.querySelector(".point-group-swatch");
+    swatch.style.background = input.checked ? view.colors[input.value] : "#dce3ed";
+  });
+  const counter = document.querySelector("#ai-filter-controls [data-role='point-group-count']");
+  if (counter) counter.textContent = `${selected.size}/${POINT_GROUP_LIMIT}`;
+  document.querySelectorAll("#ai-filter-controls .ai-point-range").forEach(select => { select.value = view.selection[select.dataset.edge]; });
+}
+
+function pointMetricText(metric) {
+  if (!metric) return "";
+  const label = metric.unit && !metric.label.toLocaleLowerCase("vi").includes(metric.unit.toLocaleLowerCase("vi")) ? `${metric.label} (${metric.unit})` : metric.label;
+  const format = value => new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 }).format(value);
+  const range = metric.min == null ? "Không có giá trị hợp lệ" : metric.min === metric.max ? format(metric.min) : `${format(metric.min)} – ${format(metric.max)}`;
+  return `Kích thước theo ${label}: ${range}${metric.missingCount ? ` · ${metric.missingCount.toLocaleString("vi-VN")} điểm thiếu chỉ số (cỡ nhỏ nhất)` : ""}`;
+}
+
+function pointColorOverridesFor(suggestion) {
+  const dataset = state.aiDataset;
+  dataset.pointColorOverrides ||= Object.create(null);
+  const byField = dataset.pointColorOverrides[suggestion.id] ||= Object.create(null);
+  return byField[pointSelectionFor(suggestion).groupField] ||= Object.create(null);
+}
+
+function renderPointStyleControls() {
+  const style = mergePointStyle(state.pointStyle);
+  for (const [id, key] of [["point-size", "size"], ["point-opacity", "opacity"], ["point-border-width", "borderWidth"], ["point-color", "color"], ["point-border-color", "borderColor"]]) $(id).value = style[key];
+  $("point-size-value").value = `${style.size}%`;
+  $("point-opacity-value").value = `${Math.round(style.opacity * 100)}%`;
+  $("point-border-width-value").value = `${style.borderWidth} px`;
+  $("point-color-value").textContent = style.color.toUpperCase();
+  $("point-border-color-value").textContent = style.borderColor.toUpperCase();
+  $("point-show-border").checked = style.showBorder;
+  $("point-show-legend").checked = style.showLegend;
+  const view = activePointSuggestion() ? state.aiDataset.activePointView : null;
+  const grouped = view?.selection.mode === "pick";
+  $("point-fixed-color-field").hidden = grouped;
+  $("point-group-color-field").hidden = !grouped;
+  $("point-show-legend-field").hidden = !view;
+  $("point-group-colors").replaceChildren(...(grouped ? view.legendRows.map(item => {
+    const row = document.createElement("label"); row.className = "bar-color-row";
+    const label = document.createElement("span"); label.textContent = item.label; label.title = item.label;
+    const control = document.createElement("span"); control.className = "color-control";
+    const input = Object.assign(document.createElement("input"), { type: "color", value: item.color, className: "point-group-color" });
+    input.dataset.value = item.key; input.setAttribute("aria-label", `Màu ${item.label}`);
+    const code = document.createElement("code"); code.textContent = item.color.toUpperCase();
+    control.append(input, code); row.append(label, control);
+    return row;
+  }) : []));
+}
+
+function buildActivePointView(suggestion) {
+  const dataset = state.aiDataset;
+  const model = pointModelFor(suggestion);
+  const selection = pointSelectionFor(suggestion);
+  dataset.pointColors ||= Object.create(null);
+  const byField = dataset.pointColors[suggestion.id] ||= Object.create(null);
+  const view = buildPointView(model, selection, byField[selection.groupField], { ...state.pointStyle, groupColors: pointColorOverridesFor(suggestion) });
+  byField[view.selection.groupField] = view.paletteColors;
+  dataset.pointSelections[suggestion.id] = view.selection;
+  dataset.activePointView = view;
+  return view;
+}
+
+function refreshPointStyle() {
+  const suggestion = activePointSuggestion();
+  if (suggestion) { buildActivePointView(suggestion); syncPointControls(); }
+  applyStyle();
+}
+
+function renderPointLegend() {
+  const legend = $("point-legend");
+  const view = state.aiDataset?.activePointView;
+  legend.hidden = !activePointSuggestion() || !state.pointStyle.showLegend || !$("show-map-layers").checked || !view?.stats.visibleCount;
+  if (legend.hidden) return;
+  const heading = document.createElement("div"); heading.className = "point-legend-heading";
+  const title = document.createElement("strong"); title.textContent = view.legendTitle;
+  const count = document.createElement("span"); count.textContent = `${view.stats.visibleCount.toLocaleString("vi-VN")} điểm`;
+  heading.append(title, count);
+  const list = document.createElement("div"); list.className = "point-legend-rows";
+  for (const item of view.legendRows) {
+    const row = document.createElement("div"); row.className = "point-legend-row";
+    const swatch = document.createElement("i"); swatch.style.background = item.color; swatch.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span"); label.textContent = item.label;
+    const amount = document.createElement("b"); amount.textContent = item.count.toLocaleString("vi-VN");
+    row.append(swatch, label, amount); list.append(row);
+  }
+  const note = document.createElement("small");
+  note.textContent = pointMetricText(view.metric) || "Kích thước điểm thay đổi theo mức thu phóng";
+  legend.replaceChildren(heading, list, note);
+}
+
+function refreshPointView(suggestion, { rebuildControls = false } = {}) {
+  const dataset = state.aiDataset;
+  const model = pointModelFor(suggestion);
+  const view = buildActivePointView(suggestion);
+  dataset.spatialData = model.data;
+  pointPopup?.remove(); pointPopup = null;
+  state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = view.data;
+  state.boundary = view.data; state.sourceBoundary = model.data; state.mapType = "point";
+  state.dataProfile = analyzeSpatialData(view.data, { numericFields: model.measures.map(column => column.name) });
+  map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION);
+  map.getSource("point-data")?.setData(view.data);
+  map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+  if (rebuildControls) populatePointControls(suggestion);
+  else syncPointControls();
+  updateModelSections(); applyStyle();
+  $("file-note").textContent = `${view.stats.visibleCount.toLocaleString("vi-VN")}/${view.stats.totalCount.toLocaleString("vi-VN")} điểm · ${Math.round(view.stats.coordinateRate * 100)}% tọa độ hợp lệ`;
+  setStatus(view.stats.visibleCount ? `Đang hiển thị ${view.stats.visibleCount.toLocaleString("vi-VN")} điểm dữ liệu.` : "Không có điểm phù hợp với bộ lọc. Hãy chọn nhóm hoặc khoảng thời gian khác.", view.stats.visibleCount > 0);
+}
+
 function activateAiPoint(suggestion) {
   cancelAiBoundaryLoad();
   const dataset = state.aiDataset;
-  const pointData = recordsToPointGeoJSON(dataset.records, {
-    latField: suggestion.bindings.lat,
-    lngField: suggestion.bindings.lng
-  });
-  const coordinateRate = dataset.records.length ? pointData.features.length / dataset.records.length : 0;
+  const firstActivation = !dataset.pointSelections?.[suggestion.id];
   dataset.recommendation = recommendationForSuggestion(suggestion);
-  dataset.spatialData = pointData;
-  dataset.filters = {};
-  $("ai-filter-controls").replaceChildren(); $("ai-data-filters").hidden = true;
   state.chartConfig = null; state.chartMapping = null; state.mappingWarning = "";
   clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
   setDataPanelVisible(false); showChartStyleControls(false);
-  state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = pointData;
-  state.boundary = pointData; state.sourceBoundary = pointData; state.mapType = "point";
-  state.dataProfile = analyzeSpatialData(pointData, {
-    numericFields: dataset.analysis.columns.filter(column => column.role === "measure").map(column => column.name)
-  });
-  map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION);
-  map.getSource("point-data")?.setData(pointData);
-  map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
-  map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
-  updateModelSections(); applyStyle(); renderAiSuggestionGrid();
-  fitGeoJSON(pointData);
-  $("file-note").textContent = `${pointData.features.length.toLocaleString("vi-VN")} điểm · ${Math.round(coordinateRate * 100)}% tọa độ hợp lệ`;
-  setStatus(`Đã hiển thị ${pointData.features.length.toLocaleString("vi-VN")} điểm dữ liệu.`, true);
+  refreshPointView(suggestion, { rebuildControls: true });
+  renderAiSuggestionGrid();
+  if (firstActivation) fitGeoJSON(pointModelFor(suggestion).data);
   return true;
 }
 
@@ -2619,7 +2810,58 @@ function bindUI() {
     const option = event.target.closest(".basemap-option");
     if (option) selectMapStyle(option.dataset.mapStyle);
   });
+  $("point-style-controls").addEventListener("input", event => {
+    const control = event.target;
+    if (control.matches(".point-group-color")) {
+      const suggestion = activePointSuggestion();
+      if (!suggestion) return;
+      pointColorOverridesFor(suggestion)[control.dataset.value] = control.value;
+      control.nextElementSibling.textContent = control.value.toUpperCase();
+    } else {
+      const key = { "point-size": "size", "point-opacity": "opacity", "point-border-width": "borderWidth", "point-color": "color", "point-border-color": "borderColor" }[control.id];
+      if (!key) return;
+      state.pointStyle = mergePointStyle({ ...state.pointStyle, [key]: control.type === "color" ? control.value : Number(control.value) });
+      if (control.type === "color") $(`${control.id}-value`).textContent = control.value.toUpperCase();
+      else $(`${control.id}-value`).value = key === "size" ? `${state.pointStyle.size}%` : key === "opacity" ? `${Math.round(state.pointStyle.opacity * 100)}%` : `${state.pointStyle.borderWidth} px`;
+    }
+    refreshPointStyle();
+  });
+  $("point-style-controls").addEventListener("change", event => {
+    const key = { "point-show-border": "showBorder", "point-show-legend": "showLegend" }[event.target.id];
+    if (!key) return;
+    state.pointStyle = mergePointStyle({ ...state.pointStyle, [key]: event.target.checked });
+    refreshPointStyle();
+  });
   $("ai-filter-controls").addEventListener("change", async event => {
+    if (event.target.matches(".ai-point-metric, .ai-point-group, .ai-point-mode, .ai-point-value, .ai-point-range")) {
+      const suggestion = activePointSuggestion();
+      if (!suggestion) return;
+      const selection = pointSelectionFor(suggestion);
+      const control = event.target;
+      let rebuildControls = false;
+      if (control.matches(".ai-point-metric")) selection.metricField = control.value;
+      else if (control.matches(".ai-point-group")) {
+        selection.groupField = control.value;
+        selection.selectedValues = [];
+        state.aiDataset.pointSelections[suggestion.id] = normalizePointSelection(pointModelFor(suggestion), selection);
+        rebuildControls = true;
+      } else if (control.matches(".ai-point-mode")) { selection.mode = control.value; rebuildControls = true; }
+      else if (control.matches(".ai-point-value")) {
+        const values = control.checked ? [...selection.selectedValues, control.value] : selection.selectedValues.filter(value => value !== control.value);
+        if (values.length > POINT_GROUP_LIMIT || !values.length) {
+          control.checked = !control.checked;
+          showToast(values.length ? `Chỉ có thể hiển thị tối đa ${POINT_GROUP_LIMIT} nhóm.` : "Cần chọn ít nhất một nhóm.");
+          return;
+        }
+        selection.selectedValues = values;
+      } else {
+        const edge = control.dataset.edge;
+        selection[edge] = control.value;
+        if (selection.from > selection.to) selection[edge === "from" ? "to" : "from"] = control.value;
+      }
+      refreshPointView(suggestion, { rebuildControls });
+      return;
+    }
     const activeLine = () => {
       const dataset = state.aiDataset;
       const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
@@ -2685,6 +2927,14 @@ function bindUI() {
     await filteredAiBoundary({ fit: shouldFit });
   });
   $("ai-filter-controls").addEventListener("click", event => {
+    if (event.target.closest(".ai-point-reset")) {
+      const suggestion = activePointSuggestion();
+      if (!suggestion) return;
+      const selection = pointSelectionFor(suggestion);
+      state.aiDataset.pointSelections[suggestion.id] = normalizePointSelection(pointModelFor(suggestion), { ...selection, selectedValues: [] });
+      refreshPointView(suggestion, { rebuildControls: true });
+      return;
+    }
     if (event.target.closest(".ai-series-reset")) {
       const dataset = state.aiDataset;
       const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
