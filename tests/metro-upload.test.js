@@ -48,6 +48,7 @@ function createHarness() {
     clearDataMappingPanel() {}, clearBarStylePanel() {}, clearPieStylePanel() {}, renderMapIcon() {},
     humanizeField: field => field,
     geoJSONToCells() { throw new Error("Metro polygons must not be regenerated as H3"); },
+    geoJSONToH3FeatureCollection: () => ({ type: "FeatureCollection", features: [] }),
     document: { getElementById: get, createElement: element, querySelector: () => element(), querySelectorAll: () => [] },
     maplibregl: {
       LngLatBounds: class { extend() { return this; } },
@@ -105,10 +106,33 @@ test("upload displays independent Metro layers, changes departure, and clears al
   await vm.runInContext("resetConfiguration()", context);
   assert.equal(sources.get("polygon-data").data.features[0].properties.departure_time, "05:30");
   assert.equal(layers.get("data-lines").layout.visibility, "visible");
+  assert.equal(get("show-weather").checked, false);
+  assert.equal(get("show-weather-status").textContent, "Đang tắt");
   vm.runInContext("deleteData()", context);
   for (const id of ["polygon-data", "vietnam-boundary", "metro-station-data", "line-data"]) assert.equal(sources.get(id).data.features.length, 0);
   assert.equal(get("metro-time-section").hidden, true);
   assert.equal(get("metro-legend").hidden, true);
+});
+
+test("area search recommends Polygon by default without uploaded data", async () => {
+  const { context, get, sources, layers } = createHarness();
+  context.searchBoundaries = [{
+    type: "Feature",
+    properties: { name: "Hà Nội" },
+    geometry: { type: "Polygon", coordinates: [[[105, 20], [106, 20], [106, 21], [105, 20]]] }
+  }];
+  get("show-weather").checked = true;
+
+  await vm.runInContext("applySearchBoundaries(searchBoundaries)", context);
+
+  assert.equal(vm.runInContext("state.dataOrigin", context), "search");
+  assert.equal(vm.runInContext("state.mapType", context), "polygon");
+  assert.equal(sources.get("polygon-data").data.features.length, 1);
+  assert.equal(layers.get("polygon-fill").layout.visibility, "visible");
+  assert.equal(layers.get("h3-fill").layout.visibility, "none");
+  assert.equal(get("map-type-grid").children.find(button => button.dataset.type === "polygon").className, "map-type active");
+  assert.equal(get("show-weather").checked, false);
+  assert.equal(get("show-weather-status").textContent, "Đang tắt");
 });
 
 test("Point style panel applies appearance and resets it without rebuilding H3 or changing filters", async () => {

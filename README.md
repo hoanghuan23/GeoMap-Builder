@@ -47,7 +47,7 @@ AI đánh giá mức phù hợp của kiểu hiển thị theo grain, role và �
 
 Response AI lỗi, không hợp lệ hoặc chỉ chứa suggestion sai contract sẽ chuyển ngay sang rule-based fallback với cùng contract; không retry. Pie, Half Pie và các biến thể bar vẫn là lựa chọn thủ công. Thay đổi filter, ngày, series, metric, palette hoặc H3 resolution chỉ dựng lại payload tại client và không gọi AI thêm lần nữa.
 
-`AI_DEBUG` mặc định tắt. Khi tắt, middleware không log sample/head hoặc raw profile. Chỉ bật `AI_DEBUG=true` trong môi trường phát triển có dữ liệu phù hợp để ghi log.
+`AI_DEBUG` mặc định tắt. Khi tắt, middleware không log sample/head hoặc raw profile. Chỉ bật `AI_DEBUG=true` trong môi trường phát triển có dữ liệu phù hợp để ghi log. Khi bật, mỗi lần phân tích sẽ thêm một phần tử JSON gồm tên file/sheet, input gửi AI, raw output và output sau chuẩn hóa vào `test/ai-analysis-input-output.json`. Có thể đổi đường dẫn bằng biến `AI_DEBUG_FILE`; toàn bộ các lần phân tích được lưu chung trong một mảng JSON và có thể format trực tiếp trong IDE.
 
 Choropleth lấy geometry hành chính từ MapTiler và cho phép thiếu một phần địa danh, đồng thời báo `matched`, `unmatched` và `matchRate`. GADM chỉ được dùng làm mặt nạ đất liền, không ép tên hoặc số lượng tỉnh. Thiếu MapTiler key chỉ khóa choropleth; Bar, Line và H3 vẫn hoạt động nếu dữ liệu phù hợp.
 

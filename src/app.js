@@ -1295,8 +1295,10 @@ async function resetConfiguration() {
   if (!state.chartConfig) syncPolygonPaletteControls();
   $("show-map-layers").checked = true;
   $("show-map-layers-status").textContent = "Đang bật";
-  $("show-weather").checked = true;
-  $("show-weather-status").textContent = "Đang bật";
+  weatherLoadRevision += 1;
+  cellPopup?.remove();
+  $("show-weather").checked = false;
+  $("show-weather-status").textContent = "Đang tắt";
   for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).checked = true;
 
   if (state.chartConfig) {
@@ -2485,15 +2487,20 @@ async function applySearchBoundaries(boundaries) {
     return;
   }
 
+  const isNewSearch = state.dataOrigin !== "search";
   clearMetroData();
   cellPopup?.remove();
   state.dataOrigin = "search";
+  if (isNewSearch) {
+    $("show-weather").checked = false;
+    $("show-weather-status").textContent = "Đang tắt";
+  }
   state.polygonPalette = state.polygonPalette && state.polygonPalette !== "travel" ? state.polygonPalette : "diverging";
   state.resolution = CONFIG.DEFAULT_RESOLUTION;
   state.baselineCount = null;
   state.boundary = { type: "FeatureCollection", features: boundaries };
   state.sourceBoundary = state.boundary;
-  state.mapType = "h3";
+  state.mapType = "polygon";
   state.dataProfile = analyzeSpatialData(state.boundary);
   state.pointData = EMPTY_FEATURE_COLLECTION;
   state.lineData = EMPTY_FEATURE_COLLECTION;
@@ -2502,8 +2509,7 @@ async function applySearchBoundaries(boundaries) {
   $("selected-file").hidden = true;
   map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
-  // Keep the selected administrative boundaries available for Polygon mode.
-  // Layer visibility ensures they are only filled after the user chooses Polygon.
+  // Use the selected administrative boundaries directly for the default Polygon mode.
   map.getSource("polygon-data")?.setData(state.boundary);
   map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   renderSearchMapTypes();
