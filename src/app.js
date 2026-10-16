@@ -16,7 +16,7 @@ import {
 import { DEFAULT_BAR_CONFIG, mergeBarConfig } from "./charts/configs/bar-config.js";
 import { clearBarStylePanel, renderBarStylePanel } from "./charts/components/bar-style-panel.jsx";
 import { clearDataMappingPanel, renderDataMappingPanel } from "./charts/components/data-mapping-panel.jsx";
-import { BAR_COLORS, dataForBarMapping, humanizeField, reconcileSeriesColors, seriesFromFields, validateBarMapping } from "./charts/data-transformers.js";
+import { BAR_COLORS, dataForBarMapping, defaultMetricSelection, humanizeField, reconcileSeriesColors, seriesFromFields, validateBarMapping } from "./charts/data-transformers.js";
 import { renderChartIcon } from "./charts/chart-icons.js";
 import { renderMapIcon } from "./renderers/map-icons.js";
 import { PointRenderer } from "./renderers/point-renderer.js";
@@ -31,7 +31,7 @@ import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } f
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
 import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
-import { applyPipelineFilters, chartOptionForSuggestion, defaultTimeFilter, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
+import { applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarMetrics, defaultTimeFilter, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-client.js";
 import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
@@ -333,9 +333,12 @@ function updateModelSections() {
   $("map-style-controls").hidden = isChart || isPoint;
   $("point-style-controls").hidden = !isPoint;
   $("cell-stats-card").hidden = !hasModel || isChart || state.mapType !== "h3";
+  const activeAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
   $("ai-filter-description").textContent = activePointSuggestion()
     ? "Chọn chỉ số, nhóm điểm và khoảng thời gian"
-    : "Chọn chỉ số, địa phương và khoảng thời gian";
+    : activeAiSuggestion?.chartType === "bar"
+      ? "Chọn kiểu biểu đồ và các chỉ số hiển thị"
+      : "Chọn chỉ số, địa phương và khoảng thời gian";
   if (!isChart) {
     const isPolygon = state.mapType === "polygon";
     const isWeather = state.dataOrigin === "search" && state.mapType === "h3";
@@ -1425,12 +1428,7 @@ function resetDisplayedMetrics() {
   const dataset = state.chartAnalysis?.datasets.find(item => item.path === state.chartMapping?.datasetPath);
   if (!dataset) return;
   const variant = state.chartConfig?.variant;
-  const count = variant === "single" ? 1 : variant === "line"
-    ? Math.min(3, dataset.suggestedMetrics.length)
-    : ["pie", "halfPie"].includes(variant)
-    ? Math.min(6, dataset.suggestedMetrics.length)
-    : Math.min(4, dataset.suggestedMetrics.length);
-  applyChartMappingChange({ metrics: dataset.suggestedMetrics.slice(0, count) });
+  applyChartMappingChange({ metrics: defaultMetricSelection(dataset, variant) });
   showToast("Đã đặt lại chỉ số hiển thị.");
 }
 
@@ -1438,8 +1436,7 @@ function applyChartMappingChange(change) {
   let mapping = { ...state.chartMapping, ...change };
   if (change.datasetPath) {
     const nextDataset = state.chartAnalysis.datasets.find(dataset => dataset.path === change.datasetPath);
-    const count = state.chartConfig.variant === "single" ? 1 : state.chartConfig.variant === "line" ? Math.min(3, nextDataset.suggestedMetrics.length) : ["pie", "halfPie"].includes(state.chartConfig.variant) ? Math.min(6, nextDataset.suggestedMetrics.length) : Math.min(4, nextDataset.suggestedMetrics.length);
-    mapping = { datasetPath: nextDataset.path, xField: nextDataset.suggestedCategory, metrics: nextDataset.suggestedMetrics.slice(0, count) };
+    mapping = { datasetPath: nextDataset.path, xField: nextDataset.suggestedCategory, metrics: defaultMetricSelection(nextDataset, state.chartConfig.variant) };
   }
   state.chartMapping = mapping;
   const dataset = state.chartAnalysis.datasets.find(item => item.path === mapping.datasetPath);
@@ -1598,6 +1595,25 @@ function lineSelectionFor(dataset, suggestion) {
     from: null,
     to: null
   };
+}
+
+function barSelectionFor(dataset, suggestion) {
+  dataset.barSelections ||= {};
+  const available = new Set(barMetricOptions(dataset.analysis.columns).map(item => item.key));
+  const saved = dataset.barSelections[suggestion.id];
+  if (!saved) {
+    return dataset.barSelections[suggestion.id] = {
+      variant: "single",
+      metrics: defaultBarMetrics(suggestion, dataset.analysis.columns, "single")
+    };
+  }
+  saved.variant = saved.variant === "grouped" ? "grouped" : "single";
+  saved.metrics = [...new Set(saved.metrics || [])].filter(metric => available.has(metric));
+  const minimum = saved.variant === "grouped" ? 2 : 1;
+  if (saved.metrics.length < minimum) saved.metrics = defaultBarMetrics(suggestion, dataset.analysis.columns, saved.variant);
+  if (saved.variant === "grouped" && saved.metrics.length < 2) saved.variant = "single";
+  if (saved.variant === "single") saved.metrics = saved.metrics.slice(0, 1);
+  return saved;
 }
 
 function aiLineRegionField(dataset, suggestion) {
@@ -1889,17 +1905,47 @@ function syncAiLineSelection(option) {
 
 function populateAiBarMetric(suggestion) {
   const controls = $("ai-filter-controls");
-  const measures = state.aiDataset.analysis.columns.filter(column => column.role === "measure");
+  const dataset = state.aiDataset;
+  const selection = barSelectionFor(dataset, suggestion);
+  const choices = barMetricOptions(dataset.analysis.columns);
   controls.replaceChildren();
-  if (!measures.length) { $("ai-data-filters").hidden = true; return; }
-  const label = document.createElement("label"); const caption = document.createElement("span"); const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
-  caption.textContent = "Chỉ số"; select.className = "ai-chart-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số cho biểu đồ cột");
-  const choices = [{ name: "count", labelVi: "Số bản ghi" }, ...measures];
-  select.replaceChildren(...choices.map(column => Object.assign(document.createElement("option"), {
-    value: column.name,
-    textContent: column.labelVi || humanizeField(column.name)
-  })));
-  select.value = suggestion.bindings.y; label.append(caption, select); controls.append(label); $("ai-data-filters").hidden = false;
+  const typeField = document.createElement("div");
+  const typeCaption = document.createElement("span");
+  const typeOptions = document.createElement("div");
+  typeField.className = "ai-control-group"; typeCaption.textContent = "Kiểu biểu đồ"; typeOptions.className = "ai-bar-chart-types";
+  for (const item of [
+    { variant: "single", label: "Cột đơn", icon: "singleBar" },
+    { variant: "grouped", label: "Cột ghép", icon: "groupedBar" }
+  ]) {
+    const button = document.createElement("button"); const icon = document.createElement("span"); const text = document.createElement("span");
+    button.type = "button"; button.className = `ai-bar-chart-type${selection.variant === item.variant ? " active" : ""}`;
+    button.dataset.barVariant = item.variant; button.setAttribute("aria-pressed", String(selection.variant === item.variant));
+    button.disabled = item.variant === "grouped" && choices.length < 2;
+    renderChartIcon(icon, item.icon); text.textContent = item.label; button.append(icon, text); typeOptions.append(button);
+  }
+  typeField.append(typeCaption, typeOptions);
+
+  let metricControl;
+  if (selection.variant === "single") {
+    const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
+    select.className = "ai-chart-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số cho biểu đồ cột");
+    select.replaceChildren(...choices.map(item => Object.assign(document.createElement("option"), { value: item.key, textContent: item.label })));
+    select.value = selection.metrics[0];
+    metricControl = select;
+  } else {
+    const picker = document.createElement("div"); const head = document.createElement("div"); const list = document.createElement("div");
+    picker.className = "ai-bar-metric-picker"; head.className = "ai-bar-metric-head"; list.className = "ai-bar-metric-list";
+    head.textContent = `${selection.metrics.length} đã chọn · Tối thiểu 2`;
+    list.replaceChildren(...choices.map(item => {
+      const row = document.createElement("label"); const input = document.createElement("input"); const text = document.createElement("span");
+      input.type = "checkbox"; input.className = "ai-bar-metric-checkbox"; input.value = item.key; input.checked = selection.metrics.includes(item.key);
+      text.textContent = item.label; row.append(input, text); return row;
+    }));
+    picker.append(head, list); metricControl = picker;
+  }
+  const metricField = document.createElement("div"); const metricCaption = document.createElement("span");
+  metricField.className = "ai-control-group"; metricCaption.textContent = "Chỉ số"; metricField.append(metricCaption, metricControl);
+  controls.append(typeField, metricField); $("ai-data-filters").hidden = false;
 }
 
 function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) {
@@ -1912,6 +1958,7 @@ function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) 
     ? filterByTimeRange(dataset.records, timeColumn, sel.from, sel.to)
     : dataset.records;
   const top = suggestion.chartType === "bar" ? dataset.barLimits?.[suggestion.id] ?? 12 : undefined;
+  const barSelection = suggestion.chartType === "bar" ? barSelectionFor(dataset, suggestion) : null;
   const lineOptions = isLine ? {
     measure: sel.measure,
     seriesField: !regionField || sel.scope === "all" ? null : regionField,
@@ -1920,7 +1967,11 @@ function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) 
       ? `${uniqueRecordValues(dataset.records, regionField).length} ${(dataset.analysis.columns.find(column => column.name === regionField)?.labelVi || humanizeField(regionField)).toLowerCase()}`
       : ""
   } : {};
-  const option = chartOptionForSuggestion(suggestion, records, dataset.analysis.columns, { top, ...lineOptions });
+  const option = chartOptionForSuggestion(suggestion, records, dataset.analysis.columns, {
+    top,
+    ...(barSelection ? { variant: barSelection.variant, metrics: barSelection.metrics } : {}),
+    ...lineOptions
+  });
   if (!option?.config?.data?.length) throw new Error("Không còn dữ liệu hợp lệ để dựng biểu đồ.");
   dataset.activeChartOption = option;
   clearMapForAiChart();
@@ -2348,6 +2399,7 @@ async function replaceAiPipelineData(pipeline, name) {
     selectedSuggestionId: null,
     geoAliases: {},
     lineSelections: {},
+    barSelections: {},
     barLimits: {},
     recommendation: null,
     boundaries: null
@@ -2870,9 +2922,27 @@ function bindUI() {
       return suggestion?.chartType === "line" ? suggestion : null;
     };
     if (event.target.matches(".ai-chart-metric-selector")) {
-      const suggestion = state.aiDataset?.suggestions.find(item => item.id === state.aiDataset.selectedSuggestionId);
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
       if (suggestion?.chartType !== "bar") return;
-      Object.assign(suggestion, withSuggestionMetric(suggestion, event.target.value, state.aiDataset.analysis.columns));
+      const selection = barSelectionFor(dataset, suggestion);
+      selection.variant = "single"; selection.metrics = [event.target.value];
+      Object.assign(suggestion, withSuggestionMetric(suggestion, event.target.value, dataset.analysis.columns));
+      activateAiChartSuggestion(suggestion);
+      return;
+    }
+    if (event.target.matches(".ai-bar-metric-checkbox")) {
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+      if (suggestion?.chartType !== "bar") return;
+      const checked = [...document.querySelectorAll("#ai-filter-controls .ai-bar-metric-checkbox:checked")];
+      if (checked.length < 2) {
+        event.target.checked = true;
+        showToast("Cột ghép cần ít nhất 2 chỉ số.");
+        return;
+      }
+      const selection = barSelectionFor(dataset, suggestion);
+      selection.variant = "grouped"; selection.metrics = checked.map(input => input.value);
       activateAiChartSuggestion(suggestion);
       return;
     }
@@ -2929,6 +2999,22 @@ function bindUI() {
     await filteredAiBoundary({ fit: shouldFit });
   });
   $("ai-filter-controls").addEventListener("click", event => {
+    const barVariant = event.target.closest(".ai-bar-chart-type");
+    if (barVariant) {
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+      if (suggestion?.chartType !== "bar") return;
+      const selection = barSelectionFor(dataset, suggestion);
+      const variant = barVariant.dataset.barVariant;
+      if (!variant || selection.variant === variant) return;
+      selection.variant = variant;
+      selection.metrics = defaultBarMetrics(suggestion, dataset.analysis.columns, variant);
+      if (variant === "single" && selection.metrics[0]) {
+        Object.assign(suggestion, withSuggestionMetric(suggestion, selection.metrics[0], dataset.analysis.columns));
+      }
+      activateAiChartSuggestion(suggestion);
+      return;
+    }
     if (event.target.closest(".ai-point-reset")) {
       const suggestion = activePointSuggestion();
       if (!suggestion) return;

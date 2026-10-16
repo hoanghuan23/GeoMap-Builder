@@ -455,13 +455,115 @@ button {
     padding-left: 31px
 }
 
-.ai-filter-controls > label {
+.ai-filter-controls > label,
+.ai-filter-controls > .ai-control-group {
     display: flex;
     flex-direction: column;
     gap: 6px;
     color: var(--ink);
     font-size: 10px;
     font-weight: 600
+}
+
+.ai-bar-chart-types {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px
+}
+
+.ai-bar-chart-type {
+    min-width: 0;
+    height: 72px;
+    padding: 7px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    border: 1px solid #d9dde3;
+    border-radius: 7px;
+    background: #f8f8f8;
+    color: #172033;
+    font: inherit;
+    font-weight: 400;
+    cursor: pointer
+}
+
+.ai-bar-chart-type.active {
+    border: 1.5px solid #19984b;
+    background: #f5fbf7;
+    box-shadow: 0 0 0 1px rgba(25, 152, 75, .08);
+    font-weight: 600
+}
+
+.ai-bar-chart-type:focus-visible {
+    outline: 2px solid #19984b;
+    outline-offset: 2px
+}
+
+.ai-bar-chart-type:disabled {
+    cursor: not-allowed;
+    opacity: .45
+}
+
+.ai-bar-chart-type .chart-type-icon {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    line-height: 0
+}
+
+.ai-bar-chart-type .chart-type-icon svg {
+    display: block
+}
+
+.ai-bar-metric-picker {
+    overflow: hidden;
+    border: 1px solid #dce3ed;
+    border-radius: 6px;
+    background: #fff
+}
+
+.ai-bar-metric-head {
+    padding: 7px 9px;
+    border-bottom: 1px solid #e8ecf2;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 400
+}
+
+.ai-bar-metric-list {
+    max-height: 160px;
+    overflow: auto
+}
+
+.ai-bar-metric-list label {
+    min-height: 32px;
+    padding: 5px 9px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid #edf0f4;
+    color: #354052;
+    font-size: 10px;
+    font-weight: 400;
+    cursor: pointer
+}
+
+.ai-bar-metric-list label:last-child {
+    border-bottom: 0
+}
+
+.ai-bar-metric-list label:hover {
+    background: #f3f7fc
+}
+
+.ai-bar-metric-list input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: #19984b
 }
 
 .ai-filter-controls select,

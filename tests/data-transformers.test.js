@@ -4,6 +4,7 @@ import {
   analyzeDataSets,
   createBarOptions,
   dataForBarMapping,
+  defaultMetricSelection,
   nextMetricSelection,
   reconcileSeriesColors,
   validateBarMapping
@@ -36,6 +37,16 @@ test("tạo lựa chọn cột đơn và cột ghép khi có hai chỉ số", ()
   assert.deepEqual(options.map(option => option.id), ["single_bar", "grouped_bar"]);
   assert.deepEqual(options.map(option => option.icon), ["singleBar", "groupedBar"]);
   assert.equal(options[1].config.series.length, 2);
+});
+
+test("cột ghép mặc định đúng hai chỉ số dù dataset có nhiều trường số", () => {
+  const dataset = analyzeDataSets([
+    { region: "A", revenue: 10, cost: 4, profit: 6 },
+    { region: "B", revenue: 12, cost: 5, profit: 7 }
+  ])[0];
+  assert.deepEqual(defaultMetricSelection(dataset, "single"), ["revenue"]);
+  assert.deepEqual(defaultMetricSelection(dataset, "grouped"), ["revenue", "cost"]);
+  assert.deepEqual(createBarOptions(dataset)[1].config.series.map(item => item.key), ["revenue", "cost"]);
 });
 
 test("kiểm tra đúng quy tắc số chỉ số và không tự sửa lựa chọn", () => {

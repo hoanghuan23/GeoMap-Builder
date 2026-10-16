@@ -71,16 +71,57 @@ function validMeasureRecords(records, field) {
   return records.filter(record => isFiniteValue(record?.[field]));
 }
 
-export function buildBarChartOption(suggestion, records, columns, { top = 12 } = {}) {
-  const { x, y } = suggestion.bindings;
-  const aggregation = y === "count" ? "count" : resolveAggregation(suggestion, columns);
-  const valueKey = y === "count" ? "__count" : y;
+export function barMetricOptions(columns) {
+  return [
+    { key: "count", label: "Số bản ghi", unit: "" },
+    ...(columns || []).filter(column => column.role === "measure" && column.name !== "count")
+      .map(column => ({ key: column.name, label: column.labelVi || humanizeField(column.name), unit: column.unit || "" }))
+  ];
+}
+
+export function defaultBarMetrics(suggestion, columns, variant = "single") {
+  const available = barMetricOptions(columns).map(item => item.key);
+  const requested = first(suggestion?.bindings?.y);
+  const primary = available.includes(requested) ? requested : available[0];
+  if (variant !== "grouped") return primary ? [primary] : [];
+  const measures = available.filter(key => key !== "count" && key !== primary);
+  return [primary, ...measures, ...available.filter(key => key !== primary && !measures.includes(key))].filter(Boolean).slice(0, 2);
+}
+
+export function buildBarChartOption(suggestion, records, columns, { top = 12, metrics = null, variant = "single" } = {}) {
+  const { x } = suggestion.bindings;
+  const byName = columnMap(columns);
+  const available = new Set(barMetricOptions(columns).map(item => item.key));
+  const requested = Array.isArray(metrics) ? metrics : defaultBarMetrics(suggestion, columns, variant);
+  const metricNames = [...new Set(requested)].filter(metric => available.has(metric));
+  const effectiveMetrics = (variant === "grouped" && metricNames.length >= 2 ? metricNames : metricNames.slice(0, 1));
+  const descriptors = effectiveMetrics.map(metric => {
+    const metricSuggestion = {
+      ...suggestion,
+      agg: metric === first(suggestion.bindings.y) ? suggestion.agg : null,
+      bindings: { ...suggestion.bindings, y: metric }
+    };
+    return {
+      metric,
+      key: metric === "count" ? "__count" : metric,
+      label: metric === "count" ? "Số bản ghi" : byName.get(metric)?.labelVi || humanizeField(metric),
+      unit: metric === "count" ? "" : byName.get(metric)?.unit || "",
+      aggregation: metric === "count" ? "count" : resolveAggregation(metricSuggestion, columns)
+    };
+  });
+  const valueFor = (descriptor, groupedRecords) => aggregate(
+    descriptor.metric === "count"
+      ? groupedRecords
+      : groupedRecords.map(record => record[descriptor.metric]).filter(value => value != null),
+    descriptor.aggregation
+  );
   const groups = groupRecords(records, x).map(group => ({
     [x]: displayCategory(group.value),
-    [valueKey]: aggregate(y === "count" ? group.records : group.records.map(record => record[y]).filter(value => value != null), aggregation),
+    ...Object.fromEntries(descriptors.map(descriptor => [descriptor.key, valueFor(descriptor, group.records)])),
     __records: group.records
-  })).filter(row => Number.isFinite(row[valueKey]));
-  groups.sort((a, b) => Math.abs(b[valueKey]) - Math.abs(a[valueKey]) || String(a[x]).localeCompare(String(b[x]), "vi"));
+  })).filter(row => descriptors.length && descriptors.every(descriptor => Number.isFinite(row[descriptor.key])));
+  const primaryKey = descriptors[0]?.key;
+  groups.sort((a, b) => Math.abs(b[primaryKey]) - Math.abs(a[primaryKey]) || String(a[x]).localeCompare(String(b[x]), "vi"));
   const topCount = top === "all" ? Infinity : Math.max(1, Number(top) || 12);
   let data = groups;
   if (groups.length > topCount) {
@@ -89,32 +130,39 @@ export function buildBarChartOption(suggestion, records, columns, { top = 12 } =
     const raw = remainder.flatMap(row => row.__records);
     visible.push({
       [x]: "Khác",
-      [valueKey]: aggregate(y === "count" ? raw : raw.map(record => record[y]).filter(value => value != null), aggregation),
+      ...Object.fromEntries(descriptors.map(descriptor => [descriptor.key, valueFor(descriptor, raw)])),
       __records: raw
     });
     data = visible;
   }
   data = data.map(({ __records, ...row }) => row);
-  const valueColumn = columnMap(columns).get(y);
+  const grouped = descriptors.length >= 2;
+  const xLabel = byName.get(x)?.labelVi || humanizeField(x);
+  const title = grouped
+    ? `So sánh nhiều chỉ số theo ${xLabel.toLocaleLowerCase("vi")}`
+    : descriptors[0] && descriptors[0].metric !== first(suggestion.bindings.y)
+      ? `${descriptors[0].label} theo ${xLabel.toLocaleLowerCase("vi")}`
+      : suggestion.title;
+  const units = [...new Set(descriptors.map(item => item.unit))];
   return {
     id: suggestion.id,
-    label: suggestion.title,
-    icon: "singleBar",
+    label: title,
+    icon: grouped ? "groupedBar" : "singleBar",
     aiSuggestion: true,
     totalCategories: groups.length,
     config: {
       chartKind: "bar",
-      variant: "single",
-      title: suggestion.title,
+      variant: grouped ? "grouped" : "single",
+      title,
       subtitle: suggestion.reason,
-      unit: valueColumn?.unit || "",
+      unit: units.length === 1 ? units[0] : "",
       sourcePath: "$",
       xField: x,
-      series: [{ key: valueKey, label: y === "count" ? "Số bản ghi" : valueColumn?.labelVi || humanizeField(y), color: BAR_COLORS[0] }],
+      series: descriptors.map((item, index) => ({ key: item.key, label: item.label, color: BAR_COLORS[index % BAR_COLORS.length] })),
       data,
-      aggregation,
+      aggregation: descriptors[0]?.aggregation || null,
       showGrid: true,
-      showLegend: false,
+      showLegend: grouped,
       showTooltip: true,
       showDataLabels: true
     }

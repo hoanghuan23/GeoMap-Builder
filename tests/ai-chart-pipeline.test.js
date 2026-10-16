@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBarChartOption, buildLineChartOption, defaultTimeFilter, evaluateSuggestion, prepareSuggestions, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
+import { buildBarChartOption, buildLineChartOption, defaultBarMetrics, defaultTimeFilter, evaluateSuggestion, prepareSuggestions, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
 import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
 import { normalizeTabularRecords } from "../src/tabular-data.js";
 import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
@@ -19,6 +19,26 @@ test("bar aggregate theo nhóm và gộp phần dư thành Khác", () => {
   assert.equal(option.config.data.length, 4);
   assert.equal(option.config.data.at(-1).province, "Khác");
   assert.equal(option.config.data.at(-1).rain, 78);
+});
+
+test("bar ghép mặc định hai chỉ số và gộp từng chỉ số đúng phép tính", () => {
+  const metricColumns = [
+    ...columns,
+    { name: "temperature", role: "measure", aggDefault: "mean", labelVi: "Nhiệt độ", unit: "°C" },
+    { name: "humidity", role: "measure", aggDefault: "mean", labelVi: "Độ ẩm", unit: "%" }
+  ];
+  const suggestion = { id: "bar", title: "Thời tiết", reason: "", bindings: { x: "province", y: "rain" }, agg: "sum" };
+  assert.deepEqual(defaultBarMetrics(suggestion, metricColumns, "grouped"), ["rain", "temperature"]);
+  const option = buildBarChartOption(suggestion, [
+    { province: "A", rain: 2, temperature: 20, humidity: 70 },
+    { province: "A", rain: 3, temperature: 30, humidity: 80 },
+    { province: "B", rain: 4, temperature: 25, humidity: 75 }
+  ], metricColumns, { variant: "grouped", metrics: ["rain", "temperature"] });
+  assert.equal(option.config.variant, "grouped");
+  assert.equal(option.icon, "groupedBar");
+  assert.equal(option.config.showLegend, true);
+  assert.deepEqual(option.config.series.map(item => item.key), ["rain", "temperature"]);
+  assert.deepEqual(option.config.data.find(row => row.province === "A"), { province: "A", rain: 5, temperature: 25 });
 });
 
 test("line long format chỉ chọn năm series có nhiều điểm nhất và pivot đúng", () => {

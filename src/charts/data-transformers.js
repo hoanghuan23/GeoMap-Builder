@@ -135,6 +135,19 @@ export function requiredMetricCount(variant) {
   return { min: 2, max: Infinity, message: "Cột ghép cần từ 2 chỉ số trở lên." };
 }
 
+/** Pick the initial metrics for a chart variant from the dataset recommendation order. */
+export function defaultMetricSelection(dataset, variant) {
+  const suggested = dataset?.suggestedMetrics || [];
+  const limit = variant === "single"
+    ? 1
+    : variant === "grouped"
+      ? 2
+      : variant === "line"
+        ? 3
+        : ["pie", "halfPie"].includes(variant) ? 6 : 1;
+  return suggested.slice(0, Math.min(limit, suggested.length));
+}
+
 /** Apply the selection rule for each bar variant while preserving click order. */
 export function nextMetricSelection(currentMetrics, key, variant) {
   const current = [...new Set(currentMetrics || [])];
@@ -184,15 +197,15 @@ export function reconcileSeriesColors(nextSeries, previousSeries = [], palette =
 export function createBarOptions(dataset, titlePrefix = dataset?.label || "Dữ liệu") {
   if (!dataset?.suggestedCategory || !dataset.numericFields.length) return [];
   const base = { xField: dataset.suggestedCategory, unit: "", sourcePath: dataset.path };
-  const suggested = dataset.suggestedMetrics;
-  const first = suggested[0];
+  const singleMetrics = defaultMetricSelection(dataset, "single");
+  const first = singleMetrics[0];
   const dataFor = metrics => dataForBarMapping(dataset, { xField: base.xField, metrics });
   const options = [{
     id: "single_bar", label: "Cột đơn", icon: "singleBar",
-    config: { ...base, data: dataFor([first]), variant: "single", title: `${humanizeField(first)} theo ${humanizeField(base.xField).toLowerCase()}`, series: seriesFromFields([first]) }
+    config: { ...base, data: dataFor(singleMetrics), variant: "single", title: `${humanizeField(first)} theo ${humanizeField(base.xField).toLowerCase()}`, series: seriesFromFields(singleMetrics) }
   }];
   if (dataset.numericFields.length >= 2) {
-    const group = suggested.slice(0, Math.min(4, suggested.length));
+    const group = defaultMetricSelection(dataset, "grouped");
     options.push({ id: "grouped_bar", label: "Cột ghép", icon: "groupedBar", config: { ...base, data: dataFor(group), variant: "grouped", title: `So sánh nhiều chỉ số · ${titlePrefix}`, series: seriesFromFields(group) } });
   }
   return options.filter(option => option.config.data.length);
