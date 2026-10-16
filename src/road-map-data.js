@@ -13,15 +13,43 @@ export const ROAD_NETWORKS = Object.freeze([
   ["tuyen_quang", "Tuyên Quang"], ["vinh_long", "Vĩnh Long"]
 ].map(([id, label]) => Object.freeze({ id, label })));
 
-export function inferRoadNetwork(fileName, records = [], columns = []) {
-  const context = [fileName, ...columns.filter(column => column.role === "geo" && ["admin1", "admin2"].includes(column.geoLevel))
-    .flatMap(column => [...new Set(records.map(row => row[column.name]))])].map(normalizeRoadText).join(" ");
-  const padded = ` ${context} `;
-  const matches = ROAD_NETWORKS.filter(network => padded.includes(` ${normalizeRoadText(network.label)} `)
-    || padded.includes(` ${normalizeRoadText(network.id)} `)
-    || network.id === "hanoi" && /\b(hn|hanoi)\b/.test(context));
-  // Do not silently put an unknown or multi-province dataset on the Hanoi network.
-  return matches.length === 1 ? matches[0].id : null;
+const ROAD_AREA_FIELD_NAMES = new Set([
+  "khu vuc", "tinh", "tinh thanh", "tinh thanh pho", "thanh pho", "dia phuong",
+  "province", "city", "region", "area"
+]);
+
+function normalizedRoadArea(value) {
+  const normalized = normalizeRoadText(value)
+    .replace(/^(tinh|thanh pho|tp)\s+/, "")
+    .replace(/\s+viet nam$/, "")
+    .trim();
+  if (["hn", "hanoi"].includes(normalized)) return "ha noi";
+  if (["hcm", "tphcm", "sai gon", "saigon"].includes(normalized)) return "ho chi minh";
+  return normalized;
+}
+
+export function roadAreaField(columns = []) {
+  const named = columns.find(column => ROAD_AREA_FIELD_NAMES.has(normalizeRoadText(column.name)));
+  return named?.name || columns.find(column => column.role === "geo" && column.geoLevel === "admin1")?.name || null;
+}
+
+export function roadNetworkForArea(value) {
+  const area = normalizedRoadArea(value);
+  return ROAD_NETWORKS.find(network => normalizedRoadArea(network.label) === area
+    || normalizeRoadText(network.id) === area)?.id || null;
+}
+
+export function roadNetworksFromRecords(records = [], columns = []) {
+  const field = roadAreaField(columns);
+  if (!field) return { field: null, networkIds: [], unknownAreas: [] };
+  const networkIds = []; const unknownAreas = [];
+  for (const value of new Set(records.map(row => row?.[field]).filter(value => value != null && String(value).trim()))) {
+    const id = roadNetworkForArea(value);
+    const target = id ? networkIds : unknownAreas;
+    const item = id || String(value).trim();
+    if (!target.includes(item)) target.push(item);
+  }
+  return { field, networkIds, unknownAreas };
 }
 
 export function roadValueColumns(columns, records, roadField) {
@@ -82,7 +110,10 @@ export function joinRoadRecords(records, roads, { roadField, valueField, columns
     const named = byName.get(group.name) || [];
     const referenced = byRef.get(group.ref) || [];
     const exact = group.ref ? named.filter(feature => referenced.includes(feature)) : [];
-    const matched = exact.length ? exact : named.length ? named : referenced;
+    // Route refs such as CT.01 and QL.1 span multiple provinces and roads. When
+    // the source row supplies a ref, require it and the road name to identify
+    // the same geometry instead of silently falling back to either field.
+    const matched = group.ref ? exact : named;
     if (!matched.length) { unmatched.push(String(group.rows[0][roadField])); continue; }
     matchedRows += group.rows.length;
     const properties = { ...group.rows[0] };
@@ -97,26 +128,60 @@ export function joinRoadRecords(records, roads, { roadField, valueField, columns
   return { type: "FeatureCollection", features, stats: { totalRows: records.length, matchedRows, unmatched, segmentCount: features.length } };
 }
 
-export function roadMapStyle(data, column) {
+export function joinRoadRecordsByArea(records, roadGeometries, { areaField = null, roadField, valueField, columns = [], aggregation = "mean" }) {
+  const field = areaField || roadAreaField(columns);
+  if (!field) throw new Error("Thiếu cột Khu vực để xác định mạng đường.");
+  const grouped = new Map(); const unresolved = [];
+  for (const row of records) {
+    const network = roadNetworkForArea(row?.[field]);
+    if (!network || !roadGeometries?.[network]) { unresolved.push(String(row?.[roadField] ?? "")); continue; }
+    if (!grouped.has(network)) grouped.set(network, []);
+    grouped.get(network).push(row);
+  }
+  const features = []; const unmatched = [...unresolved]; let matchedRows = 0;
+  for (const [network, networkRecords] of grouped) {
+    const joined = joinRoadRecords(networkRecords, roadGeometries[network], { roadField, valueField, columns, aggregation });
+    features.push(...joined.features); unmatched.push(...joined.stats.unmatched); matchedRows += joined.stats.matchedRows;
+  }
+  return {
+    type: "FeatureCollection",
+    features,
+    stats: { totalRows: records.length, matchedRows, unmatched, segmentCount: features.length }
+  };
+}
+
+export function roadMapStyle(data, column, colorOverrides = {}) {
   const field = column?.name;
   const values = data.features.map(feature => feature.properties[field]).filter(value => value != null && value !== "");
+  const colorFor = (key, fallback) => /^#[0-9a-f]{6}$/i.test(colorOverrides[key] || "") ? colorOverrides[key] : fallback;
   if (column?.role === "measure") {
     const numbers = values.map(Number).filter(Number.isFinite);
     if (!numbers.length) return { color: "#94a3b8", rows: [] };
     const min = Math.min(...numbers); const max = Math.max(...numbers);
     const colors = /toc do|speed|ty le toc do/.test(normalizeRoadText(field))
       ? ["#dc2626", "#f97316", "#eab308", "#22c55e"] : ["#22c55e", "#eab308", "#f97316", "#dc2626"];
-    if (min === max) return { color: colors[0], rows: [{ label: String(min), color: colors[0] }] };
-    const stops = colors.map((color, index) => ({ value: min + (max - min) * index / (colors.length - 1), color }));
+    if (min === max) {
+      const key = "measure-0"; const color = colorFor(key, colors[0]);
+      return { color, rows: [{ key, label: String(min), color }] };
+    }
+    const stops = colors.map((color, index) => ({
+      key: `measure-${index}`,
+      value: min + (max - min) * index / (colors.length - 1),
+      color: colorFor(`measure-${index}`, color)
+    }));
     return {
       color: ["case", ["==", ["typeof", ["get", field]], "number"], ["interpolate", ["linear"], ["to-number", ["get", field], min], ...stops.flatMap(stop => [stop.value, stop.color])], "#94a3b8"],
-      rows: stops.map(stop => ({ label: stop.value.toLocaleString("vi-VN", { maximumFractionDigits: 1 }), color: stop.color }))
+      rows: stops.map(stop => ({ key: stop.key, label: stop.value.toLocaleString("vi-VN", { maximumFractionDigits: 1 }), color: stop.color }))
     };
   }
   const isCongestion = /muc do un tac|congestion|traffic status/.test(normalizeRoadText(field));
   const severity = Object.keys(CONGESTION_COLORS);
   const categories = [...new Set(values.map(String))].sort((a, b) => isCongestion
     ? severity.indexOf(congestionLevel(a)) - severity.indexOf(congestionLevel(b)) : a.localeCompare(b, "vi"));
-  const rows = categories.map((value, index) => ({ label: value, color: isCongestion ? CONGESTION_COLORS[congestionLevel(value)] || "#94a3b8" : BAR_COLORS[index % BAR_COLORS.length] }));
+  const rows = categories.map((value, index) => {
+    const key = `category:${value}`;
+    const fallback = isCongestion ? CONGESTION_COLORS[congestionLevel(value)] || "#94a3b8" : BAR_COLORS[index % BAR_COLORS.length];
+    return { key, label: value, color: colorFor(key, fallback) };
+  });
   return { color: rows.length ? ["match", ["to-string", ["get", field]], ...rows.flatMap(row => [row.label, row.color]), "#94a3b8"] : "#94a3b8", rows };
 }

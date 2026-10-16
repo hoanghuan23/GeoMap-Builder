@@ -60,6 +60,28 @@ test("giữ nhận diện tỉnh/thành phố khi AI gán category hoặc thiế
   }
 });
 
+test("giữ Khu vực là cột địa phương để tự chọn mạng đường", () => {
+  const areaProfile = { rowCount: 2, columns: [
+    { name: "Khu vực", inferredType: "text", uniqueCount: 1 },
+    { name: "Tên đường", inferredType: "text", uniqueCount: 2 },
+    { name: "Tốc độ", inferredType: "number", uniqueCount: 2 }
+  ] };
+  const result = validateAndNormalizeAnalysis({
+    columns: [
+      { name: "Khu vực", role: "category", geoLevel: null },
+      { name: "Tên đường", role: "category", geoLevel: null },
+      { name: "Tốc độ", role: "measure", aggDefault: "mean" }
+    ],
+    suggestions: [{
+      id: "road-map", chartType: "map_line", confidence: .9,
+      bindings: { region: "Tên đường", value: "Tốc độ" }
+    }]
+  }, areaProfile);
+  assert.equal(result.columns.find(column => column.name === "Khu vực").role, "geo");
+  assert.equal(result.columns.find(column => column.name === "Khu vực").geoLevel, "admin1");
+  assert.equal(result.suggestions[0].chartType, "map_line");
+});
+
 test("fallback dùng cùng AnalysisResult và không biến id thành measure", () => {
   const result = fallbackAnalysis({
     rowCount: 2,

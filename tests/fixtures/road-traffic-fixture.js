@@ -7,6 +7,7 @@ export const trafficRecords = Array.from({ length: 84 }, (_, index) => {
   return TRAFFIC_TIMES.map((time, slot) => {
     const speed = index === 0 ? [24, 20, 38][slot] : 15 + index % 20 + slot * 3;
     return {
+      "Khu vực": "Hà Nội",
       "Tên đường": name,
       "Mã đường": index === 1 ? "QL.1" : "",
       "Thời điểm": `2026-10-13 ${time}`,
@@ -23,6 +24,7 @@ export const trafficAiAnalysis = {
   datasetTitle: "Quan sát giao thông theo tuyến",
   grain: "Một tuyến đường tại một thời điểm",
   columns: [
+    { name: "Khu vực", role: "geo", geoLevel: "admin1", country: "VN" },
     { name: "Tên đường", role: "category" },
     { name: "Mã đường", role: "id" },
     { name: "Thời điểm", role: "time", timeParse: "iso", granularity: "day" },

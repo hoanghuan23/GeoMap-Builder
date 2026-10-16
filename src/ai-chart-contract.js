@@ -2,7 +2,7 @@ const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
 
 const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area|state)/i;
-const ADMINISTRATIVE_LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện)/i;
+const ADMINISTRATIVE_LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|khu vực|region|area|state)/i;
 const TIME_HINT = /(ngày|date|time|thời điểm|thoi diem|tháng|month|năm|year|quarter|quý|week|tuần)/i;
 const ROAD_NAME_HINT = /(^|[\s_.-])(tên đường|ten duong|tên tuyến|ten tuyen|tuyến đường|tuyen duong|road[\s_.-]*name|route[\s_.-]*name|street[\s_.-]*name)([\s_.-]|$)/i;
 const ID_HINT = /(^|[\s_.-])(id|mã|ma|code|index|rank)([\s_.-]|$)/i;
@@ -226,14 +226,16 @@ export function fallbackAnalysis(profile, { datasetTitle = "Dữ liệu tải l�
   const lat = geo.find(column => column.geoLevel === "point_lat");
   const lng = geo.find(column => column.geoLevel === "point_lng");
   const region = geo.find(column => ["admin1", "admin2", "country"].includes(column.geoLevel));
+  const regionProfile = profile?.columns?.find(column => column.name === region?.name);
+  const groupingRegion = Number(regionProfile?.uniqueCount) > 1 ? region : null;
   const suggestions = [];
   const road = byRole("category").find(column => ROAD_NAME_HINT.test(column.name));
   const roadValue = byRole("category").find(column => /mức độ ùn tắc|muc do un tac|traffic status|congestion/i.test(column.name)) || measures[0];
   if (road && roadValue) suggestions.push({ id: "rule-map-line", chartType: "map_line", title: "Biểu đồ mạng lưới", bindings: { region: road.name, value: roadValue.name }, agg: roadValue.aggDefault, confidence: .8, reason: "Ghép tên tuyến với mạng đường có sẵn để thể hiện dữ liệu theo vị trí thực tế.", source: "rule" });
   if (region && measures[0]) suggestions.push({ id: "rule-choropleth", chartType: "choropleth", title: `${measures[0].name} theo ${region.name}`, bindings: { region: region.name, value: measures[0].name }, agg: measures[0].aggDefault, confidence: .72, reason: "Nhận diện theo quy tắc từ cột địa danh và chỉ số số.", source: "rule" });
   if (lat && lng) suggestions.push({ id: "rule-point", chartType: "point", title: "Vị trí các bản ghi", bindings: { lat: lat.name, lng: lng.name }, agg: null, confidence: .95, reason: "Mỗi dòng có một cặp kinh độ, vĩ độ nên được hiển thị trực tiếp bằng điểm.", source: "rule" });
-  if (time && measures.length) suggestions.push({ id: "rule-line", chartType: "line", title: `Xu hướng theo ${time.name}`, bindings: { x: time.name, y: measures.slice(0, 3).map(column => column.name), ...(region || category ? { series: (region || category).name } : {}) }, agg: null, confidence: .68, reason: "Nhận diện theo quy tắc từ cột thời gian và chỉ số số.", source: "rule" });
-  const x = region || category;
+  if (time && measures.length) suggestions.push({ id: "rule-line", chartType: "line", title: `Xu hướng theo ${time.name}`, bindings: { x: time.name, y: measures.slice(0, 3).map(column => column.name), ...(groupingRegion || category ? { series: (groupingRegion || category).name } : {}) }, agg: null, confidence: .68, reason: "Nhận diện theo quy tắc từ cột thời gian và chỉ số số.", source: "rule" });
+  const x = groupingRegion || category || region;
   if (x) suggestions.push({ id: "rule-bar", chartType: "bar", title: measures[0] ? `${measures[0].name} theo ${x.name}` : `Số bản ghi theo ${x.name}`, bindings: { x: x.name, y: measures[0]?.name || "count" }, agg: measures[0]?.aggDefault || "count", confidence: .65, reason: "Nhận diện theo quy tắc từ cột phân loại.", source: "rule" });
   return { datasetTitle, grain: "Một dòng tương ứng một bản ghi dữ liệu", columns, suggestions, source: "rule" };
 }

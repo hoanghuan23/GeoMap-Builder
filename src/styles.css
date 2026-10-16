@@ -1421,9 +1421,12 @@ input[type=range] {
     flex: none
 }
 
-#point-style-controls > .field { margin-top: 12px; margin-bottom: 12px; }
-#point-style-controls > .field:first-child { margin-top: 0; }
-#point-style-controls .toggle-row { margin: 12px 0; }
+#point-style-controls > .field,
+#road-style-controls > .field { margin-top: 12px; margin-bottom: 12px; }
+#point-style-controls > .field:first-child,
+#road-style-controls > .field:first-child { margin-top: 0; }
+#point-style-controls .toggle-row,
+#road-style-controls .toggle-row { margin: 12px 0; }
 #point-group-color-field > .field-label { margin-bottom: 9px; }
 
 .feature-controls {
