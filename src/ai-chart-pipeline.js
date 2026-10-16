@@ -88,13 +88,14 @@ export function defaultBarMetrics(suggestion, columns, variant = "single") {
   return [primary, ...measures, ...available.filter(key => key !== primary && !measures.includes(key))].filter(Boolean).slice(0, 2);
 }
 
-export function buildBarChartOption(suggestion, records, columns, { top = 12, metrics = null, variant = "single" } = {}) {
+export function buildBarChartOption(suggestion, records, columns, { top = 12, metrics = null, variant = "single", aggregation = null } = {}) {
   const { x } = suggestion.bindings;
   const byName = columnMap(columns);
   const available = new Set(barMetricOptions(columns).map(item => item.key));
   const requested = Array.isArray(metrics) ? metrics : defaultBarMetrics(suggestion, columns, variant);
   const metricNames = [...new Set(requested)].filter(metric => available.has(metric));
   const effectiveMetrics = (variant === "grouped" && metricNames.length >= 2 ? metricNames : metricNames.slice(0, 1));
+  const selectedAggregation = ["sum", "mean"].includes(aggregation) ? aggregation : null;
   const descriptors = effectiveMetrics.map(metric => {
     const metricSuggestion = {
       ...suggestion,
@@ -106,7 +107,7 @@ export function buildBarChartOption(suggestion, records, columns, { top = 12, me
       key: metric === "count" ? "__count" : metric,
       label: metric === "count" ? "Số bản ghi" : byName.get(metric)?.labelVi || humanizeField(metric),
       unit: metric === "count" ? "" : byName.get(metric)?.unit || "",
-      aggregation: metric === "count" ? "count" : resolveAggregation(metricSuggestion, columns)
+      aggregation: metric === "count" ? "count" : selectedAggregation || resolveAggregation(metricSuggestion, columns)
     };
   });
   const valueFor = (descriptor, groupedRecords) => aggregate(

@@ -337,7 +337,7 @@ function updateModelSections() {
   $("ai-filter-description").textContent = activePointSuggestion()
     ? "Chọn chỉ số, nhóm điểm và khoảng thời gian"
     : activeAiSuggestion?.chartType === "bar"
-      ? "Chọn kiểu biểu đồ và các chỉ số hiển thị"
+      ? " chọn cách hiển thị và chỉ số dữ liệu"
       : "Chọn chỉ số, địa phương và khoảng thời gian";
   if (!isChart) {
     const isPolygon = state.mapType === "polygon";
@@ -1604,10 +1604,12 @@ function barSelectionFor(dataset, suggestion) {
   if (!saved) {
     return dataset.barSelections[suggestion.id] = {
       variant: "single",
-      metrics: defaultBarMetrics(suggestion, dataset.analysis.columns, "single")
+      metrics: defaultBarMetrics(suggestion, dataset.analysis.columns, "single"),
+      aggregation: "sum"
     };
   }
   saved.variant = saved.variant === "grouped" ? "grouped" : "single";
+  saved.aggregation = saved.aggregation === "mean" ? "mean" : "sum";
   saved.metrics = [...new Set(saved.metrics || [])].filter(metric => available.has(metric));
   const minimum = saved.variant === "grouped" ? 2 : 1;
   if (saved.metrics.length < minimum) saved.metrics = defaultBarMetrics(suggestion, dataset.analysis.columns, saved.variant);
@@ -1912,7 +1914,7 @@ function populateAiBarMetric(suggestion) {
   const typeField = document.createElement("div");
   const typeCaption = document.createElement("span");
   const typeOptions = document.createElement("div");
-  typeField.className = "ai-control-group"; typeCaption.textContent = "Kiểu biểu đồ"; typeOptions.className = "ai-bar-chart-types";
+  typeField.className = "ai-control-group"; typeCaption.textContent = "Hình thức hiển thị"; typeOptions.className = "ai-bar-chart-types";
   for (const item of [
     { variant: "single", label: "Cột đơn", icon: "singleBar" },
     { variant: "grouped", label: "Cột ghép", icon: "groupedBar" }
@@ -1945,7 +1947,14 @@ function populateAiBarMetric(suggestion) {
   }
   const metricField = document.createElement("div"); const metricCaption = document.createElement("span");
   metricField.className = "ai-control-group"; metricCaption.textContent = "Chỉ số"; metricField.append(metricCaption, metricControl);
-  controls.append(typeField, metricField); $("ai-data-filters").hidden = false;
+  const aggregationControl = aiSelect("ai-bar-aggregation-selector", [
+    ["sum", "Tổng (SUM)"],
+    ["mean", "Trung bình (AVG)"]
+  ], selection.aggregation);
+  aggregationControl.disabled = selection.metrics.every(metric => metric === "count");
+  if (aggregationControl.disabled) aggregationControl.title = "Số bản ghi luôn đếm số dòng dữ liệu.";
+  controls.append(typeField, metricField, aiField("Cách tính giá trị", aggregationControl));
+  $("ai-data-filters").hidden = false;
 }
 
 function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) {
@@ -1969,7 +1978,7 @@ function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) 
   } : {};
   const option = chartOptionForSuggestion(suggestion, records, dataset.analysis.columns, {
     top,
-    ...(barSelection ? { variant: barSelection.variant, metrics: barSelection.metrics } : {}),
+    ...(barSelection ? { variant: barSelection.variant, metrics: barSelection.metrics, aggregation: barSelection.aggregation } : {}),
     ...lineOptions
   });
   if (!option?.config?.data?.length) throw new Error("Không còn dữ liệu hợp lệ để dựng biểu đồ.");
@@ -2921,6 +2930,14 @@ function bindUI() {
       const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
       return suggestion?.chartType === "line" ? suggestion : null;
     };
+    if (event.target.matches(".ai-bar-aggregation-selector")) {
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+      if (suggestion?.chartType !== "bar" || !["sum", "mean"].includes(event.target.value)) return;
+      barSelectionFor(dataset, suggestion).aggregation = event.target.value;
+      activateAiChartSuggestion(suggestion);
+      return;
+    }
     if (event.target.matches(".ai-chart-metric-selector")) {
       const dataset = state.aiDataset;
       const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);

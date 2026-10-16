@@ -32,3 +32,16 @@ export function prepareBarData(data, config, series) {
   }
   return config.limit === "all" ? result : result.slice(0, config.limit);
 }
+
+export function getBarAutoWindowSize(dataLength, seriesCount, config = {}, { width, height } = {}) {
+  if (dataLength <= 0) return 0;
+  const { orientation, barWidth, barGap } = mergeBarConfig(config);
+  const axisSize = orientation === "horizontal" ? height : width;
+  if (!Number.isFinite(axisSize) || axisSize <= 0) return Math.min(dataLength, 12);
+
+  const thickness = Math.min(20, Math.max(8, barWidth / 2));
+  const count = Math.max(1, seriesCount);
+  const seriesSize = (count * thickness + (count - 1) * 3) / (1 - barGap / 100);
+  const groupSize = Math.max(orientation === "horizontal" ? 34 : 64, seriesSize);
+  return Math.min(dataLength, Math.max(6, Math.floor(axisSize / groupSize)));
+}

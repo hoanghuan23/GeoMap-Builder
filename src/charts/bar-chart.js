@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bar,
@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { mergeBarConfig, prepareBarData } from "./configs/bar-config.js";
+import { getBarAutoWindowSize, mergeBarConfig, prepareBarData } from "./configs/bar-config.js";
 import { analyzeDataSets, createBarOptions } from "./data-transformers.js";
 
 const roots = new WeakMap();
@@ -113,9 +113,21 @@ function tooltipValue(value, _name, item, unit) {
 
 function Chart({ config }) {
   const data = useMemo(() => prepareBarData(config.data, config, config.series), [config]);
-  const initialWindow = Math.min(data.length, 24);
-  const [range, setRange] = useState({ startIndex: 0, endIndex: Math.max(0, initialWindow - 1) });
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const isHorizontal = config.orientation === "horizontal";
+  const axisSize = isHorizontal ? dimensions.height : dimensions.width;
+  const autoWindow = getBarAutoWindowSize(data.length, config.series.length, config, dimensions);
+  const [range, setRange] = useState(() => ({ startIndex: 0, endIndex: Math.max(0, autoWindow - 1) }));
+  const [brushRevision, setBrushRevision] = useState(0);
+  // Normalization creates fresh arrays on every render; compare plotted values so
+  // changing colors or tooltip settings preserves a manually selected range.
+  const fitKey = useMemo(() => JSON.stringify([
+    config.xField,
+    config.series.map(item => item.key),
+    data.map(row => [row[config.xField], ...config.series.map(item => row[item.key])]),
+    config.limit, config.sort, config.orientation, config.barWidth, config.barGap
+  ]), [config, data]);
+  const previousFitKey = useRef(fitKey);
   const minimumWindow = Math.min(6, data.length);
   const canZoom = data.length > minimumWindow;
   const visibleCount = range.endIndex - range.startIndex + 1;
@@ -123,8 +135,30 @@ function Chart({ config }) {
   const canZoomOut = canZoom && visibleCount < data.length;
 
   useEffect(() => {
-    setRange({ startIndex: 0, endIndex: Math.max(0, Math.min(data.length, 24) - 1) });
-  }, [data.length, config.limit, config.sort]);
+    // Recharts can retain stale traveller positions after replacing chart data.
+    // Wait for its data effects before restoring the controlled Brush selection.
+    const frame = requestAnimationFrame(() => setBrushRevision(revision => revision + 1));
+    return () => cancelAnimationFrame(frame);
+  }, [data]);
+
+  useEffect(() => {
+    const inputsChanged = previousFitKey.current !== fitKey;
+    previousFitKey.current = fitKey;
+    setRange(current => {
+      const startIndex = inputsChanged ? 0 : Math.max(0, Math.min(current.startIndex, data.length - autoWindow));
+      const endIndex = Math.max(0, startIndex + autoWindow - 1);
+      return current.startIndex === startIndex && current.endIndex === endIndex ? current : { startIndex, endIndex };
+    });
+  }, [fitKey, axisSize, autoWindow, data.length]);
+
+  const handleResize = (width, height) => {
+    if (width <= 0 || height <= 0) return;
+    const nextWidth = Math.round(width);
+    const nextHeight = Math.round(height);
+    setDimensions(current => current.width === nextWidth && current.height === nextHeight
+      ? current
+      : { width: nextWidth, height: nextHeight });
+  };
 
   const zoom = direction => setRange(current => {
     const size = current.endIndex - current.startIndex + 1;
@@ -171,7 +205,7 @@ function Chart({ config }) {
       )
     ),
     h("div", { className: "bar-chart-plot" },
-      h(ResponsiveContainer, { width: "100%", height: "100%" },
+      h(ResponsiveContainer, { width: "100%", height: "100%", onResize: handleResize },
         h(BarChart, { data, layout: isHorizontal ? "vertical" : "horizontal", margin: { top: 18, right: config.showDataLabels ? 50 : 20, left: isHorizontal ? 30 : 4, bottom: canZoom ? 4 : 8 }, barCategoryGap: `${config.barGap}%`, barGap: 3 },
           config.showGrid ? h(CartesianGrid, { stroke: "#e9edf2", strokeDasharray: "3 3", vertical: isHorizontal }) : null,
           isHorizontal
@@ -188,6 +222,7 @@ function Chart({ config }) {
           config.showLegend ? h(Legend, { iconType: "circle", iconSize: 8, wrapperStyle: { paddingTop: 12, fontSize: 11 } }) : null,
           ...bars,
           canZoom ? h(Brush, {
+            key: brushRevision,
             dataKey: config.xField,
             height: 22,
             travellerWidth: 8,

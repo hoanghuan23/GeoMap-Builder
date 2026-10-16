@@ -41,6 +41,43 @@ test("bar ghép mặc định hai chỉ số và gộp từng chỉ số đúng 
   assert.deepEqual(option.config.data.find(row => row.province === "A"), { province: "A", rain: 5, temperature: 25 });
 });
 
+test("bar cột đơn ưu tiên SUM hoặc AVG người dùng chọn so với cấu hình AI và chỉ số", () => {
+  const metricColumns = [...columns, { name: "temperature", role: "measure", aggDefault: "mean" }];
+  const suggestion = { id: "bar", title: "Nhiệt độ", bindings: { x: "province", y: "temperature" }, agg: "mean" };
+  const records = [{ province: "A", temperature: 20 }, { province: "A", temperature: 30 }];
+  for (const [aggregation, expected] of [["sum", 50], ["mean", 25]]) {
+    const option = buildBarChartOption(suggestion, records, metricColumns, { aggregation });
+    assert.equal(option.config.aggregation, aggregation);
+    assert.equal(option.config.data[0].temperature, expected);
+  }
+  const sumSuggestion = { ...suggestion, agg: "sum" };
+  assert.equal(buildBarChartOption(sumSuggestion, records, metricColumns, { aggregation: "mean" }).config.data[0].temperature, 25);
+  assert.equal(suggestion.agg, "mean");
+});
+
+test("bar ghép áp dụng phép tính đã chọn cho mọi chỉ số, tính Khác từ dữ liệu gốc và giữ phép đếm", () => {
+  const metricColumns = [...columns, { name: "temperature", role: "measure", aggDefault: "mean" }];
+  const suggestion = { id: "bar", title: "Thời tiết", bindings: { x: "province", y: "rain" }, agg: "sum" };
+  const records = [
+    { province: "A", rain: 100, temperature: 10 },
+    { province: "A", rain: 200, temperature: 30 },
+    { province: "B", rain: 20, temperature: 50 },
+    { province: "C", rain: 10, temperature: 70 },
+    { province: "C", rain: 20, temperature: null }
+  ];
+  const options = { variant: "grouped", metrics: ["rain", "temperature", "count"], top: 1 };
+  const summed = buildBarChartOption(suggestion, records, metricColumns, { ...options, aggregation: "sum" });
+  assert.deepEqual(summed.config.data, [
+    { province: "A", rain: 300, temperature: 40, __count: 2 },
+    { province: "Khác", rain: 50, temperature: 120, __count: 3 }
+  ]);
+  const averaged = buildBarChartOption(suggestion, records, metricColumns, { ...options, aggregation: "mean" });
+  assert.deepEqual(averaged.config.data, [
+    { province: "A", rain: 150, temperature: 20, __count: 2 },
+    { province: "Khác", rain: 50 / 3, temperature: 60, __count: 3 }
+  ]);
+});
+
 test("line long format chỉ chọn năm series có nhiều điểm nhất và pivot đúng", () => {
   const records = [];
   for (let province = 0; province < 7; province++) {
