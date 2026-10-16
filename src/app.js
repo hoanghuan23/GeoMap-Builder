@@ -75,7 +75,7 @@ const state = {
   aiDataset: null, pendingSheet: null,
   mapStyle: "liberty"
 };
-let map; let toastTimer; let cellPopup; let pointPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
+let map; let toastTimer; let statusTimer; let cellPopup; let pointPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
 let layerOrderRevision = 0;
 let mapLayerEventsBound = false;
 const uploadedPointerLayerIds = new Set();
@@ -160,7 +160,13 @@ function clearChartCanvas() {
 }
 
 function showToast(message) { const el = $("toast"); el.textContent = message; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2800); }
-function setStatus(message, hide = false) { const el = $("status"); el.textContent = message; el.hidden = false; if (hide) setTimeout(() => { el.hidden = true; }, 2200); }
+function setStatus(message, hide = false) {
+  const el = $("status");
+  clearTimeout(statusTimer);
+  el.textContent = message;
+  el.hidden = false;
+  if (hide) statusTimer = setTimeout(() => { el.hidden = true; }, 2200);
+}
 function setDataPanelVisible(visible) { $("data-panel").hidden = !visible; document.querySelector(".content-area").classList.toggle("table-hidden", !visible); map?.resize(); }
 function fmt(value, digits = 1) { return Number.isFinite(value) ? value.toFixed(digits) : "--"; }
 
@@ -3010,7 +3016,11 @@ function bindUI() {
       state.pendingSheet = null; $("sheet-selector-field").hidden = true;
       await applyReadResult(result, pending.file);
     } catch (error) {
-      if (error?.name !== "AbortError") { console.error(error); showToast(error.message || "Không thể đọc sheet."); }
+      if (error?.name !== "AbortError") {
+        console.error(error);
+        const message = error.message || "Không thể đọc sheet.";
+        setStatus(message, true);
+      }
     }
   });
   $("uploaded-layer-list").addEventListener("click", event => {
