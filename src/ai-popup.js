@@ -17,6 +17,9 @@ function parsedDate(value) {
 function formatTime(value, granularity) {
   const date = parsedDate(value);
   if (!date) return String(value);
+  if (granularity === "datetime") return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).format(date);
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   if (granularity === "year") return String(year);

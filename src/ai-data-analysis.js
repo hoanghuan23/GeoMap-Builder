@@ -41,7 +41,7 @@ export function fallbackMapRecommendation(records) {
   };
 }
 
-export async function requestAiDataAnalysis(records, { signal, includeSamples = false, profile: suppliedProfile = null } = {}) {
+export async function requestAiDataAnalysis(records, { signal, includeSamples = false, profile: suppliedProfile = null, source = null } = {}) {
   const profile = suppliedProfile || profileTabularData(records, { includeSamples });
   let analysis;
   let fallbackReason = "";
@@ -49,7 +49,7 @@ export async function requestAiDataAnalysis(records, { signal, includeSamples = 
     const response = await fetch("/api/ai/analyze-map-data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile }),
+      body: JSON.stringify({ profile, ...(source ? { source } : {}) }),
       signal
     });
     if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || `AI HTTP ${response.status}`);
@@ -93,8 +93,11 @@ export async function requestAiMapRecommendation(records, options = {}) {
 }
 
 export function displayFilterValue(value, control = "") {
-  const date = isDate(value) ? value : control === "date-select" ? new Date(value) : null;
-  if (date && !Number.isNaN(date.getTime())) return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" }).format(date);
+  const date = isDate(value) ? value : ["date-select", "datetime-select"].includes(control) ? new Date(value) : null;
+  if (date && !Number.isNaN(date.getTime())) return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    ...(control === "datetime-select" ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23" } : {})
+  }).format(date);
   return String(value ?? "");
 }
 

@@ -1,5 +1,5 @@
 import { BAR_COLORS, humanizeField } from "./charts/data-transformers.js";
-import { LINE_COLORS } from "./charts/line-chart.js";
+import { formatLineX, LINE_COLORS } from "./charts/line-chart.js";
 import { serializeTabularValue } from "./tabular-data.js";
 import { latLngToCell } from "h3-js";
 
@@ -31,7 +31,8 @@ export function withSuggestionMetric(suggestion, metric, columns) {
   const label = field => byName.get(field)?.labelVi || humanizeField(field);
   const metricLabel = metric === "count" ? "Số bản ghi" : label(metric);
   const dimension = suggestion.chartType === "bar" ? suggestion.bindings.x : suggestion.bindings.region;
-  updated.agg = metric === "count" ? "count" : resolveAggregation(updated, columns);
+  updated.agg = suggestion.chartType === "map_line" && byName.get(metric)?.role !== "measure" ? null
+    : metric === "count" ? "count" : resolveAggregation(updated, columns);
   updated.title = dimension ? `${metricLabel} theo ${label(dimension)}` : `${metricLabel} theo ô H3`;
   return updated;
 }
@@ -46,8 +47,8 @@ function aggregate(values, aggregation) {
   return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
 }
 
-function displayCategory(value) {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+function displayCategory(value, includeTime = false) {
+  if (value instanceof Date) return includeTime ? value.toISOString() : value.toISOString().slice(0, 10);
   return String(value ?? "");
 }
 
@@ -196,6 +197,8 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
     const right = b.value instanceof Date ? b.value.getTime() : String(b.value);
     return left < right ? -1 : left > right ? 1 : 0;
   });
+  const includeTime = xGroups.some(group => group.value instanceof Date
+    && !group.value.toISOString().endsWith("T00:00:00.000Z"));
   const available = [];
   if (series) {
     const counts = new Map();
@@ -215,7 +218,7 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
   const requested = Array.isArray(selectedSeries) ? new Set(selectedSeries) : null;
   const selected = (requested ? available.filter(item => requested.has(item.key)) : available.slice(0, defaultSeriesLimit)).slice(0, maxSeries);
   const data = xGroups.map(group => {
-    const row = { [x]: displayCategory(group.value) };
+    const row = { [x]: displayCategory(group.value, includeTime) };
     for (const item of selected) {
       const matching = series ? group.records.filter(record => String(record?.[series]) === String(item.seriesValue)) : group.records;
       row[item.key] = aggregate(matching.map(record => record[item.measure]).filter(value => value != null), aggregation);
@@ -229,7 +232,8 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
   if (measures.length === 1 && (picked || !series)) {
     title = series ? `${labelOf(measures[0])} theo ${xLabel}` : `${aggWord} ${labelOf(measures[0]).toLowerCase()} theo ${xLabel}`;
   }
-  const rangeText = data.length ? ` · ${data[0][x]} – ${data.at(-1)[x]}` : "";
+  const rangeLabel = value => includeTime ? formatLineX(value, true) : value;
+  const rangeText = data.length ? ` · ${rangeLabel(data[0][x])} – ${rangeLabel(data.at(-1)[x])}` : "";
   const subtitle = series
     ? `${selected.length}/${available.length} chuỗi${rangeText}`
     : `${scopeLabel ? `${aggWord} ${scopeLabel}` : "Gộp tất cả dòng dữ liệu"}${rangeText}`;
@@ -264,13 +268,14 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
 }
 
 export function defaultTimeFilter(records, columns, chartType) {
-  if (!["choropleth", "hex_h3"].includes(chartType)) return null;
+  if (!["choropleth", "hex_h3", "map_line"].includes(chartType)) return null;
   const time = (columns || []).find(column => column.role === "time");
   if (!time) return null;
   const values = [...new Map(records.map(record => record?.[time.name]).filter(value => value instanceof Date && !Number.isNaN(value.getTime())).map(value => [value.toISOString(), value])).values()]
     .sort((a, b) => a.getTime() - b.getTime());
   if (values.length < 2) return null;
-  return { column: time.name, control: "date-select", default: values.at(-1).toISOString(), values: values.map(value => value.toISOString()) };
+  const hasTime = values.some(value => value.getUTCHours() || value.getUTCMinutes() || value.getUTCSeconds());
+  return { column: time.name, control: hasTime ? "datetime-select" : "date-select", default: values.at(-1).toISOString(), values: values.map(value => value.toISOString()) };
 }
 
 export function applyPipelineFilters(records, filters = {}) {
@@ -298,6 +303,9 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
     const groups = groupRecords(records, suggestion.bindings.x).length;
     feasibilityScore = Math.min(feasibilityScore, Math.min(1, groups / 2));
     if (groups < 2) { available = false; unavailableReason = "Cần ít nhất hai mốc thời gian hợp lệ."; }
+  } else if (suggestion.chartType === "map_line") {
+    const groups = groupRecords(records, suggestion.bindings.region).length;
+    if (!groups) { available = false; unavailableReason = "Không có tên tuyến hợp lệ để ghép với mạng đường."; }
   } else if (suggestion.chartType === "choropleth") {
     const groups = groupRecords(records, suggestion.bindings.region).length;
     feasibilityScore = Math.min(feasibilityScore, Math.min(1, groups / 2));

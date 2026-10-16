@@ -3,7 +3,8 @@ const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
 
 const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area|state)/i;
 const ADMINISTRATIVE_LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện)/i;
-const TIME_HINT = /(ngày|date|time|tháng|month|năm|year|quarter|quý|week|tuần)/i;
+const TIME_HINT = /(ngày|date|time|thời điểm|thoi diem|tháng|month|năm|year|quarter|quý|week|tuần)/i;
+const ROAD_NAME_HINT = /(^|[\s_.-])(tên đường|ten duong|tên tuyến|ten tuyen|tuyến đường|tuyen duong|road[\s_.-]*name|route[\s_.-]*name|street[\s_.-]*name)([\s_.-]|$)/i;
 const ID_HINT = /(^|[\s_.-])(id|mã|ma|code|index|rank)([\s_.-]|$)/i;
 const LAT_HINT = /(^|[\s_.-])(lat|latitude|vĩ độ|vi do)([\s_.-]|$)/i;
 const LNG_HINT = /(^|[\s_.-])(lng|lon|long|longitude|kinh độ|kinh do)([\s_.-]|$)/i;
@@ -27,6 +28,12 @@ export const AI_CHART_REGISTRY = Object.freeze({
     slots: Object.freeze({ lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]), value: Object.freeze(["measure"]) }),
     icon: "hexagon",
     renderer: "H3"
+  }),
+  map_line: Object.freeze({
+    label: "Biểu đồ mạng lưới",
+    slots: Object.freeze({ region: Object.freeze(["category", "geo"]), value: Object.freeze(["measure", "category"]) }),
+    icon: "line",
+    renderer: "MapLibre"
   }),
   line: Object.freeze({
     label: "Biểu đồ đường",
@@ -125,6 +132,7 @@ function inferredRole(column) {
   if (LOCATION_HINT.test(name) && column?.inferredType !== "number") return { role: "geo", geoLevel: /quận|huyện|district/i.test(name) ? "admin2" : "admin1", country: "VN" };
   if (ID_HINT.test(name)) return { role: "id" };
   if (column?.inferredType === "number") return { role: "measure", aggDefault: SUM_HINT.test(name) ? "sum" : "mean" };
+  if (ROAD_NAME_HINT.test(name)) return { role: "category" };
   if (Number(column?.uniqueCount) > 0 && Number(column.uniqueCount) <= 80) return { role: "category" };
   return { role: "text" };
 }
@@ -150,14 +158,16 @@ function normalizeColumn(raw, fallback) {
   // Administrative names remain geographic dimensions even if AI calls them categories.
   const isAdministrativeRegion = fallback.role === "geo" && ADMINISTRATIVE_LOCATION_HINT.test(fallback.name)
     && ["geo", "category", "text"].includes(raw.role);
+  const isRoadName = fallback.role === "category" && ROAD_NAME_HINT.test(fallback.name)
+    && ["geo", "category", "text"].includes(raw.role);
   return {
     name: fallback.name,
-    role: isAdministrativeRegion ? "geo" : raw.role,
+    role: isAdministrativeRegion ? "geo" : isRoadName ? "category" : raw.role,
     labelVi: typeof raw.labelVi === "string" && raw.labelVi.trim() ? raw.labelVi.trim() : null,
-    geoLevel: isAdministrativeRegion
+    geoLevel: isRoadName ? null : isAdministrativeRegion
       ? cleanOptional(raw.geoLevel, ["country", "admin1", "admin2"]) || fallback.geoLevel
       : cleanOptional(raw.geoLevel, ["country", "admin1", "admin2", "point_lat", "point_lng", "h3"]),
-    country: typeof raw.country === "string" && raw.country.trim() ? raw.country.trim().toUpperCase() : null,
+    country: !isRoadName && typeof raw.country === "string" && raw.country.trim() ? raw.country.trim().toUpperCase() : null,
     timeParse: cleanOptional(raw.timeParse, ["iso", "excel_serial", "unix_s", "unix_ms", "text"]),
     granularity: cleanOptional(raw.granularity, ["day", "week", "month", "year"]),
     unit: typeof raw.unit === "string" && raw.unit.trim() ? raw.unit.trim() : null,
@@ -174,7 +184,7 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds) {
   const spec = AI_CHART_REGISTRY[raw?.chartType];
   if (!spec || typeof raw.id !== "string" || !raw.id.trim() || seenIds.has(raw.id)) return null;
   const b = raw.bindings || {};
-  const required = raw.chartType === "choropleth" ? ["region", "value"]
+  const required = ["choropleth", "map_line"].includes(raw.chartType) ? ["region", "value"]
     : raw.chartType === "point" ? ["lat", "lng"]
       : raw.chartType === "hex_h3" ? ["lat", "lng", "value"]
         : raw.chartType === "line" ? ["x", "y"] : ["x", "y"];
@@ -212,11 +222,14 @@ export function fallbackAnalysis(profile, { datasetTitle = "Dữ liệu tải l�
   const measures = byRole("measure");
   const geo = byRole("geo");
   const time = byRole("time")[0];
-  const category = byRole("category")[0];
+  const category = byRole("category").find(column => ROAD_NAME_HINT.test(column.name)) || byRole("category")[0];
   const lat = geo.find(column => column.geoLevel === "point_lat");
   const lng = geo.find(column => column.geoLevel === "point_lng");
   const region = geo.find(column => ["admin1", "admin2", "country"].includes(column.geoLevel));
   const suggestions = [];
+  const road = byRole("category").find(column => ROAD_NAME_HINT.test(column.name));
+  const roadValue = byRole("category").find(column => /mức độ ùn tắc|muc do un tac|traffic status|congestion/i.test(column.name)) || measures[0];
+  if (road && roadValue) suggestions.push({ id: "rule-map-line", chartType: "map_line", title: "Biểu đồ mạng lưới", bindings: { region: road.name, value: roadValue.name }, agg: roadValue.aggDefault, confidence: .8, reason: "Ghép tên tuyến với mạng đường có sẵn để thể hiện dữ liệu theo vị trí thực tế.", source: "rule" });
   if (region && measures[0]) suggestions.push({ id: "rule-choropleth", chartType: "choropleth", title: `${measures[0].name} theo ${region.name}`, bindings: { region: region.name, value: measures[0].name }, agg: measures[0].aggDefault, confidence: .72, reason: "Nhận diện theo quy tắc từ cột địa danh và chỉ số số.", source: "rule" });
   if (lat && lng) suggestions.push({ id: "rule-point", chartType: "point", title: "Vị trí các bản ghi", bindings: { lat: lat.name, lng: lng.name }, agg: null, confidence: .95, reason: "Mỗi dòng có một cặp kinh độ, vĩ độ nên được hiển thị trực tiếp bằng điểm.", source: "rule" });
   if (time && measures.length) suggestions.push({ id: "rule-line", chartType: "line", title: `Xu hướng theo ${time.name}`, bindings: { x: time.name, y: measures.slice(0, 3).map(column => column.name), ...(region || category ? { series: (region || category).name } : {}) }, agg: null, confidence: .68, reason: "Nhận diện theo quy tắc từ cột thời gian và chỉ số số.", source: "rule" });

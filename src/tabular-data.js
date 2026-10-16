@@ -7,7 +7,10 @@ function cleanString(value, maxLength = 160) {
 }
 
 function jsonValue(value) {
-  if (isDate(value)) return value.toISOString().slice(0, 10);
+  if (isDate(value)) {
+    const iso = value.toISOString();
+    return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso;
+  }
   if (typeof value === "string") return cleanString(value);
   if (["number", "boolean"].includes(typeof value) || value == null) return value;
   return cleanString(value);
@@ -27,7 +30,7 @@ function numericValue(value, commaDecimal = false) {
   return Number.isFinite(number) ? number : null;
 }
 
-const TIME_COLUMN_HINT = /(^|[ _-])(date|time|day|month|year|ngay|ngày|thang|tháng|nam|năm|timestamp)([ _-]|$)/i;
+const TIME_COLUMN_HINT = /(^|[ _-])(date|time|day|month|year|ngay|ngày|thời điểm|thoi diem|thang|tháng|nam|năm|timestamp|datetime)([ _-]|$)/i;
 const ISO_DATE = /^\d{4}-\d{2}(?:-\d{2})?/;
 
 function dateHint(name, state) {

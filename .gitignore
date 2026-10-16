@@ -13,5 +13,15 @@ administrative_division/
 # dữ liệu đường
 roads/
 
+# cache
+cache/
+__pycache__/
+
+transport_output/
+
 # logic test
 test/
+
+# trích xuất dữ liệu
+extract_transport.py
+trichxuat_dulieu_hn.py

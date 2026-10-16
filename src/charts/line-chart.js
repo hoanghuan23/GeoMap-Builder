@@ -113,10 +113,18 @@ const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/;
 const ISO_MONTH = /^(\d{4})-(\d{2})$/;
 const numberFormat = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 });
 
-// "2026-09-01" -> "01/09" (tick) hoặc "01/09/2026" (tooltip); giá trị khác giữ nguyên
-function formatX(value, full = false) {
+// Date-only values keep their calendar date; timestamps show local hours too.
+export function formatLineX(value, full = false) {
   const text = String(value ?? "");
   const day = ISO_DAY.exec(text);
+  if (day && text.includes("T")) {
+    const date = new Date(text);
+    if (!Number.isNaN(date.getTime())) {
+      const pad = part => String(part).padStart(2, "0");
+      const dateLabel = `${pad(date.getDate())}/${pad(date.getMonth() + 1)}${full ? `/${date.getFullYear()}` : ""}`;
+      return `${dateLabel} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+  }
   if (day) return full ? `${day[3]}/${day[2]}/${day[1]}` : `${day[3]}/${day[2]}`;
   const month = ISO_MONTH.exec(text);
   if (month) return `${month[2]}/${month[1]}`;
@@ -135,7 +143,7 @@ function LineTooltip({ active, payload, label, unit }) {
   if (!active || !payload?.length) return null;
   const items = payload.filter(item => item.value != null).sort((a, b) => b.value - a.value);
   return h("div", { style: { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 12, boxShadow: "0 8px 24px rgba(15,23,42,.10)" } },
-    h("div", { style: { fontWeight: 600, marginBottom: 4 } }, formatX(label, true)),
+    h("div", { style: { fontWeight: 600, marginBottom: 4 } }, formatLineX(label, true)),
     ...items.map(item => h("div", { key: item.dataKey, style: { display: "flex", gap: 8, alignItems: "center" } },
       h("span", { style: { width: 8, height: 8, borderRadius: 4, background: item.color } }),
       h("span", { style: { flex: 1 } }, item.name),
@@ -178,7 +186,7 @@ function Chart({ config }) {
           h(XAxis, {
             type: "category", dataKey: config.xField, axisLine: false, tickLine: false,
             tick: { fill: "#697586", fontSize: 11 },
-            tickFormatter: value => formatX(value),
+            tickFormatter: value => formatLineX(value),
             interval: "preserveStartEnd", minTickGap: 24, height: 38
           }),
           h(YAxis, {

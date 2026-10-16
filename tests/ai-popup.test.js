@@ -76,6 +76,13 @@ test("tổng hợp giữ 0 và false, đồng thời coi thiếu dữ liệu là
   assert.equal(properties.ignored, undefined);
 });
 
+test("popup tuyến đường giữ giờ phút của thời điểm quan sát", () => {
+  const instant = new Date(2026, 9, 13, 17, 30);
+  const rows = aiPopupRows({ timestamp: instant.toISOString() }, [{ name: "timestamp", role: "time", granularity: "datetime" }]);
+  assert.ok(rows[0].value.includes("17:30"));
+  assert.ok(rows[0].value.includes("13/10/2026"));
+});
+
 test("renderer ghi chuỗi HTML bằng textContent", () => {
   let innerHtmlWrites = 0;
   const documentRef = {

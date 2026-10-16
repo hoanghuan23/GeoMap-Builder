@@ -47,7 +47,7 @@ test("middleware chỉ gọi OpenAI một lần và fallback ngay khi output kh�
     assert.ok(response.body.suggestions.some(item => item.chartType === "choropleth"));
     const sent = JSON.parse(upstreamBody.input);
     assert.equal(sent.profile.rowCount, 2);
-    assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "point", "hex_h3", "line", "bar"]);
+    assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "point", "hex_h3", "map_line", "line", "bar"]);
   } finally {
     globalThis.fetch = originalFetch;
   }

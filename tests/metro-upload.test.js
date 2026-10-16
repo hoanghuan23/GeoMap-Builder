@@ -45,7 +45,7 @@ function createHarness() {
     CONFIG: { DEFAULT_RESOLUTION: 5, MAX_RENDER_CELLS: 120000 },
     DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     mergeBarConfig: () => ({}), mergePieConfig: () => ({}),
-    clearDataMappingPanel() {}, clearBarStylePanel() {}, clearPieStylePanel() {}, renderMapIcon() {},
+    clearDataMappingPanel() {}, clearBarStylePanel() {}, clearPieStylePanel() {}, renderMapIcon() {}, renderChartIcon() {},
     humanizeField: field => field,
     geoJSONToCells() { throw new Error("Metro polygons must not be regenerated as H3"); },
     geoJSONToH3FeatureCollection: () => ({ type: "FeatureCollection", features: [] }),
@@ -71,6 +71,21 @@ function createHarness() {
   vm.runInContext("map = testMap; addMapLayers();", context);
   return { context, get, sources, layers };
 }
+
+test("mọi thẻ bản đồ tuyến dùng tên Biểu đồ mạng lưới, không còn nhãn Line", () => {
+  const { context, get } = createHarness();
+  vm.runInContext("renderSupportedChartCatalog()", context);
+  const labels = get("supported-chart-grid").children.map(item => item.children[1].textContent);
+  assert.ok(labels.includes("Biểu đồ mạng lưới"));
+  assert.ok(labels.includes("Biểu đồ đường"), "temporal line charts keep their distinct label");
+  assert.ok(!labels.includes("Line"));
+  context.roadData = metroFixture.metro_route;
+  vm.runInContext("renderCompatibleMapTypes(roadData)", context);
+  const card = get("map-type-grid").children.find(item => item.dataset.type === "line");
+  assert.equal(card.dataset.label, "Biểu đồ mạng lưới");
+  assert.equal(card.title, "Biểu đồ mạng lưới · MapLibre");
+  assert.equal(card.children[1], "Biểu đồ mạng lưới");
+});
 
 test("upload displays independent Metro layers, changes departure, and clears all sources", async () => {
   const { context, get, sources, layers } = createHarness();
