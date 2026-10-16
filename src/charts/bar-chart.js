@@ -89,7 +89,7 @@ export function normalizeBarChartConfig(input) {
 
   return {
     ...mergeBarConfig(input),
-    variant: input.variant || (series.length === 1 ? "single" : series.length === 2 ? "double" : "grouped"),
+    variant: series.length === 1 ? "single" : "grouped",
     title: typeof input.title === "string" ? input.title.trim() : "",
     unit: typeof input.unit === "string" ? input.unit.trim() : "",
     xField,

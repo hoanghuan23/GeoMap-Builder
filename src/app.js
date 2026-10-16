@@ -54,7 +54,6 @@ const SUPPORTED_VIEW_TYPES = Object.freeze([
   { label: "Line", icon: "line", kind: "map" },
   { label: "Polygon", icon: "polygon", kind: "map" },
   { label: "Cột đơn", icon: "singleBar", kind: "chart" },
-  { label: "Cột đôi", icon: "doubleBar", kind: "chart" },
   { label: "Cột ghép", icon: "groupedBar", kind: "chart" },
   { label: "Biểu đồ đường", icon: "line", kind: "chart" },
   { label: "Pie chart", icon: "pieChart", kind: "chart" },
@@ -1426,7 +1425,7 @@ function resetDisplayedMetrics() {
   const dataset = state.chartAnalysis?.datasets.find(item => item.path === state.chartMapping?.datasetPath);
   if (!dataset) return;
   const variant = state.chartConfig?.variant;
-  const count = variant === "single" ? 1 : variant === "double" ? 2 : variant === "line"
+  const count = variant === "single" ? 1 : variant === "line"
     ? Math.min(3, dataset.suggestedMetrics.length)
     : ["pie", "halfPie"].includes(variant)
     ? Math.min(6, dataset.suggestedMetrics.length)
@@ -1439,7 +1438,7 @@ function applyChartMappingChange(change) {
   let mapping = { ...state.chartMapping, ...change };
   if (change.datasetPath) {
     const nextDataset = state.chartAnalysis.datasets.find(dataset => dataset.path === change.datasetPath);
-    const count = state.chartConfig.variant === "single" ? 1 : state.chartConfig.variant === "double" ? 2 : state.chartConfig.variant === "line" ? Math.min(3, nextDataset.suggestedMetrics.length) : ["pie", "halfPie"].includes(state.chartConfig.variant) ? Math.min(6, nextDataset.suggestedMetrics.length) : Math.min(4, nextDataset.suggestedMetrics.length);
+    const count = state.chartConfig.variant === "single" ? 1 : state.chartConfig.variant === "line" ? Math.min(3, nextDataset.suggestedMetrics.length) : ["pie", "halfPie"].includes(state.chartConfig.variant) ? Math.min(6, nextDataset.suggestedMetrics.length) : Math.min(4, nextDataset.suggestedMetrics.length);
     mapping = { datasetPath: nextDataset.path, xField: nextDataset.suggestedCategory, metrics: nextDataset.suggestedMetrics.slice(0, count) };
   }
   state.chartMapping = mapping;
@@ -1464,7 +1463,7 @@ function applyChartMappingChange(change) {
           : `Cơ cấu các chỉ số theo ${humanizeField(mapping.xField).toLowerCase()}`
         : state.chartConfig.variant === "single"
         ? `${humanizeField(mapping.metrics[0])} theo ${humanizeField(mapping.xField).toLowerCase()}`
-        : `${state.chartConfig.variant === "double" ? "So sánh hai chỉ số" : "So sánh nhiều chỉ số"} · ${dataset.label}`
+        : `So sánh nhiều chỉ số · ${dataset.label}`
     };
     renderChartCanvas();
     renderChartStyleControls();

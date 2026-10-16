@@ -130,7 +130,6 @@ export function analyzeDataSets(input) {
 
 export function requiredMetricCount(variant) {
   if (variant === "single") return { min: 1, max: 1, message: "Cột đơn cần đúng 1 chỉ số." };
-  if (variant === "double") return { min: 2, max: 2, message: "Cột đôi cần đúng 2 chỉ số." };
   if (variant === "line") return { min: 1, max: Infinity, message: "Biểu đồ đường cần ít nhất 1 chỉ số." };
   if (["pie", "halfPie"].includes(variant)) return { min: 1, max: Infinity, message: "Biểu đồ tròn cần ít nhất 1 chỉ số." };
   return { min: 2, max: Infinity, message: "Cột ghép cần từ 2 chỉ số trở lên." };
@@ -141,7 +140,6 @@ export function nextMetricSelection(currentMetrics, key, variant) {
   const current = [...new Set(currentMetrics || [])];
   if (variant === "single") return [key];
   if (current.includes(key)) return current.filter(item => item !== key);
-  if (variant === "double" && current.length >= 2) return [...current.slice(-1), key];
   return [...current, key];
 }
 
@@ -194,9 +192,7 @@ export function createBarOptions(dataset, titlePrefix = dataset?.label || "Dữ 
     config: { ...base, data: dataFor([first]), variant: "single", title: `${humanizeField(first)} theo ${humanizeField(base.xField).toLowerCase()}`, series: seriesFromFields([first]) }
   }];
   if (dataset.numericFields.length >= 2) {
-    const pair = suggested.slice(0, 2);
     const group = suggested.slice(0, Math.min(4, suggested.length));
-    options.push({ id: "double_bar", label: "Cột đôi", icon: "doubleBar", config: { ...base, data: dataFor(pair), variant: "double", title: `So sánh hai chỉ số · ${titlePrefix}`, series: seriesFromFields(pair) } });
     options.push({ id: "grouped_bar", label: "Cột ghép", icon: "groupedBar", config: { ...base, data: dataFor(group), variant: "grouped", title: `So sánh nhiều chỉ số · ${titlePrefix}`, series: seriesFromFields(group) } });
   }
   return options.filter(option => option.config.data.length);
