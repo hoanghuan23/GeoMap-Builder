@@ -1,6 +1,5 @@
 const MAP_TYPES = [
   { id: "point", label: "Point", icon: "point", renderer: "MapLibre", accepts: profile => profile.hasPoints },
-  { id: "circle", label: "Circle", icon: "circle", renderer: "MapLibre", accepts: profile => profile.hasPoints },
   { id: "h3", label: "H3 Hexagon", icon: "hexagon", renderer: "H3", accepts: profile => profile.hasArea || profile.hasPoints },
   { id: "heatmap", label: "Heatmap", icon: "heatmap", renderer: "MapLibre", accepts: profile => profile.hasPoints && profile.numericFields.length > 0 },
   { id: "line", label: "Line", icon: "line", renderer: "MapLibre", accepts: profile => profile.hasLines },

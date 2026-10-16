@@ -49,7 +49,6 @@ const MAP_STYLES = Object.freeze({
 const MAP_STYLE_LABELS = Object.freeze({ liberty: "Liberty", bright: "Sáng", dark: "Tối" });
 const SUPPORTED_VIEW_TYPES = Object.freeze([
   { label: "Point", icon: "point", kind: "map" },
-  { label: "Circle", icon: "circle", kind: "map" },
   { label: "H3 Hexagon", icon: "hexagon", kind: "map" },
   { label: "Heatmap", icon: "heatmap", kind: "map" },
   { label: "Line", icon: "line", kind: "map" },
@@ -435,7 +434,6 @@ function applyMapLayerVisibility() {
   if (map.getLayer("h3-fill")) map.setLayoutProperty("h3-fill", "visibility", showH3 ? "visible" : "none");
   if (map.getLayer("h3-border")) map.setLayoutProperty("h3-border", "visibility", showH3 && $("show-border").checked ? "visible" : "none");
   if (map.getLayer("point-marker")) map.setLayoutProperty("point-marker", "visibility", showLayers && state.mapType === "point" ? "visible" : "none");
-  if (map.getLayer("point-circle")) map.setLayoutProperty("point-circle", "visibility", showLayers && state.mapType === "circle" ? "visible" : "none");
   if (map.getLayer("point-heatmap")) map.setLayoutProperty("point-heatmap", "visibility", showLayers && state.mapType === "heatmap" ? "visible" : "none");
   if (map.getLayer("polygon-fill")) map.setLayoutProperty("polygon-fill", "visibility", showPolygon ? "visible" : "none");
   if (map.getLayer("polygon-border")) map.setLayoutProperty("polygon-border", "visibility", showPolygon && $("show-border").checked ? "visible" : "none");
@@ -469,7 +467,6 @@ function addMapLayers() {
     "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(33,102,172,0)", .2, "#2c7bb6", .4, "#00a6ca", .6, "#fdae61", .8, "#f46d43", 1, "#d73027"],
     "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 12, 28], "heatmap-opacity": .82
   } });
-  map.addLayer({ id: "point-circle", type: "circle", source: "point-data", paint: { "circle-radius": 7, "circle-color": "#7c5cff", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.25, "circle-opacity": .86 } });
   PointRenderer.render(map, state.pointData, {
     sourceId: "point-data",
     layerId: "point-marker",
@@ -533,12 +530,6 @@ function addMapLayers() {
     });
   });
   map.on("mouseenter", "h3-fill", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "h3-fill", () => map.getCanvas().style.cursor = "");
-  map.on("click", "point-circle", event => {
-    const feature = event.features?.[0]; if (!feature) return;
-    const rows = Object.entries(feature.properties || {}).map(([key, value]) => `<b>${key}:</b> ${String(value)}`).join("<br>");
-    new maplibregl.Popup({ offset: 9 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
-  });
-  map.on("mouseenter", "point-circle", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "point-circle", () => map.getCanvas().style.cursor = "");
   map.on("click", "point-marker", event => {
     const feature = event.features?.[0]; if (!feature) return;
     const activeSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
@@ -1100,16 +1091,15 @@ async function replaceMetroData(data, name) {
   setStatus("Đã hiển thị vùng dữ liệu, đường bao, các ga và tuyến Metro.", true);
 }
 
-function applyPointStyle() {
-  if (!map?.getLayer("point-circle")) return;
+function applyHeatmapWeight() {
+  if (!map?.getLayer("point-heatmap")) return;
   const field = state.dataProfile?.numericFields?.[0];
   const values = field ? state.pointData.features.map(feature => Number(feature.properties?.[field])).filter(Number.isFinite) : [];
   const min = values.length ? Math.min(...values) : 0; const max = values.length ? Math.max(...values) : 0;
   if (field && max > min) {
-    map.setPaintProperty("point-circle", "circle-radius", ["interpolate", ["linear"], ["to-number", ["get", field], min], min, 5, max, 16]);
     map.setPaintProperty("point-heatmap", "heatmap-weight", ["interpolate", ["linear"], ["to-number", ["get", field], min], min, .15, max, 1]);
   } else {
-    map.setPaintProperty("point-circle", "circle-radius", 7); map.setPaintProperty("point-heatmap", "heatmap-weight", 1);
+    map.setPaintProperty("point-heatmap", "heatmap-weight", 1);
   }
 }
 
@@ -2439,7 +2429,7 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   else geoJSONToCells(data, Math.min(state.resolution, 3));
   state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
   renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));
-  state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData); applyPointStyle();
+  state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData); applyHeatmapWeight();
   const features = data.type === "FeatureCollection" ? data.features : data.type === "Feature" ? [data] : [{ type: "Feature", properties: {}, geometry: data }];
   state.lineData = { type: "FeatureCollection", features: features.filter(feature => ["LineString", "MultiLineString"].includes(feature.geometry?.type)) };
   map.getSource("line-data")?.setData(state.lineData);

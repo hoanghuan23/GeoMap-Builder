@@ -114,7 +114,6 @@ Một số nhóm visualization dự kiến:
 - Point
 - Line
 - Polygon
-- Circle
 - Hexagon
 - Column
 - Heatmap
