@@ -41,7 +41,7 @@ export function fallbackMapRecommendation(records) {
   };
 }
 
-export async function requestAiDataAnalysis(records, { signal, includeSamples = false, profile: suppliedProfile = null } = {}) {
+export async function requestAiDataAnalysis(records, { signal, includeSamples = false, profile: suppliedProfile = null, source = null } = {}) {
   const profile = suppliedProfile || profileTabularData(records, { includeSamples });
   let analysis;
   let fallbackReason = "";
@@ -49,7 +49,7 @@ export async function requestAiDataAnalysis(records, { signal, includeSamples = 
     const response = await fetch("/api/ai/analyze-map-data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile }),
+      body: JSON.stringify({ profile, ...(source ? { source } : {}) }),
       signal
     });
     if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || `AI HTTP ${response.status}`);

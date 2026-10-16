@@ -1,4 +1,5 @@
 import { ANALYSIS_RESPONSE_SCHEMA, supportedChartsForPrompt, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { appendAiAnalysisDebugLog } from "./ai-analysis-debug-log.js";
 
 const LAYER_ORDER_SCHEMA = {
   type: "object",
@@ -30,6 +31,15 @@ async function readJson(request) {
 function outputText(result) {
   if (typeof result.output_text === "string") return result.output_text;
   return (result.output || []).flatMap(item => item.content || []).find(item => item.type === "output_text")?.text || "";
+}
+
+function debugSource(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = {};
+  for (const field of ["fileName", "sheetName", "extension"]) {
+    if (typeof value[field] === "string" && value[field].trim()) source[field] = value[field].trim().slice(0, 240);
+  }
+  return Object.keys(source).length ? source : null;
 }
 
 export function aiMapRecommendationPlugin(env) {
@@ -89,6 +99,7 @@ Với binding không áp dụng, trả null vì schema dùng một bindings obje
       const parsed = JSON.parse(text);
       const responseBody = isLayerOrder ? parsed : validateAndNormalizeAnalysis(parsed, body.profile);
       if (!isLayerOrder) {
+        const latencyMs = Date.now() - startedAt;
         console.info("AI tabular analysis", {
           model: env.OPENAI_MODEL || "gpt-5.6-luna",
           rows: body.profile.rowCount,
@@ -97,17 +108,27 @@ Với binding không áp dụng, trả null vì schema dùng một bindings obje
           source: responseBody.source,
           suggestions: responseBody.suggestions.map(item => item.chartType),
           validationErrors: responseBody.validationErrors?.length || 0,
-          latencyMs: Date.now() - startedAt
+          latencyMs
         });
         if (env.AI_DEBUG === "true") {
-          console.debug(
-            "AI tabular debug\n",
-            JSON.stringify({
-              profile: body.profile,
-              rawOutput: parsed,
-              normalizedOutput: responseBody
-            }, null, 2)
-          );
+          const debugEntry = {
+            timestamp: new Date().toISOString(),
+            source: debugSource(body.source),
+            model: env.OPENAI_MODEL || "gpt-5.6-luna",
+            latencyMs,
+            input: aiInput,
+            output: {
+              raw: parsed,
+              normalized: responseBody
+            }
+          };
+          console.debug("AI tabular input/output\n", JSON.stringify(debugEntry, null, 2));
+          try {
+            const filePath = await appendAiAnalysisDebugLog(env, debugEntry);
+            console.info(`Đã ghi AI input/output vào ${filePath}`);
+          } catch (debugError) {
+            console.warn("Không thể ghi file AI input/output:", debugError);
+          }
         }
       }
       sendJson(response, 200, responseBody);

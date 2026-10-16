@@ -1521,7 +1521,7 @@ function normalizeTravelTimeRecords(records) {
   }));
 }
 
-async function analyzeTabularRecords(records, profile, { signal } = {}) {
+async function analyzeTabularRecords(records, profile, { signal, source = null } = {}) {
   const congestionRecords = normalizeCongestionRecords(records);
   if (congestionRecords) return { kind: "congestion", records: congestionRecords };
   const travelRecords = normalizeTravelTimeRecords(records);
@@ -1529,7 +1529,8 @@ async function analyzeTabularRecords(records, profile, { signal } = {}) {
   const pipeline = await requestAiDataAnalysis(records, {
     signal,
     includeSamples: Boolean($("ai-include-samples")?.checked),
-    profile
+    profile,
+    source
   });
   let spatialData = null;
   try { spatialData = recordsToPointGeoJSON(pipeline.records); } catch { /* Tabular data without coordinates. */ }
@@ -1558,7 +1559,10 @@ async function readSpatialFile(file, { sheetName = null, signal } = {}) {
       signal
     });
     if (parsed.needsSheet) return { kind: "sheet-selection", sheetNames: parsed.sheetNames, file };
-    return analyzeTabularRecords(parsed.records, parsed.profile, { signal });
+    return analyzeTabularRecords(parsed.records, parsed.profile, {
+      signal,
+      source: { fileName: file.name, sheetName: parsed.sheetName || sheetName || null, extension }
+    });
   }
   const text = await file.text();
   const parsed = JSON.parse(text);
@@ -1576,7 +1580,10 @@ async function readSpatialFile(file, { sheetName = null, signal } = {}) {
   const records = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : null;
   if (records) {
     const profiled = await profileRecordsInWorker(records, { includeSamples: Boolean($("ai-include-samples")?.checked), signal });
-    return analyzeTabularRecords(records, profiled.profile, { signal });
+    return analyzeTabularRecords(records, profiled.profile, {
+      signal,
+      source: { fileName: file.name, extension }
+    });
   }
   return { kind: "chart", analysis: analyzeBarData(parsed) };
 }
@@ -2323,7 +2330,7 @@ async function activateAiChoropleth(suggestion) {
 
 async function replaceAiMapData(records, recommendation, name) {
   const profile = { rowCount: records.length, columns: recommendation.numericFields.map(field => ({ name: field, inferredType: "number" })) };
-  const pipeline = await requestAiDataAnalysis(records, { profile });
+  const pipeline = await requestAiDataAnalysis(records, { profile, source: { fileName: name } });
   replaceAiPipelineData({ ...pipeline, rawRecords: records }, name);
 }
 

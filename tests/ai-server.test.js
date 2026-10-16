@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import { aiMapRecommendationPlugin } from "../server/ai-map-recommendation.js";
 
@@ -76,6 +79,53 @@ test("middleware giữ quyết định không đề xuất và vẫn gửi schem
     assert.equal(response.body.source, "ai");
     assert.deepEqual(response.body.suggestions, []);
     assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("AI_DEBUG ghi input và output của lần phân tích vào cùng một file", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "geomap-ai-debug-"));
+  const debugFile = join(directory, "input-output.json");
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const originalFetch = globalThis.fetch;
+  const rawOutput = {
+    datasetTitle: "Dữ liệu kiểm thử",
+    grain: "mỗi dòng là một địa phương",
+    columns: [],
+    suggestions: []
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ output_text: JSON.stringify(rawOutput) })
+  });
+  try {
+    const profile = {
+      rowCount: 2,
+      samplesIncluded: false,
+      columns: [
+        { name: "province", inferredType: "text", uniqueCount: 2 },
+        { name: "value", inferredType: "number", uniqueCount: 2 }
+      ]
+    };
+    const source = { fileName: "du-lieu.xlsx", sheetName: "Data", extension: "xlsx" };
+    const middleware = middlewareFor({
+      OPENAI_API_KEY: "test",
+      OPENAI_MODEL: "test-model",
+      AI_DEBUG: "true",
+      AI_DEBUG_FILE: debugFile
+    });
+    const response = await call(middleware, { profile, source });
+    assert.equal(response.status, 200);
+    await call(middleware, { profile, source });
+
+    const entries = JSON.parse(await readFile(debugFile, "utf8"));
+    assert.equal(entries.length, 2);
+    assert.deepEqual(entries[0].source, source);
+    assert.deepEqual(entries[0].input.profile, profile);
+    assert.deepEqual(Object.keys(entries[0].input.supportedCharts), ["choropleth", "point", "hex_h3", "line", "bar"]);
+    assert.deepEqual(entries[0].output.raw, rawOutput);
+    assert.equal(entries[0].output.normalized.source, "ai");
   } finally {
     globalThis.fetch = originalFetch;
   }
