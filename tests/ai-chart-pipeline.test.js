@@ -28,7 +28,7 @@ test("bar ghép mặc định hai chỉ số và gộp từng chỉ số đúng 
     { name: "humidity", role: "measure", aggDefault: "mean", labelVi: "Độ ẩm", unit: "%" }
   ];
   const suggestion = { id: "bar", title: "Thời tiết", reason: "", bindings: { x: "province", y: "rain" }, agg: "sum" };
-  assert.deepEqual(defaultBarMetrics(suggestion, metricColumns, "grouped"), ["rain", "temperature"]);
+  assert.deepEqual(defaultBarMetrics(suggestion, metricColumns, "grouped"), ["rain"]);
   const option = buildBarChartOption(suggestion, [
     { province: "A", rain: 2, temperature: 20, humidity: 70 },
     { province: "A", rain: 3, temperature: 30, humidity: 80 },
@@ -76,6 +76,54 @@ test("bar ghép áp dụng phép tính đã chọn cho mọi chỉ số, tính K
     { province: "A", rain: 150, temperature: 20, __count: 2 },
     { province: "Khác", rain: 50 / 3, temperature: 60, __count: 3 }
   ]);
+});
+
+test("bảng doanh thu T01-T12 được bổ sung bar theo thời gian và giữ đúng thứ tự tháng", () => {
+  const records = Array.from({ length: 12 }, (_, index) => ({
+    "Tháng": `T${String(index + 1).padStart(2, "0")}`,
+    "Miền Bắc": 100 + index,
+    "Miền Trung": 80 + index,
+    "Miền Nam": 70 + index,
+    "Tổng doanh thu": 250 + index * 3
+  }));
+  const profile = {
+    rowCount: records.length,
+    columns: [
+      { name: "Tháng", inferredType: "text", uniqueCount: 12 },
+      { name: "Miền Bắc", inferredType: "number", uniqueCount: 12 },
+      { name: "Miền Trung", inferredType: "number", uniqueCount: 12 },
+      { name: "Miền Nam", inferredType: "number", uniqueCount: 12 },
+      { name: "Tổng doanh thu", inferredType: "number", uniqueCount: 12 }
+    ]
+  };
+  const analysis = validateAndNormalizeAnalysis({
+    datasetTitle: "Doanh thu theo tháng và miền",
+    grain: "một tháng",
+    columns: [
+      { name: "Tháng", role: "time", timeParse: "text", granularity: "month", labelVi: "Tháng" },
+      { name: "Miền Bắc", role: "measure", aggDefault: "sum", unit: "VND" },
+      { name: "Miền Trung", role: "measure", aggDefault: "sum", unit: "VND" },
+      { name: "Miền Nam", role: "measure", aggDefault: "sum", unit: "VND" },
+      { name: "Tổng doanh thu", role: "measure", aggDefault: "sum", unit: "VND" }
+    ],
+    suggestions: [{
+      id: "revenue-line",
+      chartType: "line",
+      title: "Biểu đồ đường theo tháng",
+      bindings: { x: "Tháng", y: ["Miền Bắc", "Miền Trung", "Miền Nam"] },
+      confidence: .98
+    }]
+  }, profile);
+  const normalized = normalizeTabularRecords(records, analysis.columns);
+  const suggestions = prepareSuggestions(analysis, normalized.records, normalized.validRowRate);
+  const line = suggestions.find(item => item.chartType === "line");
+  const bar = suggestions.find(item => item.chartType === "bar");
+
+  assert.equal(line.available, true);
+  assert.equal(bar.available, true);
+  assert.deepEqual(bar.bindings, { x: "Tháng", y: "Tổng doanh thu" });
+  const option = buildBarChartOption(bar, normalized.records, analysis.columns, { top: "all" });
+  assert.deepEqual(option.config.data.map(row => row["Tháng"]), records.map(record => record["Tháng"]));
 });
 
 test("line long format chỉ chọn năm series có nhiều điểm nhất và pivot đúng", () => {

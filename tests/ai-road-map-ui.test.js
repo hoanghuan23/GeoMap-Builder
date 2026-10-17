@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import * as pipeline from "../src/ai-chart-pipeline.js";
 import * as roadMap from "../src/road-map-data.js";
+import * as timeValues from "../src/time-values.js";
 import { AI_CHART_REGISTRY } from "../src/ai-chart-contract.js";
 import { displayFilterValue, comparableFilterValue } from "../src/ai-data-analysis.js";
 
@@ -32,7 +33,7 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => roads })
   layers.set("data-lines", { layout: {}, paint: {} });
   get("opacity").value = ".72";
   const context = vm.createContext({
-    ...pipeline, ...roadMap, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue,
+    ...pipeline, ...roadMap, ...timeValues, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
     roadNetworkUrl: id => ["hanoi", "da_nang"].includes(id) ? `/roads/${id}.json` : null,
     keepSelectOpenAfterMouseClick: value => value, humanizeField: value => value,

@@ -95,6 +95,15 @@ test("Point time range includes both endpoints, normalizes reversed ranges, and 
   assert.doesNotThrow(() => JSON.stringify(empty.paint));
 });
 
+test("Point dùng cùng bộ lọc khoảng cho kỳ không có năm", () => {
+  const records = [record("A", 10, { period: "T10" }), record("A", 20, { period: "T2" }), record("A", 30, { period: "T1" })];
+  const model = createPointModel(records, [...columns, { name: "period", role: "time", granularity: "month" }], bindings);
+  assert.deepEqual(model.times, ["T1", "T2", "T10"]);
+  const view = buildPointView(model, { from: "T10", to: "T2" });
+  assert.equal(view.selection.from, "T2");
+  assert.equal(view.stats.visibleCount, 2);
+});
+
 test("Eight selected groups have distinct matching map/legend colors, stable across metric/time changes", () => {
   const records = Array.from({ length: 10 }, (_, index) => record(`G${index}`, index, { day: new Date(`2026-07-0${index % 2 + 1}`) }));
   const model = createPointModel(records, [...columns, { name: "day", role: "time" }], bindings);

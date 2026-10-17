@@ -42,6 +42,19 @@ test("giữ Date hợp lệ, parse Excel/Unix và số thập phân dấu phẩy
   assert.equal(result.records[0].rainfall, 12.5);
 });
 
+test("giữ nhãn tháng thứ tự T01-T12 thay vì đổi thành null", () => {
+  const result = normalizeTabularRecords([
+    { "Tháng": "T01", value: 10 },
+    { "Tháng": "T12", value: 20 }
+  ], [
+    { name: "Tháng", role: "time", timeParse: "text", granularity: "month" },
+    { name: "value", role: "measure" }
+  ]);
+
+  assert.deepEqual(result.records.map(record => record["Tháng"]), ["T01", "T12"]);
+  assert.equal(result.validRowRate["Tháng"], 1);
+});
+
 test("profile ngày có min/max chính xác và reservoir sampling lặp lại được", () => {
   const records = Array.from({ length: 30 }, (_, index) => ({ date: new Date(Date.UTC(2026, 8, index + 1)), value: index }));
   const first = profileTabularData(records, { includeSamples: true });

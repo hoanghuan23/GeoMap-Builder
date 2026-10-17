@@ -48,6 +48,8 @@ test("middleware chỉ gọi OpenAI một lần và fallback ngay khi output kh�
     const sent = JSON.parse(upstreamBody.input);
     assert.equal(sent.profile.rowCount, 2);
     assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "point", "hex_h3", "map_line", "line", "bar"]);
+    assert.deepEqual(sent.supportedCharts.bar.slots.x, ["category", "geo", "time"]);
+    assert.match(upstreamBody.instructions, /role, grain, đơn vị và phép gộp/);
   } finally {
     globalThis.fetch = originalFetch;
   }

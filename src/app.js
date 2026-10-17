@@ -31,7 +31,8 @@ import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } f
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
 import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
-import { applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarMetrics, defaultTimeFilter, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
+import { applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
+import { compareTimeValues, filterTimeRange, formatTimeValue, timeValueInfo, uniqueTimeValues } from "./time-values.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-client.js";
 import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
@@ -1273,7 +1274,7 @@ function renderChartStyleControls() {
   const activeAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
   const isAiBar = activeAiSuggestion?.chartType === "bar" && state.chartConfig.chartKind === "bar";
   const panelConfig = isAiBar
-    ? { ...state.barStyle, limit: state.aiDataset.barLimits?.[activeAiSuggestion.id] ?? 12 }
+    ? { ...state.barStyle, limit: state.aiDataset.barLimits?.[activeAiSuggestion.id] ?? defaultBarLimit(activeAiSuggestion, state.aiDataset.analysis.columns) }
     : state.chartConfig.chartKind === "line"
       ? { ...state.barStyle, showDataLabels: Boolean(state.chartConfig.showDataLabels) }
       : state.barStyle;
@@ -1531,23 +1532,7 @@ function lineSelectionFor(dataset, suggestion) {
 
 function barSelectionFor(dataset, suggestion) {
   dataset.barSelections ||= {};
-  const available = new Set(barMetricOptions(dataset.analysis.columns).map(item => item.key));
-  const saved = dataset.barSelections[suggestion.id];
-  if (!saved) {
-    return dataset.barSelections[suggestion.id] = {
-      variant: "single",
-      metrics: defaultBarMetrics(suggestion, dataset.analysis.columns, "single"),
-      aggregation: "sum"
-    };
-  }
-  saved.variant = saved.variant === "grouped" ? "grouped" : "single";
-  saved.aggregation = saved.aggregation === "mean" ? "mean" : "sum";
-  saved.metrics = [...new Set(saved.metrics || [])].filter(metric => available.has(metric));
-  const minimum = saved.variant === "grouped" ? 2 : 1;
-  if (saved.metrics.length < minimum) saved.metrics = defaultBarMetrics(suggestion, dataset.analysis.columns, saved.variant);
-  if (saved.variant === "grouped" && saved.metrics.length < 2) saved.variant = "single";
-  if (saved.variant === "single") saved.metrics = saved.metrics.slice(0, 1);
-  return saved;
+  return dataset.barSelections[suggestion.id] = normalizeBarSelection(suggestion, dataset.analysis.columns, dataset.barSelections[suggestion.id]);
 }
 
 function aiLineRegionField(dataset, suggestion) {
@@ -1555,17 +1540,6 @@ function aiLineRegionField(dataset, suggestion) {
   const columns = dataset.analysis.columns;
   const geo = columns.find(column => column.role === "geo" && ["admin1", "admin2", "country"].includes(column.geoLevel));
   return (geo || columns.find(column => column.role === "category"))?.name || null;
-}
-
-function filterByTimeRange(records, field, from, to) {
-  const lo = Date.parse(from);
-  const hi = Date.parse(to);
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return records;
-  return records.filter(record => {
-    const value = record?.[field];
-    const time = value instanceof Date ? value.getTime() : Date.parse(value);
-    return Number.isFinite(time) && time >= lo && time <= hi;
-  });
 }
 
 function populateAiFilters(dataset) {
@@ -1588,8 +1562,9 @@ function populateAiFilters(dataset) {
     select.value = recommendation.metricField; label.append(caption, select); metricControls.push(label);
   }
   const filterControls = recommendation.filters.flatMap(filter => {
+    const column = dataset.analysis.columns.find(item => item.name === filter.field);
     const values = uniqueRecordValues(records, filter.field).sort((a, b) =>
-      ["date-select", "datetime-select"].includes(filter.control) ? a[0].localeCompare(b[0]) : String(a[1]).localeCompare(String(b[1]), "vi")
+      column?.role === "time" ? compareTimeValues(a[1], b[1], column) : String(a[1]).localeCompare(String(b[1]), "vi")
     );
     if (!values.length || values.length < 2 && !filter.showSingle) return [];
     const label = document.createElement("label");
@@ -1828,18 +1803,16 @@ function populateAiLineSelection(option, suggestion) {
     ], sel.scope)));
     if (sel.scope === "pick") nodes.push(buildAiSeriesPicker(option));
   }
-  const timeColumn = dataset.analysis.columns.find(column => column.role === "time")?.name;
-  const times = timeColumn
-    ? uniqueRecordValues(dataset.records, timeColumn).sort((a, b) => a[0].localeCompare(b[0]))
-    : [];
+  const time = dataset.analysis.columns.find(column => column.name === suggestion.bindings.x && column.role === "time");
+  const times = time ? uniqueTimeValues(dataset.records, time) : [];
   if (times.length > 1) {
-    const hasTime = option.config.data.some(row => String(row[option.config.xField]).includes("T"));
-    const choices = times.map(([value, raw]) => [value, displayFilterValue(raw, hasTime ? "datetime-select" : "date-select")]);
+    const hasTime = times.some(value => value instanceof Date && !value.toISOString().endsWith("T00:00:00.000Z"));
+    const choices = times.map(value => [comparableFilterValue(value), formatTimeValue(value, time, hasTime)]);
     const from = aiSelect("ai-line-range", choices, sel.from ?? choices[0][0]);
     const to = aiSelect("ai-line-range", choices, sel.to ?? choices.at(-1)[0]);
     from.dataset.edge = "from";
     to.dataset.edge = "to";
-    nodes.push(aiField(`${labelOf(timeColumn)} từ`, from), aiField("đến", to));
+    nodes.push(aiField(`${labelOf(time.name)} từ`, from), aiField("đến", to));
   }
   $("ai-filter-controls").replaceChildren(...nodes);
   $("ai-data-filters").hidden = nodes.length === 0;
@@ -1871,7 +1844,7 @@ function populateAiBarMetric(suggestion) {
     const button = document.createElement("button"); const icon = document.createElement("span"); const text = document.createElement("span");
     button.type = "button"; button.className = `ai-bar-chart-type${selection.variant === item.variant ? " active" : ""}`;
     button.dataset.barVariant = item.variant; button.setAttribute("aria-pressed", String(selection.variant === item.variant));
-    button.disabled = item.variant === "grouped" && choices.length < 2;
+    button.disabled = item.variant === "grouped" && defaultBarMetrics(suggestion, dataset.analysis.columns, "grouped").length < 2;
     renderChartIcon(icon, item.icon); text.textContent = item.label; button.append(icon, text); typeOptions.append(button);
   }
   typeField.append(typeCaption, typeOptions);
@@ -1897,8 +1870,11 @@ function populateAiBarMetric(suggestion) {
   const metricField = document.createElement("div"); const metricCaption = document.createElement("span");
   metricField.className = "ai-control-group"; metricCaption.textContent = "Chỉ số"; metricField.append(metricCaption, metricControl);
   const aggregationControl = aiSelect("ai-bar-aggregation-selector", [
+    ["auto", "Theo từng chỉ số"],
     ["sum", "Tổng (SUM)"],
-    ["mean", "Trung bình (AVG)"]
+    ["mean", "Trung bình (AVG)"],
+    ["min", "Nhỏ nhất (MIN)"],
+    ["max", "Lớn nhất (MAX)"]
   ], selection.aggregation);
   aggregationControl.disabled = selection.metrics.every(metric => metric === "count");
   if (aggregationControl.disabled) aggregationControl.title = "Số bản ghi luôn đếm số dòng dữ liệu.";
@@ -1911,11 +1887,11 @@ function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) 
   const isLine = suggestion.chartType === "line";
   const sel = isLine ? lineSelectionFor(dataset, suggestion) : null;
   const regionField = isLine ? aiLineRegionField(dataset, suggestion) : null;
-  const timeColumn = dataset.analysis.columns.find(column => column.role === "time")?.name;
-  const records = isLine && timeColumn && sel.from && sel.to
-    ? filterByTimeRange(dataset.records, timeColumn, sel.from, sel.to)
+  const time = isLine ? dataset.analysis.columns.find(column => column.name === suggestion.bindings.x && column.role === "time") : null;
+  const records = isLine && time && sel.from && sel.to
+    ? filterTimeRange(dataset.records, time, sel.from, sel.to)
     : dataset.records;
-  const top = suggestion.chartType === "bar" ? dataset.barLimits?.[suggestion.id] ?? 12 : undefined;
+  const top = suggestion.chartType === "bar" ? dataset.barLimits?.[suggestion.id] ?? defaultBarLimit(suggestion, dataset.analysis.columns) : undefined;
   const barSelection = suggestion.chartType === "bar" ? barSelectionFor(dataset, suggestion) : null;
   const lineOptions = isLine ? {
     measure: sel.measure,
@@ -2018,7 +1994,11 @@ function populatePointControls(suggestion) {
     }
   }
   if (model.timeColumn) {
-    const choices = model.times.map(value => [value, displayFilterValue(value, "date-select")]);
+    const choices = model.times.map(value => {
+      const date = timeValueInfo(value, model.timeColumn)?.value;
+      const hasTime = date instanceof Date && !date.toISOString().endsWith("T00:00:00.000Z");
+      return [value, formatTimeValue(value, model.timeColumn, hasTime)];
+    });
     const from = aiSelect("ai-point-range", choices, selection.from); from.dataset.edge = "from";
     const to = aiSelect("ai-point-range", choices, selection.to); to.dataset.edge = "to";
     const label = model.timeColumn.labelVi || humanizeField(model.timeColumn.name);
@@ -3000,7 +2980,7 @@ function bindUI() {
       } else {
         const edge = control.dataset.edge;
         selection[edge] = control.value;
-        if (selection.from > selection.to) selection[edge === "from" ? "to" : "from"] = control.value;
+        if (compareTimeValues(selection.from, selection.to, pointModelFor(suggestion).timeColumn) > 0) selection[edge === "from" ? "to" : "from"] = control.value;
       }
       refreshPointView(suggestion, { rebuildControls });
       return;
@@ -3013,7 +2993,7 @@ function bindUI() {
     if (event.target.matches(".ai-bar-aggregation-selector")) {
       const dataset = state.aiDataset;
       const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-      if (suggestion?.chartType !== "bar" || !["sum", "mean"].includes(event.target.value)) return;
+      if (suggestion?.chartType !== "bar" || !["auto", "sum", "mean", "min", "max"].includes(event.target.value)) return;
       barSelectionFor(dataset, suggestion).aggregation = event.target.value;
       activateAiChartSuggestion(suggestion);
       return;
@@ -3023,7 +3003,7 @@ function bindUI() {
       const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
       if (suggestion?.chartType !== "bar") return;
       const selection = barSelectionFor(dataset, suggestion);
-      selection.variant = "single"; selection.metrics = [event.target.value];
+      selection.variant = "single"; selection.metrics = [event.target.value]; selection.aggregation = "auto";
       Object.assign(suggestion, withSuggestionMetric(suggestion, event.target.value, dataset.analysis.columns));
       activateAiChartSuggestion(suggestion);
       return;
@@ -3072,7 +3052,8 @@ function bindUI() {
       const sel = lineSelectionFor(state.aiDataset, suggestion);
       const [from, to] = ["from", "to"].map(edge => document.querySelector(`#ai-filter-controls .ai-line-range[data-edge='${edge}']`));
       if (!from || !to) return;
-      if (from.value > to.value) (event.target === from ? to : from).value = event.target.value;
+      const time = state.aiDataset.analysis.columns.find(column => column.name === suggestion.bindings.x);
+      if (compareTimeValues(from.value, to.value, time) > 0) (event.target === from ? to : from).value = event.target.value;
       sel.from = from.value;
       sel.to = to.value;
       activateAiChartSuggestion(suggestion, { rebuildControls: false });

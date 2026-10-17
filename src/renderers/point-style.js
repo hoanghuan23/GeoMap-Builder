@@ -1,5 +1,6 @@
 import { humanizeField } from "../charts/data-transformers.js";
 import { serializeTabularValue } from "../tabular-data.js";
+import { compareTimeValues, timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "../time-values.js";
 
 export const POINT_COLOR = "#00d084";
 export const POINT_COLORS = Object.freeze(["#5b8ff9", "#f58b61", "#63c785", "#f6bd16", "#9270ca", "#6dc8ec", "#d9548a", "#2f9e9e"]);
@@ -45,12 +46,6 @@ function groupKey(value) {
   return value == null || String(value).trim() === "" ? null : String(value);
 }
 
-function timestamp(value) {
-  if (value == null || value === "") return null;
-  const time = Date.parse(serializeTabularValue(value));
-  return Number.isFinite(time) ? time : null;
-}
-
 function fieldLabel(column) {
   return column.labelVi || humanizeField(column.name);
 }
@@ -81,10 +76,10 @@ export function createPointModel(records, columns, { lat, lng }) {
   let timeColumn = null;
   let times = [];
   for (const column of columns.filter(column => column.role === "time")) {
-    const values = [...new Set(features.map(feature => timestamp(feature.properties[column.name])).filter(value => value != null))].sort((a, b) => a - b);
-    if (values.length < 2) continue;
+    const values = uniqueTimeValues(features.map(feature => feature.properties), column);
+    if (values.length < 2 || !timeValuesAreComparable(values, column)) continue;
     timeColumn = column;
-    times = values.map(value => new Date(value).toISOString());
+    times = values.map(value => String(serializeTabularValue(value)));
     break;
   }
   return {
@@ -105,7 +100,7 @@ export function normalizePointSelection(model, saved = {}) {
   if (!selectedValues.length) selectedValues = group?.values.slice(0, POINT_DEFAULT_GROUPS).map(item => item.key) || [];
   let from = model.times.includes(saved.from) ? saved.from : model.times[0] || null;
   let to = model.times.includes(saved.to) ? saved.to : model.times.at(-1) || null;
-  if (from && to && from > to) [from, to] = [to, from];
+  if (from && to && compareTimeValues(from, to, model.timeColumn) > 0) [from, to] = [to, from];
   return {
     metricField: metric?.name || null,
     groupField: group?.name || null,
@@ -163,12 +158,13 @@ export function buildPointView(model, saved = {}, previousColors = {}, inputStyl
   const selected = new Set(selection.selectedValues);
   const paletteColors = assignColors(selection.selectedValues, previousColors);
   const colors = Object.fromEntries(selection.selectedValues.map(key => [key, colorValue(inputStyle.groupColors?.[key], paletteColors[key])]));
-  const from = timestamp(selection.from); const to = timestamp(selection.to);
+  const from = model.timeColumn ? timeValueInfo(selection.from, model.timeColumn) : null;
+  const to = model.timeColumn ? timeValueInfo(selection.to, model.timeColumn) : null;
   const features = model.data.features.filter(feature => {
     if (selection.mode === "pick" && !selected.has(groupKey(feature.properties[selection.groupField]))) return false;
     if (model.timeColumn) {
-      const time = timestamp(feature.properties[model.timeColumn.name]);
-      if (time == null || time < from || time > to) return false;
+      const time = timeValueInfo(feature.properties[model.timeColumn.name], model.timeColumn);
+      if (!time || time.kind !== from?.kind || time.order < from.order || time.order > to.order) return false;
     }
     return true;
   });
