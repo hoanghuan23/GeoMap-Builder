@@ -1,5 +1,6 @@
 import { CONFIG } from "./config.js";
 import { cellAtMaxResolution, geoJSONToCells, geoJSONToH3FeatureCollection, h3CellCenter, recordsToAggregatedH3, recordsToPointGeoJSON } from "./h3-utils.js";
+import { buildRegionHexGrid } from "./region-hex-grid.js";
 import { analyzeSpatialData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
 import { BarRenderer, analyzeBarData } from "./charts/bar-chart.js";
 import { createLineOption, LINE_COLORS, lineSeriesFromFields, LineRenderer } from "./charts/line-chart.js";
@@ -66,6 +67,7 @@ const state = {
   resolution: CONFIG.DEFAULT_RESOLUTION, boundary: null, sourceBoundary: null, h3Data: { type: "FeatureCollection", features: [] },
   page: 1, pageSize: 10, query: "", baselineCount: null,
   mapType: null, dataProfile: null,
+  regionHexEnabled: false, regionHexResolution: CONFIG.DEFAULT_RESOLUTION,
   pointData: { type: "FeatureCollection", features: [] },
   chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null,
   barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, pointStyle: { ...DEFAULT_POINT_STYLE },
@@ -319,6 +321,18 @@ function showSupportedChartCatalog(visible) {
   $("supported-chart-catalog").hidden = !visible;
 }
 
+function isRegionHexMode() {
+  return state.mapType === "polygon" && !state.metroData && state.regionHexEnabled;
+}
+
+function syncRegionHexControls() {
+  $("show-region-hex").checked = state.regionHexEnabled;
+  $("region-hex-resolution-control").hidden = !state.regionHexEnabled;
+  $("region-hex-resolution").disabled = !state.regionHexEnabled;
+  $("region-hex-resolution").value = state.regionHexResolution;
+  $("region-hex-resolution-value").value = state.regionHexResolution;
+}
+
 function updateModelSections() {
   const hasModel = Boolean(state.mapType);
   const isChart = Boolean(state.chartConfig);
@@ -333,6 +347,8 @@ function updateModelSections() {
   $("chart-data-mapping-section").hidden = !isChart || !state.chartMapping;
   $("resolution-section").hidden = !hasModel || isChart || state.mapType !== "h3";
   $("feature-section").hidden = !hasModel || isChart;
+  $("region-hex-controls").hidden = isChart || state.mapType !== "polygon" || Boolean(state.metroData);
+  syncRegionHexControls();
   $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon", "point"].includes(state.mapType) && !isRoad);
   $("map-style-controls").hidden = isChart || isPoint || isRoad;
   $("point-style-controls").hidden = !isPoint;
@@ -400,7 +416,7 @@ function renderWeatherLegend() {
   $("weather-legend-title").textContent = `${metric}${hasTemperatureUnit ? " (°C)" : ""}`;
   $("weather-legend-scale").style.background = scale.gradient;
   $("weather-legend-labels").replaceChildren(...scale.values.map(value => Object.assign(document.createElement("span"), { textContent: Number(value.toFixed(1)).toLocaleString("vi-VN") })));
-  $("weather-legend-note").textContent = state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon";
+  $("weather-legend-note").textContent = isRegionHexMode() ? `Dữ liệu tải lên · H3 res ${state.regionHexResolution}` : state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon";
 }
 
 function applyStyle() {
@@ -410,10 +426,10 @@ function applyStyle() {
   const borderColor = $("border-color").value;
   const borderWidth = Number($("line-width").value);
   if (map.getLayer("h3-fill")) {
-    const weatherColor = state.dataOrigin === "search" && $("show-weather").checked
+    const weatherColor = state.dataOrigin === "search" && state.mapType === "h3" && $("show-weather").checked
       ? temperatureFillExpression(state.polygonPalette, color)
-      : state.aiDataset
-      ? polygonFillExpression(state.h3Data, state.dataProfile, state.polygonPalette, color)
+      : state.aiDataset || isRegionHexMode()
+      ? polygonFillExpression(isRegionHexMode() ? state.boundary : state.h3Data, state.dataProfile, state.polygonPalette, color)
       : color;
     map.setPaintProperty("h3-fill", "fill-color", weatherColor);
     map.setPaintProperty("h3-fill", "fill-opacity", opacity);
@@ -443,15 +459,15 @@ function applyStyle() {
 function applyMapLayerVisibility() {
   if (!map) return;
   const showLayers = $("show-map-layers")?.checked ?? false;
-  const showH3 = showLayers && state.mapType === "h3";
-  const showPolygon = showLayers && state.mapType === "polygon" && (!state.metroData || $("show-metro-cells").checked);
+  const showH3 = showLayers && (state.mapType === "h3" || isRegionHexMode());
+  const showPolygon = showLayers && state.mapType === "polygon" && !isRegionHexMode() && (!state.metroData || $("show-metro-cells").checked);
   if (map.getLayer("h3-fill")) map.setLayoutProperty("h3-fill", "visibility", showH3 ? "visible" : "none");
   if (map.getLayer("h3-border")) map.setLayoutProperty("h3-border", "visibility", showH3 && $("show-border").checked ? "visible" : "none");
   if (map.getLayer("point-marker")) map.setLayoutProperty("point-marker", "visibility", showLayers && state.mapType === "point" ? "visible" : "none");
   if (map.getLayer("point-heatmap")) map.setLayoutProperty("point-heatmap", "visibility", showLayers && state.mapType === "heatmap" ? "visible" : "none");
   if (map.getLayer("polygon-fill")) map.setLayoutProperty("polygon-fill", "visibility", showPolygon ? "visible" : "none");
   if (map.getLayer("polygon-border")) map.setLayoutProperty("polygon-border", "visibility", showPolygon && $("show-border").checked ? "visible" : "none");
-  if (map.getLayer("vietnam-border")) map.setLayoutProperty("vietnam-border", "visibility", showLayers && (!state.metroData || $("show-metro-boundary").checked) ? "visible" : "none");
+  if (map.getLayer("vietnam-border")) map.setLayoutProperty("vietnam-border", "visibility", showLayers && !isRegionHexMode() && (!state.metroData || $("show-metro-boundary").checked) ? "visible" : "none");
   for (const id of ["metro-stations", "metro-station-labels"]) {
     if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", showLayers && state.metroData && $("show-metro-stations").checked ? "visible" : "none");
   }
@@ -1005,7 +1021,42 @@ function estimateCellCount(resolution) {
   return Math.round(state.baselineCount * Math.pow(7, resolution - CONFIG.DEFAULT_RESOLUTION));
 }
 
+let regionHexBuildRevision = 0;
+
+async function rebuildRegionHexGrid({ fit = false } = {}) {
+  const revision = ++regionHexBuildRevision;
+  const boundary = state.boundary;
+  const requestedResolution = state.regionHexResolution;
+  if (!boundary || !isRegionHexMode()) return;
+  setStatus(`Đang tạo lưới lục giác ở độ phân giải ${requestedResolution}…`);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  if (revision !== regionHexBuildRevision || boundary !== state.boundary || !isRegionHexMode()) return;
+  try {
+    const result = buildRegionHexGrid(boundary, requestedResolution, CONFIG.MAX_RENDER_CELLS);
+    state.h3Data = result.data;
+    state.regionHexResolution = result.resolution;
+    syncRegionHexControls();
+    map.getSource("h3-grid")?.setData(state.h3Data);
+    const count = result.data.features.length;
+    $("region-hex-note").textContent = result.resolution !== requestedResolution
+      ? `Đã dùng độ phân giải ${result.resolution} để giữ số ô trong giới hạn ${CONFIG.MAX_RENDER_CELLS.toLocaleString("vi-VN")} ô.`
+      : !count ? "Chưa có ô ở độ phân giải này. Tăng độ phân giải để hiển thị vùng nhỏ." : "";
+    $("cell-count").textContent = count.toLocaleString("vi-VN");
+    $("cell-label").textContent = `Tổng số cell (res ${result.resolution})`;
+    state.page = 1; updateDashboard();
+    syncPolygonPaletteControls(); applyStyle();
+    if (fit && count) fitBoundary();
+    setStatus(`Đã vẽ ${count.toLocaleString("vi-VN")} ô lục giác.`, true);
+  } catch (error) {
+    state.regionHexEnabled = false;
+    syncRegionHexControls(); applyStyle();
+    $("region-hex-note").textContent = error.message || "Không thể tạo lưới lục giác.";
+    setStatus("Không thể tạo lưới lục giác.", true);
+  }
+}
+
 async function rebuildGrid({ fit = false } = {}) {
+  if (isRegionHexMode()) return rebuildRegionHexGrid({ fit });
   const selectedAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
   if (selectedAiSuggestion?.chartType === "hex_h3") return refreshAiH3({ fit });
   if (!state.boundary) { setStatus("Hãy upload dữ liệu không gian trước."); return; }
@@ -1137,6 +1188,9 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 }
 
 function clearUploadedData() {
+  regionHexBuildRevision += 1;
+  state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
+  $("region-hex-note").textContent = "";
   tabularAbortController?.abort(); tabularAbortController = null; tabularLoadRevision += 1;
   cancelAiBoundaryLoad();
   weatherLoadRevision += 1;
@@ -1161,6 +1215,10 @@ function clearUploadedData() {
 }
 
 async function resetConfiguration() {
+  regionHexBuildRevision += 1;
+  state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
+  $("region-hex-note").textContent = "";
+  syncRegionHexControls();
   state.resolution = CONFIG.DEFAULT_RESOLUTION;
   state.barStyle = mergeBarConfig();
   state.pieStyle = mergePieConfig();
@@ -2344,7 +2402,7 @@ async function filteredAiBoundary({ fit = false } = {}) {
   state.dataProfile = analyzeSpatialData(data, { numericFields });
   map.getSource("polygon-data")?.setData(data);
   map.getSource("vietnam-boundary")?.setData(data);
-  if (state.mapType === "h3") await rebuildGrid({ fit });
+  if (state.mapType === "h3" || isRegionHexMode()) await rebuildGrid({ fit });
   else {
     syncPolygonPaletteControls(); applyStyle();
     if (fit && data.features.length) fitBoundary();
@@ -2529,6 +2587,9 @@ function replaceChartData(analysis, name) {
   setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(options[0].id);
 }
 async function replaceBoundary(data, name, profile = null, { preservePolygons = false, preserveAi = false } = {}) {
+  regionHexBuildRevision += 1;
+  state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
+  $("region-hex-note").textContent = "";
   weatherLoadRevision += 1;
   if (!preserveAi) clearAiMapState();
   clearMetroData();
@@ -2578,6 +2639,9 @@ function renderSearchMapTypes() {
 
 async function applySearchBoundaries(boundaries) {
   if (state.dataOrigin && state.dataOrigin !== "search") return;
+  regionHexBuildRevision += 1;
+  state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
+  $("region-hex-note").textContent = "";
   if (!boundaries.length) {
     if (state.dataOrigin === "search") {
       clearUploadedData();
@@ -3151,6 +3215,22 @@ function bindUI() {
   });
   $("metro-departure").addEventListener("change", updateMetroTime);
   for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).addEventListener("change", applyMapLayerVisibility);
+  $("show-region-hex").addEventListener("change", async event => {
+    regionHexBuildRevision += 1;
+    state.regionHexEnabled = event.target.checked;
+    cellPopup?.remove();
+    $("region-hex-note").textContent = "";
+    syncRegionHexControls();
+    if (isRegionHexMode()) await rebuildRegionHexGrid();
+    else { applyStyle(); setStatus("Đang hiển thị vùng hành chính.", true); }
+  });
+  $("region-hex-resolution").addEventListener("input", event => {
+    $("region-hex-resolution-value").value = event.target.value;
+  });
+  $("region-hex-resolution").addEventListener("change", async event => {
+    state.regionHexResolution = Number(event.target.value);
+    await rebuildRegionHexGrid();
+  });
   $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
   $("opacity").addEventListener("input", e => { $("opacity-value").value = `${Math.round(e.target.value * 100)}%`; applyStyle(); }); $("line-width").addEventListener("input", e => { $("line-width-value").value = `${e.target.value} px`; applyStyle(); });
   for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); if (id === "fixed-color" && (state.mapType === "polygon" || state.dataOrigin === "search" || state.aiDataset)) { state.polygonPalette = null; syncPolygonPaletteControls(); } applyStyle(); }); }
@@ -3174,9 +3254,12 @@ function bindUI() {
     if (selectChartOption(button.dataset.type)) return;
     document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active"));
     button.classList.add("active");
+    regionHexBuildRevision += 1;
+    state.regionHexEnabled = false;
+    $("region-hex-note").textContent = "";
     state.mapType = button.dataset.type;
     updateModelSections();
-    if (state.mapType === "h3" && state.boundary && !state.h3Data.features.length) await rebuildGrid();
+    if (state.mapType === "h3" && state.boundary) await rebuildGrid();
     else applyStyle();
     setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true);
   });
@@ -3259,10 +3342,17 @@ function exportCSV() {
   const blob = new Blob(["\ufeff" + rows.map(row => row.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n")], { type: "text/csv;charset=utf-8" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `h3-res-${state.resolution}.csv`; a.click(); URL.revokeObjectURL(a.href);
 }
 
+function observeMapSize() {
+  if (typeof ResizeObserver === "undefined") return;
+  const observer = new ResizeObserver(() => map?.resize());
+  observer.observe($("map"));
+}
+
 async function init() {
   renderSupportedChartCatalog();
   bindUI(); syncMapStyleControls();
   map = new maplibregl.Map({ container: "map", style: MAP_STYLES[state.mapStyle], center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
+  observeMapSize();
   createMapSearch({ map, apiKey: CONFIG.MAPTILER_API_KEY, onBoundariesChange: applySearchBoundaries });
   map.on("style.load", () => {
     const switchedStyle = pendingMapStyle;

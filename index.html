@@ -84,6 +84,16 @@
         <div id="feature-controls" class="feature-controls">
           <label class="toggle-row feature-toggle-row"><span class="feature-copy"><b>Hiển thị lớp bản đồ</b><small>Bật để vẽ các đối tượng/lớp dữ liệu lên bản đồ</small></span><span class="switch-control"><input id="show-map-layers" type="checkbox" checked><i></i><em id="show-map-layers-status">Đang bật</em></span></label>
           <label id="weather-toggle-field" class="toggle-row feature-toggle-row" hidden><span class="feature-copy"><b>Dữ liệu thời tiết</b><small>Nhiệt độ, độ ẩm, tầm nhìn và gió theo ô H3</small></span><span class="switch-control"><input id="show-weather" type="checkbox"><i></i><em id="show-weather-status">Đang tắt</em></span></label>
+          <div id="region-hex-controls" class="region-hex-controls" hidden>
+            <label class="toggle-row feature-toggle-row"><span class="feature-copy"><b>Hiển thị lưới lục giác</b><small>Biểu diễn dữ liệu bằng các ô lục giác thay cho vùng hành chính</small></span><input id="show-region-hex" type="checkbox" aria-controls="region-hex-resolution-control"><i></i></label>
+            <div id="region-hex-resolution-control" class="field range-field resolution-control" hidden>
+              <div class="field-label"><label for="region-hex-resolution">Độ phân giải lưới (Resolution)</label><output id="region-hex-resolution-value" for="region-hex-resolution">6</output></div>
+              <input id="region-hex-resolution" type="range" min="0" max="15" step="1" value="6" disabled aria-describedby="region-hex-resolution-help">
+              <div class="resolution-hints" aria-hidden="true"><span>Ô lớn (0)</span><span>Ô nhỏ (15)</span></div>
+              <small id="region-hex-resolution-help">Độ phân giải càng cao, các ô lục giác càng nhỏ và bản đồ càng chi tiết.</small>
+              <small id="region-hex-note" class="region-hex-note" role="status"></small>
+            </div>
+          </div>
           <div id="metro-layer-controls" hidden>
             <label class="toggle-row"><span>Hiển thị vùng dữ liệu</span><input id="show-metro-cells" type="checkbox" checked><i></i></label>
             <label class="toggle-row"><span>Hiển thị đường bao vùng</span><input id="show-metro-boundary" type="checkbox" checked><i></i></label>

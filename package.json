@@ -13,7 +13,7 @@
     "vite": "^6.1.0"
   },
   "dependencies": {
-    "h3-js": "^4.1.0",
+    "h3-js": "^4.5.0",
     "polygon-clipping": "^0.15.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

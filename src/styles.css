@@ -42,7 +42,7 @@ button {
 }
 
 .app-shell {
-    height: 100%;
+    height: 100dvh;
     display: flex;
     flex-direction: column
 }
@@ -165,6 +165,8 @@ button {
 
 .workspace {
     height: calc(100% - var(--header));
+    flex: 1;
+    min-height: 0;
     display: grid;
     grid-template-columns: var(--side) 1fr;
     min-width: 0
@@ -1571,6 +1573,7 @@ input[type=range] {
 
 .content-area {
     min-width: 0;
+    min-height: 0;
     display: grid;
     grid-template-rows: minmax(280px, 1fr) var(--table);
     background: #e9eef5
@@ -2610,6 +2613,11 @@ th:last-child {
 
 @media(max-width:760px) {
 
+    .app-shell {
+        height: auto;
+        min-height: 100dvh
+    }
+
     html,
     body {
         overflow: auto
@@ -2627,6 +2635,7 @@ th:last-child {
 
     .workspace {
         display: block;
+        flex: none;
         height: auto
     }
 
@@ -2768,6 +2777,30 @@ th:last-child {
 .weather-legend-scale.blue { background: linear-gradient(90deg, #eff6ff, #bfdbfe, #60a5fa, #2563eb, #1e3a8a); }
 .weather-legend-labels { display: flex; justify-content: space-between; margin-top: 5px; color: #cbd5e1; font-size: 10px; }
 .resolution-control { margin: 10px 0 0; }
+.region-hex-controls { padding-top: 14px; border-top: 1px solid var(--border, #e5e7eb); }
+.region-hex-controls[hidden] { display: none; }
+.region-hex-controls .resolution-control { margin-top: 16px; }
+.region-hex-controls .resolution-control[hidden] { display: none; }
+.region-hex-controls .toggle-row { position: relative; }
+.region-hex-controls .toggle-row input {
+    display: block;
+    position: absolute;
+    top: 50%;
+    right: 0;
+    width: 30px;
+    height: 17px;
+    margin: 0;
+    transform: translateY(-50%);
+    opacity: 0;
+    cursor: pointer;
+    z-index: 1;
+}
+.region-hex-controls .toggle-row input:focus-visible + i { outline: 2px solid var(--blue); outline-offset: 3px; }
+.region-hex-controls .field-label { gap: 8px; }
+.region-hex-controls .resolution-hints { font-size: 10px; margin-top: 6px; }
+.region-hex-controls .resolution-control > small { display: block; margin-top: 10px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.region-hex-controls input[type="range"]:disabled { opacity: .45; cursor: not-allowed; }
+.region-hex-note:empty { display: none !important; }
 .resolution-control input[type="range"] { width: 100%; }
 .resolution-control output {
   min-width: 28px;
