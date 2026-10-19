@@ -14,13 +14,13 @@ const LNG_HINT = /(^|[\s_.-])(lng|lon|long|longitude|kinh độ|kinh do)([\s_.-]
 
 export const AI_CHART_REGISTRY = Object.freeze({
   choropleth: Object.freeze({
-    label: "Biểu đồ vùng",
+    label: "Bản đồ Polygon",
     slots: Object.freeze({ region: Object.freeze(["geo"]), value: Object.freeze(["measure"]) }),
     icon: "polygon",
     renderer: "MapLibre"
   }),
   point: Object.freeze({
-    label: "Biểu đồ điểm",
+    label: "Biểu đồ Point",
     slots: Object.freeze({ lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]) }),
     icon: "point",
     renderer: "MapLibre"
@@ -32,7 +32,7 @@ export const AI_CHART_REGISTRY = Object.freeze({
     renderer: "H3"
   }),
   map_line: Object.freeze({
-    label: "Biểu đồ mạng lưới",
+    label: "Bản đồ Line",
     slots: Object.freeze({ region: Object.freeze(["category", "geo"]), value: Object.freeze(["measure", "category"]) }),
     icon: "line",
     renderer: "MapLibre"

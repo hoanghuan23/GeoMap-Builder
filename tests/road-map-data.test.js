@@ -16,7 +16,7 @@ const analysis = validateAndNormalizeAnalysis(trafficAiAnalysis, profile);
 
 test("map_line có registry, validation và fallback riêng, không biến thành temporal line", () => {
   assert.equal(AI_CHART_REGISTRY.map_line.renderer, "MapLibre");
-  assert.equal(AI_CHART_REGISTRY.map_line.label, "Biểu đồ mạng lưới");
+  assert.equal(AI_CHART_REGISTRY.map_line.label, "Bản đồ Line");
   assert.equal(AI_CHART_REGISTRY.line.renderer, "Recharts");
   assert.deepEqual(analysis.suggestions.map(item => item.chartType), ["map_line", "line", "bar"]);
   assert.deepEqual(analysis.validationErrors, []);

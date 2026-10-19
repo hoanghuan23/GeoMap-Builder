@@ -112,7 +112,7 @@ export function defaultBarLimit(suggestion, columns) {
   return columnMap(columns).get(suggestion.bindings.x)?.role === "time" ? "all" : 12;
 }
 
-export function buildBarChartOption(suggestion, records, columns, { top = null, metrics = null, variant = "single", aggregation = null } = {}) {
+export function buildBarChartOption(suggestion, records, columns, { top = null, metrics = null, variant = "single", aggregation = null, preserveEmptyPoints = false } = {}) {
   const { x } = suggestion.bindings;
   const byName = columnMap(columns);
   const available = new Set(barMetricOptions(columns).map(item => item.key));
@@ -146,7 +146,7 @@ export function buildBarChartOption(suggestion, records, columns, { top = null, 
     ...Object.fromEntries(descriptors.map(descriptor => [descriptor.key, valueFor(descriptor, group.records)])),
     __dimensionValue: group.value,
     __records: group.records
-  })).filter(row => descriptors.some(descriptor => Number.isFinite(row[descriptor.key])));
+  })).filter(row => preserveEmptyPoints || descriptors.some(descriptor => Number.isFinite(row[descriptor.key])));
   const primaryKey = descriptors[0]?.key;
   groups.sort(timeDimension
     ? (a, b) => compareTimeValues(a.__dimensionValue, b.__dimensionValue, byName.get(x))
@@ -204,7 +204,7 @@ function lineSeriesKey(seriesValue, measure, multipleMeasures) {
   return multipleMeasures ? `${seriesValue} · ${measure}` : String(seriesValue);
 }
 
-export function buildLineChartOption(suggestion, records, columns, { selectedSeries = null, measure = null, seriesField, scopeLabel = "", defaultSeriesLimit = 5, maxSeries = 8 } = {}) {
+export function buildLineChartOption(suggestion, records, columns, { selectedSeries = null, measure = null, seriesField, scopeLabel = "", defaultSeriesLimit = 5, maxSeries = 8, preserveEmptyPoints = false } = {}) {
   const { x } = suggestion.bindings;
   // undefined keeps the AI suggestion, null aggregates all records, and a field splits the lines by that dimension.
   const series = seriesField === undefined ? suggestion.bindings.series : seriesField;
@@ -254,7 +254,7 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
       row[item.key] = aggregate(matching.map(record => record[item.measure]), aggregations.get(item.measure));
     }
     return row;
-  }).filter(row => selected.some(item => Number.isFinite(row[item.key])));
+  }).filter(row => preserveEmptyPoints || selected.some(item => Number.isFinite(row[item.key])));
 
   const aggWord = { sum: "Tổng", mean: "Trung bình", max: "Cao nhất", min: "Thấp nhất", count: "Số lượng" }[aggregation] || "";
   const xLabel = labelOf(x).toLowerCase();
@@ -442,7 +442,7 @@ export function prepareSuggestions(analysis, records, validRowRate, options = {}
       suggestions = [{
         id: "regional-choropleth",
         chartType: "choropleth",
-        title: `Biểu đồ vùng theo ${regionLabel.toLocaleLowerCase("vi")}`,
+        title: `Bản đồ polygon theo ${regionLabel.toLocaleLowerCase("vi")}`,
         bindings: { region: region.name, value: measure.name },
         agg: resolveAggregation({ bindings: { value: measure.name } }, analysis.columns),
         confidence: .85,

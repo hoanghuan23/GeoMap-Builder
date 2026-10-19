@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { getBarAutoWindowSize, mergeBarConfig, prepareBarData } from "./configs/bar-config.js";
 import { analyzeDataSets, createBarOptions } from "./data-transformers.js";
+import { formatTimeValue } from "../time-values.js";
 
 const roots = new WeakMap();
 const DEFAULT_COLORS = ["#5470C6", "#91CC75", "#FAC858", "#EE6666", "#73C0DE", "#9A60B4"];
@@ -78,6 +79,10 @@ export function normalizeBarChartConfig(input) {
     }
     const normalized = { ...record, [xField]: String(category) };
     for (const item of series) {
+      if (input.preserveMissingValues && (record[item.key] == null || record[item.key] === "")) {
+        normalized[item.key] = null;
+        continue;
+      }
       const value = Number(record[item.key]);
       if (!Number.isFinite(value)) {
         throw new Error(`Giá trị "${item.key}" tại data[${rowIndex}] phải là số.`);
@@ -112,6 +117,7 @@ function tooltipValue(value, _name, item, unit) {
 }
 
 function Chart({ config }) {
+  const formatTime = config.timeColumn ? value => formatTimeValue(value, config.timeColumn, config.timeColumn.granularity === "datetime") : undefined;
   const data = useMemo(() => prepareBarData(config.data, config, config.series), [config]);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const isHorizontal = config.orientation === "horizontal";
@@ -177,6 +183,7 @@ function Chart({ config }) {
     fill: item.color,
     radius: isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0],
     maxBarSize: config.barWidth,
+    isAnimationActive: config.animate !== false,
     animationDuration: 550
   }, config.showDataLabels ? h(LabelList, {
     dataKey: item.key,
@@ -210,11 +217,12 @@ function Chart({ config }) {
           config.showGrid ? h(CartesianGrid, { stroke: "#e9edf2", strokeDasharray: "3 3", vertical: isHorizontal }) : null,
           isHorizontal
             ? h(XAxis, { type: "number", axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, tickFormatter: compactNumber })
-            : h(XAxis, { type: "category", dataKey: config.xField, axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, interval: 0, height: 42 }),
+            : h(XAxis, { type: "category", dataKey: config.xField, tickFormatter: formatTime, axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, interval: config.timeColumn ? "preserveStartEnd" : 0, minTickGap: 8, height: 42 }),
           isHorizontal
             ? h(YAxis, { type: "category", dataKey: config.xField, axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, interval: 0, width: 82 })
             : h(YAxis, { type: "number", axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, tickFormatter: compactNumber, width: 54 }),
           config.showTooltip ? h(Tooltip, {
+            labelFormatter: formatTime,
             formatter: (value, name, item) => tooltipValue(value, name, item, config.unit),
             cursor: { fill: "rgba(15, 23, 42, 0.035)" },
             contentStyle: { border: "1px solid #e2e8f0", borderRadius: 8, boxShadow: "0 8px 24px rgba(15,23,42,.10)" }
