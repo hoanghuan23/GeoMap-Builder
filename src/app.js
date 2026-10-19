@@ -35,7 +35,7 @@ import { createAiPopupContent } from "./ai-popup.js";
 import { applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
 import { compareTimeValues, filterTimeRange, formatTimeValue, timeValueInfo, uniqueTimeValues } from "./time-values.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
-import { buildPopupChart, createPopupChartSelection, polygonDisplaySuggestions, popupRegionValue, popupTimeColumn } from "./ai-popup-chart.js";
+import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupFeaturesMatch, popupTimeColumn } from "./ai-popup-chart.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-client.js";
 import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
 import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
@@ -80,8 +80,8 @@ const state = {
   aiDataset: null, pendingSheet: null,
   mapStyle: "liberty"
 };
-let map; let toastTimer; let statusTimer; let cellPopup; let pointPopup; let roadPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
-let polygonPopupView = null;
+let map; let toastTimer; let statusTimer; let cellPopup; let pointPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
+let mapPopupView = null;
 let layerOrderRevision = 0;
 let mapLayerEventsBound = false;
 const uploadedPointerLayerIds = new Set();
@@ -357,7 +357,7 @@ function updateModelSections() {
   $("road-style-controls").hidden = !isRoad;
   $("cell-stats-card").hidden = !hasModel || isChart || state.mapType !== "h3";
   const activeAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
-  $("ai-filter-description").textContent = activePolygonSuggestion()
+  $("ai-filter-description").textContent = activeMapPopupSuggestion()
     ? "Chọn cách hiển thị và chỉ số dữ liệu"
     : activePointSuggestion()
     ? "Chọn chỉ số, nhóm điểm và khoảng thời gian"
@@ -380,7 +380,7 @@ function updateModelSections() {
   renderPointLegend();
   renderRoadLegend();
   if (!activePointSuggestion()) { pointPopup?.remove(); pointPopup = null; }
-  if (!activePolygonSuggestion()) closePolygonPopup();
+  if (!activeMapPopupSuggestion()) closeMapPopup();
 }
 
 function fillExpression() {
@@ -464,7 +464,7 @@ function applyStyle() {
 function applyMapLayerVisibility() {
   if (!map) return;
   const showLayers = $("show-map-layers")?.checked ?? false;
-  if (!showLayers) closePolygonPopup();
+  if (!showLayers) closeMapPopup();
   const showH3 = showLayers && (state.mapType === "h3" || isRegionHexMode());
   const showPolygon = showLayers && state.mapType === "polygon" && !isRegionHexMode() && (!state.metroData || $("show-metro-cells").checked);
   if (map.getLayer("h3-fill")) map.setLayoutProperty("h3-fill", "visibility", showH3 ? "visible" : "none");
@@ -491,7 +491,6 @@ function applyMapLayerVisibility() {
   renderWeatherLegend();
   renderPointLegend();
   renderRoadLegend();
-  if (!activeRoadSuggestion() || !showLayers) { roadPopup?.remove(); roadPopup = null; }
   if (state.mapType !== "point" || !showLayers) { pointPopup?.remove(); pointPopup = null; }
 }
 
@@ -540,12 +539,7 @@ function addMapLayers() {
   map.on("click", "data-lines", event => {
     const suggestion = activeRoadSuggestion(); const feature = event.features?.[0];
     if (!suggestion || !feature) return;
-    roadPopup?.remove();
-    roadPopup = new maplibregl.Popup({ offset: 8, maxWidth: "360px", className: "ai-weather-popup" })
-      .setLngLat(event.lngLat)
-      .setDOMContent(createAiPopupContent(document, feature, state.aiDataset.analysis.columns.map(column => column.role === "time"
-        && state.aiDataset.recommendation.filters.some(filter => filter.field === column.name && filter.control === "datetime-select")
-        ? { ...column, granularity: "datetime" } : column), suggestion.bindings.region)).addTo(map);
+    openMapPopup(feature, event.lngLat, "data-lines");
   });
   for (const id of ["polygon-fill", "metro-stations", "data-lines"]) {
     map.on("mouseenter", id, () => { if (state.metroData || state.aiDataset) map.getCanvas().style.cursor = "pointer"; });
@@ -555,7 +549,7 @@ function addMapLayers() {
     const p = event.features?.[0]?.properties; if (!p) return;
     const feature = state.h3Data.features.find(cell => cell.properties.h3 === p.h3) || event.features[0];
     if (activePolygonSuggestion() && isRegionHexMode()) {
-      openPolygonPopup(feature, event.lngLat, "h3-fill");
+      openMapPopup(feature, event.lngLat, "h3-fill");
       return;
     }
     if (state.aiDataset) {
@@ -976,14 +970,17 @@ function showMetroComparison(event) {
 
 function aiWeatherPopupContent(feature) {
   const { recommendation } = state.aiDataset;
-  return createAiPopupContent(document, feature, state.aiDataset.analysis?.columns || [], recommendation.geometry?.field);
+  const columns = state.aiDataset.analysis?.columns || [];
+  return createAiPopupContent(document, feature, columns.map(column => column.role === "time"
+    && recommendation.filters.some(filter => filter.field === column.name && filter.control === "datetime-select")
+    ? { ...column, granularity: "datetime" } : column), recommendation.geometry?.field);
 }
 
 function showAiPolygonDetails(event) {
   const feature = event.features?.[0];
   if (!feature || !state.aiDataset) return;
   if (activePolygonSuggestion()) {
-    openPolygonPopup(feature, event.lngLat);
+    openMapPopup(feature, event.lngLat);
     return;
   }
   const card = aiWeatherPopupContent(feature);
@@ -996,7 +993,13 @@ function activePolygonSuggestion() {
   return suggestion?.chartType === "choropleth" ? suggestion : null;
 }
 
-function popupSelectionFor(suggestion = activePolygonSuggestion()) {
+function activeMapPopupSuggestion() {
+  const dataset = state.aiDataset;
+  const suggestion = dataset?.suggestions?.find(item => item.id === dataset.selectedSuggestionId);
+  return ["choropleth", "map_line"].includes(suggestion?.chartType) ? suggestion : null;
+}
+
+function popupSelectionFor(suggestion = activeMapPopupSuggestion()) {
   const dataset = state.aiDataset;
   dataset.popupSelections ||= {};
   const selection = dataset.popupSelections[suggestion.id] ||= { mode: "info", bar: null, line: null };
@@ -1006,23 +1009,23 @@ function popupSelectionFor(suggestion = activePolygonSuggestion()) {
   return selection;
 }
 
-function clearPolygonPopupChart(view) {
+function clearMapPopupChart(view) {
   if (view?.chartContainer) {
     chartRenderer(view.chartKind).clear(view.chartContainer);
     view.chartContainer = null;
   }
 }
 
-function closePolygonPopup() {
-  const view = polygonPopupView;
+function closeMapPopup() {
+  const view = mapPopupView;
   if (!view) return;
-  polygonPopupView = null;
-  clearPolygonPopupChart(view);
+  mapPopupView = null;
+  clearMapPopupChart(view);
   view.popup.remove();
 }
 
-function renderPolygonPopup(view) {
-  clearPolygonPopupChart(view);
+function renderMapPopup(view) {
+  clearMapPopupChart(view);
   const dataset = state.aiDataset;
   const selection = popupSelectionFor();
   const card = selection.mode === "info" ? aiWeatherPopupContent(view.feature) : document.createElement("div");
@@ -1031,7 +1034,7 @@ function renderPolygonPopup(view) {
     card.className = "weather-popup ai-popup-chart-only";
     chart = buildPopupChart({ records: dataset.records, columns: dataset.analysis.columns,
       feature: view.feature, regionField: dataset.recommendation.geometry.field,
-      kind: selection.mode, selection: selection[selection.mode] });
+      kind: selection.mode, selection: selection[selection.mode], chartType: activeMapPopupSuggestion().chartType });
     const container = document.createElement("div");
     container.className = chart.config ? "ai-popup-chart" : "weather-popup-status";
     if (!chart.config) { container.textContent = chart.message; container.setAttribute("role", "status"); }
@@ -1041,11 +1044,11 @@ function renderPolygonPopup(view) {
   view.popup.setDOMContent(card);
   const popupElement = view.popup.getElement();
   popupElement.classList.toggle("has-popup-chart", selection.mode !== "info");
-  sizePolygonPopup(view);
+  sizeMapPopup(view);
   if (chart?.config) chartRenderer(selection.mode).render(view.chartContainer, chart.config);
 }
 
-function sizePolygonPopup(view) {
+function sizeMapPopup(view) {
   const popupElement = view.popup.getElement();
   const mapContainer = map.getContainer();
   popupElement.style.setProperty("--popup-map-width", `${Math.max(0, mapContainer.clientWidth - 32)}px`);
@@ -1061,36 +1064,36 @@ function sizePolygonPopup(view) {
   ]));
 }
 
-function openPolygonPopup(feature, lngLat, layerId = null) {
-  closePolygonPopup();
+function openMapPopup(feature, lngLat, layerId = null) {
+  closeMapPopup();
   cellPopup?.remove();
-  const popup = new maplibregl.Popup({ anchor: "center", maxWidth: "520px", className: "ai-weather-popup ai-polygon-popup" })
+  const popup = new maplibregl.Popup({ anchor: "center", maxWidth: "520px", className: "ai-weather-popup ai-map-popup" })
     .setDOMContent(document.createElement("div"));
   const view = { popup, feature, lngLat, layerId, chartContainer: null, chartKind: null };
-  polygonPopupView = view;
+  mapPopupView = view;
   popup.on("close", () => {
-    clearPolygonPopupChart(view);
-    if (polygonPopupView === view) polygonPopupView = null;
+    clearMapPopupChart(view);
+    if (mapPopupView === view) mapPopupView = null;
   });
-  if (layerId) openCellPopup(popup, feature, layerId);
+  if (layerId === "h3-fill") openCellPopup(popup, feature, layerId);
   else popup.setLngLat(lngLat).addTo(map);
-  renderPolygonPopup(view);
+  renderMapPopup(view);
 }
 
-function refreshPolygonPopup() {
-  const view = polygonPopupView;
+function refreshMapPopup() {
+  const view = mapPopupView;
   if (!view) return;
-  const suggestion = activePolygonSuggestion();
-  if (!suggestion) { closePolygonPopup(); return; }
+  const suggestion = activeMapPopupSuggestion();
+  if (!suggestion) { closeMapPopup(); return; }
   const field = suggestion.bindings.region;
-  const features = view.layerId ? state.h3Data.features : state.boundary?.features;
-  const feature = features?.find(item => view.layerId
+  const features = view.layerId === "data-lines" ? state.lineData.features : view.layerId === "h3-fill" ? state.h3Data.features : state.boundary?.features;
+  const feature = features?.find(item => view.layerId === "h3-fill"
     ? item.properties.h3 === view.feature.properties.h3
-    : popupRegionValue(item, field) === popupRegionValue(view.feature, field));
-  if (!feature) { closePolygonPopup(); return; }
+    : popupFeaturesMatch(item, view.feature, field, { chartType: suggestion.chartType, columns: state.aiDataset.analysis.columns }));
+  if (!feature) { closeMapPopup(); return; }
   view.feature = feature;
-  if (view.layerId) showCellFocus(feature, view.layerId);
-  renderPolygonPopup(view);
+  if (view.layerId === "h3-fill") showCellFocus(feature, view.layerId);
+  renderMapPopup(view);
 }
 
 function updateMetroTime() {
@@ -1305,7 +1308,7 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 }
 
 function clearUploadedData() {
-  closePolygonPopup();
+  closeMapPopup();
   regionHexBuildRevision += 1;
   state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
   $("region-hex-note").textContent = "";
@@ -1584,10 +1587,9 @@ function renderRoadStyleControls() {
 }
 
 function clearAiMapState() {
-  closePolygonPopup();
+  closeMapPopup();
   cancelAiBoundaryLoad();
   pointPopup?.remove(); pointPopup = null;
-  roadPopup?.remove(); roadPopup = null;
   state.aiDataset = null;
   $("ai-line-legend").hidden = true;
   $("point-legend").hidden = true;
@@ -1731,9 +1733,10 @@ function populateAiFilters(dataset) {
   const measureColumns = suggestion?.chartType === "map_line"
     ? roadValueColumns(dataset.analysis.columns, records, suggestion.bindings.region)
     : dataset.analysis?.columns?.filter(column => column.role === "measure") || [];
-  if (recommendation.metricField && measureColumns.length > 1) {
+  if (recommendation.metricField && (measureColumns.length > 1 || suggestion?.chartType === "map_line" && measureColumns.length)) {
     const label = document.createElement("label"); const caption = document.createElement("span"); const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
-    caption.textContent = "Chỉ số"; select.className = "ai-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số hiển thị");
+    caption.textContent = suggestion?.chartType === "map_line" ? "Chỉ số tô màu bản đồ" : "Chỉ số";
+    select.className = "ai-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số hiển thị");
     select.replaceChildren(...measureColumns.map(column => Object.assign(document.createElement("option"), {
       value: column.name,
       textContent: column.labelVi || humanizeField(column.name)
@@ -1807,7 +1810,11 @@ function populateAiFilters(dataset) {
     label.append(caption, select);
     return [label];
   });
-  controls.replaceChildren(...metricControls, ...filterControls);
+  if (suggestion?.chartType === "map_line") {
+    const mapControls = document.createElement("div"); mapControls.className = "ai-popup-map-controls";
+    mapControls.append(...metricControls, ...filterControls);
+    controls.replaceChildren(...buildMapPopupControls(dataset, suggestion), mapControls);
+  } else controls.replaceChildren(...metricControls, ...filterControls);
   dataset.filters = initialFilters;
   $("ai-data-filters").hidden = controls.children.length === 0;
   return initialFilters;
@@ -1883,7 +1890,7 @@ function createAiSuggestionButton(suggestion) {
 function renderAiSuggestionGrid() {
   if (!state.aiDataset) return;
   const grid = $("map-type-grid");
-  const suggestions = polygonDisplaySuggestions(state.aiDataset.suggestions, state.aiDataset.selectedSuggestionId);
+  const suggestions = mapDisplaySuggestions(state.aiDataset.suggestions, state.aiDataset.selectedSuggestionId);
   const suggestionButtons = suggestions.map(createAiSuggestionButton);
   const suggestionHeading = document.createElement("div");
   suggestionHeading.className = "ai-manual-heading ai-suggestion-heading";
@@ -1899,9 +1906,9 @@ function renderAiSuggestionGrid() {
 }
 
 function clearMapForAiChart() {
+  closeMapPopup();
   state.boundary = null; state.sourceBoundary = null; state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = EMPTY_FEATURE_COLLECTION;
   state.lineData = EMPTY_FEATURE_COLLECTION;
-  roadPopup?.remove(); roadPopup = null;
   map.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
@@ -1924,7 +1931,7 @@ function aiSelect(className, choices, value) {
   return keepSelectOpenAfterMouseClick(select);
 }
 
-function populatePolygonFilters(dataset, suggestion) {
+function buildMapPopupControls(dataset, suggestion) {
   const columns = dataset.analysis.columns;
   const selection = popupSelectionFor(suggestion);
   const group = document.createElement("div");
@@ -1934,10 +1941,11 @@ function populatePolygonFilters(dataset, suggestion) {
   types.className = "ai-popup-types";
   types.setAttribute("role", "group"); types.setAttribute("aria-label", "Kiểu hiển thị popup");
   const time = popupTimeColumn(columns);
+  const subject = suggestion.chartType === "map_line" ? "tuyến" : "vùng";
   for (const [mode, label, description, iconName] of [
     ["info", "Chỉ hiển thị thông tin", "Hiển thị các chỉ số dưới dạng thẻ thông tin", null],
-    ["bar", "Biểu đồ cột", "Hiển thị biểu đồ cột của vùng được chọn", "singleBar"],
-    ["line", "Biểu đồ đường", time ? "Hiển thị biểu đồ đường của vùng được chọn" : "Cần cột thời gian để vẽ biểu đồ đường", "line"]
+    ["bar", "Biểu đồ cột", `Hiển thị biểu đồ cột của ${subject} được chọn`, "singleBar"],
+    ["line", "Biểu đồ đường", time ? `Hiển thị biểu đồ đường của ${subject} được chọn` : "Cần cột thời gian để vẽ biểu đồ đường", "line"]
   ]) {
     const button = document.createElement("button"); const icon = document.createElement("span");
     const copy = document.createElement("span"); const title = document.createElement("b");
@@ -1955,7 +1963,14 @@ function populatePolygonFilters(dataset, suggestion) {
   }
   group.append(caption, types);
   const nodes = [group];
-  if (selection.mode !== "info") nodes.push(buildPolygonPopupSettings(dataset, selection));
+  if (selection.mode !== "info") nodes.push(buildMapPopupSettings(dataset, selection));
+  return nodes;
+}
+
+function populatePolygonFilters(dataset, suggestion) {
+  const columns = dataset.analysis.columns;
+  const time = popupTimeColumn(columns);
+  const nodes = buildMapPopupControls(dataset, suggestion);
   const mapControls = document.createElement("div"); mapControls.className = "ai-popup-map-controls";
   const measures = columns.filter(column => column.role === "measure");
   mapControls.append(aiField("Chỉ số tô màu bản đồ", aiSelect("ai-metric-selector",
@@ -1979,7 +1994,7 @@ function populatePolygonFilters(dataset, suggestion) {
   return filters;
 }
 
-function buildPolygonPopupSettings(dataset, selection) {
+function buildMapPopupSettings(dataset, selection) {
   const settings = document.createElement("div"); settings.className = "ai-popup-settings";
   const columns = dataset.analysis.columns;
   const config = selection[selection.mode];
@@ -2020,7 +2035,8 @@ function buildPolygonPopupSettings(dataset, selection) {
   if (times.length) {
     const choices = times.map(value => [comparableFilterValue(value), formatTimeValue(value, time,
       value instanceof Date && Boolean(value.getUTCHours() || value.getUTCMinutes() || value.getUTCSeconds()))]);
-    for (const [edge, label] of [["from", "Biểu đồ từ ngày"], ["to", "Đến ngày"]]) {
+    const road = activeMapPopupSuggestion()?.chartType === "map_line";
+    for (const [edge, label] of [["from", road ? "Biểu đồ từ thời điểm" : "Biểu đồ từ ngày"], ["to", road ? "Đến thời điểm" : "Đến ngày"]]) {
       const control = aiSelect("ai-popup-range", choices, config[edge]); control.dataset.edge = edge;
       settings.append(aiField(label, control));
     }
@@ -2028,14 +2044,14 @@ function buildPolygonPopupSettings(dataset, selection) {
   return settings;
 }
 
-function refreshPolygonPopupControls() {
+function refreshMapPopupControls() {
   populateAiFilters(state.aiDataset);
-  renderGeoRepair(state.aiDataset.geoMatch?.unmatched || []);
-  refreshPolygonPopup();
+  if (activePolygonSuggestion()) renderGeoRepair(state.aiDataset.geoMatch?.unmatched || []);
+  refreshMapPopup();
 }
 
-function changePolygonPopupControl(control) {
-  if (!activePolygonSuggestion()) return;
+function changeMapPopupControl(control) {
+  if (!activeMapPopupSuggestion()) return;
   const selection = popupSelectionFor();
   const config = selection[selection.mode];
   if (!config) return;
@@ -2054,7 +2070,7 @@ function changePolygonPopupControl(control) {
       config[edge === "from" ? "to" : "from"] = control.value;
     }
   }
-  refreshPolygonPopupControls();
+  refreshMapPopupControls();
 }
 
 function buildAiSeriesPicker(option) {
@@ -2481,15 +2497,15 @@ function refreshAiRoadMap({ fit = false } = {}) {
   });
   state.lineData = data;
   dataset.roadStyle = roadMapStyle(data, dataset.analysis.columns.find(column => column.name === suggestion.bindings.value), roadColorOverridesFor(suggestion));
-  roadPopup?.remove(); roadPopup = null;
   map.getSource("line-data")?.setData(data);
   updateModelSections(); applyStyle();
+  refreshMapPopup();
   if (fit && data.features.length) fitGeoJSON(data);
   const stats = data.stats;
   const areaLabels = dataset.roadArea.networkIds.map(id => ROAD_NETWORKS.find(network => network.id === id)?.label || id);
   const skipped = dataset.roadArea.unknownAreas.length ? ` Bỏ qua khu vực chưa hỗ trợ: ${dataset.roadArea.unknownAreas.join(", ")}.` : "";
   $("file-note").textContent = `${stats.matchedRows}/${stats.totalRows} bản ghi khớp · ${stats.segmentCount.toLocaleString("vi-VN")} đoạn đường`;
-  setStatus(data.features.length ? `Đang hiển thị biểu đồ mạng lưới tại ${areaLabels.join(", ")}.${skipped}`
+  setStatus(data.features.length ? `Đang hiển thị Bản đồ Line tại ${areaLabels.join(", ")}.${skipped}`
     : `Không có tuyến khớp. Hãy kiểm tra Khu vực, tên/mã đường hoặc bộ lọc đã chọn.${skipped}`, data.features.length > 0);
 }
 
@@ -2501,7 +2517,7 @@ async function loadAiRoadNetwork({ fit = false } = {}) {
   dataset.roadArea = area; dataset.roadGeometries ||= {};
   state.lineData = EMPTY_FEATURE_COLLECTION;
   map.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
-  roadPopup?.remove(); roadPopup = null;
+  closeMapPopup();
   updateModelSections(); applyStyle();
   if (!area.field) { setStatus("Cần cột Khu vực để tự động xác định mạng đường tỉnh/thành phố."); return true; }
   if (!area.networkIds.length) {
@@ -2619,7 +2635,7 @@ async function activateAiH3(suggestion) {
 async function selectAiSuggestion(id) {
   const suggestion = state.aiDataset?.suggestions.find(item => item.id === id);
   if (!suggestion) return false;
-  if (state.aiDataset.selectedSuggestionId !== id) closePolygonPopup();
+  if (state.aiDataset.selectedSuggestionId !== id) closeMapPopup();
   if (!suggestion.available && suggestion.repairable) {
     cancelAiBoundaryLoad();
     state.aiDataset.selectedSuggestionId = id;
@@ -2664,7 +2680,7 @@ async function filteredAiBoundary({ fit = false } = {}) {
     if (fit && data.features.length) fitBoundary();
   }
   $("file-note").textContent = `${data.features.length} khu vực · ${recommendation.metricField} · ${recommendation.source === "ai" ? "GPT-5.6 Luna đề xuất" : "quy tắc dự phòng"}`;
-  refreshPolygonPopup();
+  refreshMapPopup();
 }
 
 async function activateAiChoropleth(suggestion) {
@@ -2782,9 +2798,9 @@ async function replaceAiPipelineData(pipeline, name) {
   document.querySelector(".map-panel").classList.remove("chart-mode"); setDataPanelVisible(false); showChartStyleControls(false);
   renderAiSuggestionGrid();
   let selected = false;
-  const visibleSuggestions = polygonDisplaySuggestions(suggestions);
+  const visibleSuggestions = mapDisplaySuggestions(suggestions);
   const initialSuggestions = visibleSuggestions === suggestions ? suggestions : [...visibleSuggestions].sort((a, b) =>
-    Number(b.chartType === "choropleth") - Number(a.chartType === "choropleth"));
+    Number(b.chartType === "map_line") - Number(a.chartType === "map_line") || Number(b.chartType === "choropleth") - Number(a.chartType === "choropleth"));
   for (const suggestion of initialSuggestions.filter(item => item.available)) {
     const result = await selectAiSuggestion(suggestion.id);
     if (result === null) return;
@@ -3281,7 +3297,7 @@ function bindUI() {
   });
   $("ai-filter-controls").addEventListener("change", async event => {
     if (event.target.matches(".ai-popup-metric, .ai-popup-metric-checkbox, .ai-popup-aggregation, .ai-popup-range")) {
-      changePolygonPopupControl(event.target);
+      changeMapPopupControl(event.target);
       return;
     }
     if (event.target.matches(".ai-point-metric, .ai-point-group, .ai-point-mode, .ai-point-value, .ai-point-range")) {
@@ -3421,21 +3437,21 @@ function bindUI() {
   $("ai-filter-controls").addEventListener("click", event => {
     const popupType = event.target.closest(".ai-popup-type");
     if (popupType) {
-      if (!activePolygonSuggestion() || popupType.disabled) return;
+      if (!activeMapPopupSuggestion() || popupType.disabled) return;
       const selection = popupSelectionFor();
       selection.mode = popupType.dataset.popupMode;
       popupSelectionFor();
-      refreshPolygonPopupControls();
+      refreshMapPopupControls();
       return;
     }
     const popupVariant = event.target.closest("[data-popup-bar-variant]");
     if (popupVariant) {
-      if (!activePolygonSuggestion() || popupVariant.disabled) return;
+      if (!activeMapPopupSuggestion() || popupVariant.disabled) return;
       const selection = popupSelectionFor();
       if (selection.mode !== "bar") return;
       selection.bar.variant = popupVariant.dataset.popupBarVariant;
       selection.bar.metrics = defaultBarMetrics({ bindings: { y: selection.bar.metrics[0] } }, state.aiDataset.analysis.columns, selection.bar.variant);
-      refreshPolygonPopupControls();
+      refreshMapPopupControls();
       return;
     }
     const barVariant = event.target.closest(".ai-bar-chart-type");
@@ -3499,7 +3515,7 @@ function bindUI() {
   $("metro-departure").addEventListener("change", updateMetroTime);
   for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).addEventListener("change", applyMapLayerVisibility);
   $("show-region-hex").addEventListener("change", async event => {
-    closePolygonPopup();
+    closeMapPopup();
     regionHexBuildRevision += 1;
     state.regionHexEnabled = event.target.checked;
     cellPopup?.remove();
@@ -3512,7 +3528,7 @@ function bindUI() {
     $("region-hex-resolution-value").value = event.target.value;
   });
   $("region-hex-resolution").addEventListener("change", async event => {
-    closePolygonPopup();
+    closeMapPopup();
     state.regionHexResolution = Number(event.target.value);
     await rebuildRegionHexGrid();
   });
@@ -3631,7 +3647,7 @@ function observeMapSize() {
   if (typeof ResizeObserver === "undefined") return;
   const observer = new ResizeObserver(() => {
     map?.resize();
-    if (polygonPopupView) sizePolygonPopup(polygonPopupView);
+    if (mapPopupView) sizeMapPopup(mapPopupView);
   });
   observer.observe($("map"));
 }

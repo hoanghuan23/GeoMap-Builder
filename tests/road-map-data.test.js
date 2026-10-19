@@ -43,6 +43,20 @@ test("tự xác định mạng đường từ cột Khu vực, kể cả dữ li
   });
 });
 
+test("road observations supplement Bản đồ Line when AI only suggests charts, without adding a polygon", () => {
+  const data = normalizeTabularRecords([...trafficRecords, ...trafficRecords.map(row => ({ ...row, "Khu vực": "An Giang" }))], analysis.columns);
+  const suggestions = prepareSuggestions({ ...analysis, suggestions: analysis.suggestions.filter(item => item.chartType !== "map_line") },
+    data.records, data.validRowRate, { mapTilerAvailable: true });
+  const road = suggestions.find(item => item.chartType === "map_line");
+  assert.ok(road.available);
+  assert.equal(road.title, "Bản đồ Line");
+  assert.equal(road.bindings.region, "Tên đường");
+  assert.equal(road.bindings.value, "Mức độ ùn tắc");
+  assert.equal(road.agg, null);
+  assert.equal(suggestions.some(item => item.chartType === "choropleth"), false);
+  assert.deepEqual(prepareSuggestions({ ...analysis, suggestions: [] }, data.records, data.validRowRate), []);
+});
+
 test("ghép từng dòng vào đúng mạng theo Khu vực, không ghép chéo tên đường trùng", () => {
   const columns = [
     { name: "Khu vực", role: "geo", geoLevel: "admin1" },

@@ -4,6 +4,8 @@ import { serializeTabularValue } from "./tabular-data.js";
 import { chartTimeValue, compareTimeValues, timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "./time-values.js";
 import { AGGREGATION_VALUES, measureAggregation, measureUnit } from "./measure-semantics.js";
 import { latLngToCell } from "h3-js";
+import { roadAreaField, roadNameField, roadValueColumns } from "./road-map-data.js";
+import { normalizeRoadText } from "./congestion-data.js";
 
 const AGGREGATIONS = new Set(AGGREGATION_VALUES);
 const TOTAL_HINT = /(tổng|total)/i;
@@ -432,8 +434,21 @@ export function prepareSuggestions(analysis, records, validRowRate, options = {}
   const latitude = analysis.columns.find(column => column.geoLevel === "point_lat" || LATITUDE_HINT.test(column.name));
   const longitude = analysis.columns.find(column => column.geoLevel === "point_lng" || LONGITUDE_HINT.test(column.name));
   let suggestions = analysis.suggestions || [];
+  const roadField = roadNameField(analysis.columns);
+  if (roadField && roadAreaField(analysis.columns) && suggestions.length && !suggestions.some(item => item.chartType === "map_line")) {
+    const values = roadValueColumns(analysis.columns, records, roadField);
+    const value = values.find(column => /muc do un tac|congestion|traffic status/.test(normalizeRoadText(column.name)))
+      || values.find(column => column.role === "measure");
+    if (value) {
+      let id = "road-map";
+      for (let suffix = 2; suggestions.some(item => item.id === id); suffix++) id = `road-map-${suffix}`;
+      suggestions = [{ id, chartType: "map_line", title: "Bản đồ Line", bindings: { region: roadField, value: value.name },
+        agg: value.role === "measure" ? measureAggregation(value) : null, confidence: .85, source: "rule",
+        reason: "Dữ liệu có khu vực, tên tuyến và chỉ số quan sát; có thể ghép mạng đường để xem phân bố và biểu đồ riêng của từng tuyến." }, ...suggestions];
+    }
+  }
   const region = analysis.columns.find(column => column.role === "geo" && ["country", "admin1", "admin2"].includes(column.geoLevel));
-  if (!latitude && !longitude && region && !suggestions.some(suggestion => suggestion.chartType === "choropleth")) {
+  if (!latitude && !longitude && !roadField && region && !suggestions.some(suggestion => suggestion.chartType === "choropleth")) {
     const groups = groupRecords(records, region.name);
     const measure = analysis.columns.find(column => column.role === "measure"
       && groups.filter(group => group.records.some(record => isFiniteValue(record?.[column.name]))).length >= 2);

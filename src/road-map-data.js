@@ -33,6 +33,15 @@ export function roadAreaField(columns = []) {
   return named?.name || columns.find(column => column.role === "geo" && column.geoLevel === "admin1")?.name || null;
 }
 
+export function roadRefField(columns = []) {
+  return columns.find(column => /^(ma duong|ma tuyen|route ref|route code|road code|ref)$/.test(normalizeRoadText(column.name)))?.name || null;
+}
+
+export function roadNameField(columns = []) {
+  return columns.find(column => ["category", "geo"].includes(column.role)
+    && /(^| )(ten duong|ten tuyen|tuyen duong|road name|route name|street name)( |$)/.test(normalizeRoadText(column.name)))?.name || null;
+}
+
 export function roadNetworkForArea(value) {
   const area = normalizedRoadArea(value);
   return ROAD_NETWORKS.find(network => normalizedRoadArea(network.label) === area
@@ -94,7 +103,7 @@ function indexRoads(roads) {
 
 export function joinRoadRecords(records, roads, { roadField, valueField, columns = [], aggregation = "mean" }) {
   if (roads?.type !== "FeatureCollection" || !Array.isArray(roads.features)) throw new Error("Mạng đường không hợp lệ.");
-  const refField = columns.find(column => /^(ma duong|ma tuyen|route ref|route code|road code|ref)$/.test(normalizeRoadText(column.name)))?.name;
+  const refField = roadRefField(columns);
   const { byName, byRef } = indexRoads(roads);
   const groups = new Map();
   for (const row of records) {

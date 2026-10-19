@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPopupChart, createPopupChartSelection, polygonDisplaySuggestions } from "../src/ai-popup-chart.js";
+import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions } from "../src/ai-popup-chart.js";
 import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 import { buildRegionHexGrid } from "../src/region-hex-grid.js";
 
@@ -23,19 +23,23 @@ const chart = (kind, overrides = {}) => buildPopupChart({ records, columns, feat
 
 test("polygon suggestions hide standalone charts while other data keeps existing choices", () => {
   const suggestions = [{ chartType: "line", available: true }, { chartType: "choropleth", available: true }, { chartType: "bar", available: true }];
-  assert.deepEqual(polygonDisplaySuggestions(suggestions).map(item => item.chartType), ["choropleth"]);
-  assert.equal(polygonDisplaySuggestions(suggestions.slice(0, 1)).length, 1);
+  assert.deepEqual(mapDisplaySuggestions(suggestions).map(item => item.chartType), ["choropleth"]);
+  assert.equal(mapDisplaySuggestions(suggestions.slice(0, 1)).length, 1);
   suggestions[1].available = false;
-  assert.equal(polygonDisplaySuggestions(suggestions).length, 3);
+  assert.equal(mapDisplaySuggestions(suggestions).length, 3);
   suggestions[1].repairable = true;
-  assert.equal(polygonDisplaySuggestions(suggestions).length, 1);
-  for (const chartType of ["point", "map_line", "hex_h3"]) {
+  assert.equal(mapDisplaySuggestions(suggestions).length, 1);
+  for (const chartType of ["point", "hex_h3"]) {
     const other = [...suggestions, { id: "other-map", chartType, available: true }];
     other[1].id = "polygon";
-    assert.equal(polygonDisplaySuggestions(other), other, "other map flows retain their existing default choices");
-    assert.equal(polygonDisplaySuggestions(other, "other-map"), other);
-    assert.equal(polygonDisplaySuggestions(other, "polygon").some(item => item.chartType === "line"), false);
+    assert.equal(mapDisplaySuggestions(other), other, "other map flows retain their existing default choices");
+    assert.equal(mapDisplaySuggestions(other, "other-map"), other);
+    assert.equal(mapDisplaySuggestions(other, "polygon").some(item => item.chartType === "line"), false);
   }
+  const roads = [{ id: "roads", chartType: "map_line", available: true }, { id: "line", chartType: "line", available: true }, { chartType: "bar", available: true }];
+  assert.deepEqual(mapDisplaySuggestions(roads).map(item => item.chartType), ["map_line"]);
+  assert.deepEqual(mapDisplaySuggestions(roads, "roads").map(item => item.chartType), ["map_line"]);
+  assert.equal(mapDisplaySuggestions(roads, "line"), roads, "standalone charts keep their own flow when selected explicitly");
 });
 
 test("popup uses only clicked region, full independent date range, zero and missing points", () => {
@@ -97,4 +101,24 @@ test("bar popup retains distinct timestamps and formats hours and minutes", () =
   assert.equal(result.config.data.length, 2);
   assert.notEqual(result.config.data[0].date, result.config.data[1].date);
   assert.equal(result.config.timeColumn.granularity, "datetime");
+});
+
+test("road popup isolates the clicked area's name and code across all observation times", () => {
+  const columns = [{ name: "Khu vực", role: "geo", geoLevel: "admin1" }, { name: "Tên đường", role: "category" },
+    { name: "Mã đường", role: "id" }, { name: "Thời điểm", role: "time" },
+    { name: "Tốc độ", role: "measure", aggDefault: "mean", unit: "km/h" }, { name: "Mức độ ùn tắc", role: "category" }];
+  const records = ["Hà Nội", "An Giang"].flatMap((area, i) => ["QL.1", "CT.01", ""].flatMap((ref, j) => ["08:00", "17:30", "22:00"].map((time, k) => ({
+    "Khu vực": area, "Tên đường": "Đường A", "Mã đường": ref, "Thời điểm": new Date(`2026-10-13T${time}:00Z`),
+    "Tốc độ": [24, 20, 38][k] + i * 100 + j * 10, "Mức độ ùn tắc": "Đông"
+  }))));
+  const feature = { properties: { "Khu vực": "HN", "Tên đường": "Đường A", "Mã đường": "QL1" } };
+  const selection = createPopupChartSelection(records, columns, "Mức độ ùn tắc", "line");
+  assert.equal(selection.measure, "Tốc độ", "categorical map coloring defaults the chart to a numeric measure");
+  for (const kind of ["line", "bar"]) {
+    const result = buildPopupChart({ records, columns, feature, regionField: "Tên đường", kind, chartType: "map_line",
+      selection: createPopupChartSelection(records, columns, "Mức độ ùn tắc", kind) });
+    assert.equal(result.message, "");
+    assert.deepEqual(result.config.data.map(row => row["Tốc độ"]), [24, 20, 38]);
+    assert.equal(result.config.timeColumn.granularity, "datetime");
+  }
 });

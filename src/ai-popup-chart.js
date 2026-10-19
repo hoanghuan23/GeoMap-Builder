@@ -1,14 +1,16 @@
 import { buildBarChartOption, buildLineChartOption, resolveAggregation } from "./ai-chart-pipeline.js";
 import { comparableFilterValue } from "./ai-data-analysis.js";
 import { filterTimeRange, timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "./time-values.js";
+import { roadAreaField, roadNetworkForArea, roadRefField } from "./road-map-data.js";
+import { normalizeRoadText } from "./congestion-data.js";
 
-export function polygonDisplaySuggestions(suggestions = [], selectedSuggestionId = null) {
+export function mapDisplaySuggestions(suggestions = [], selectedSuggestionId = null) {
   const selected = suggestions.find(item => item.id === selectedSuggestionId);
-  // Preserve existing point/road/H3 and independent-chart flows. Regional data
-  // enters the polygon flow by default; other datasets enter it on selection.
-  if (selected && selected.chartType !== "choropleth") return suggestions;
-  if (!selected && suggestions.some(item => item.available && ["point", "map_line", "hex_h3"].includes(item.chartType))) return suggestions;
-  return suggestions.some(item => item.chartType === "choropleth" && (item.available || item.repairable))
+  // Polygon and road maps own their popup charts. Point/H3 and standalone
+  // charts retain their existing choices and initial selection.
+  if (selected && !["choropleth", "map_line"].includes(selected.chartType)) return suggestions;
+  if (!selected && suggestions.some(item => item.available && ["point", "hex_h3"].includes(item.chartType))) return suggestions;
+  return suggestions.some(item => ["choropleth", "map_line"].includes(item.chartType) && (item.available || item.repairable))
     ? suggestions.filter(item => !["bar", "line"].includes(item.chartType)) : suggestions;
 }
 
@@ -35,16 +37,30 @@ export function popupRegionValue(feature, regionField) {
   return feature?.properties?.__location ?? feature?.properties?.[regionField];
 }
 
-export function popupRegionRecords(records, feature, regionField) {
-  const value = popupRegionValue(feature, regionField);
-  return regionKey(value) ? records.filter(record => regionKey(record[regionField]) === regionKey(value)) : [];
+function roadIdentity(properties, regionField, columns) {
+  const area = properties?.[roadAreaField(columns)];
+  return JSON.stringify([
+    roadNetworkForArea(area) || normalizeRoadText(area),
+    normalizeRoadText(properties?.[regionField]),
+    normalizeRoadText(properties?.[roadRefField(columns)]).replace(/ /g, "")
+  ]);
 }
 
-export function buildPopupChart({ records, columns, feature, regionField, kind, selection }) {
+export function popupFeaturesMatch(feature, other, regionField, { chartType = "choropleth", columns = [] } = {}) {
+  if (chartType === "map_line") return roadIdentity(feature?.properties, regionField, columns) === roadIdentity(other?.properties, regionField, columns);
+  return regionKey(popupRegionValue(feature, regionField)) === regionKey(popupRegionValue(other, regionField));
+}
+
+export function popupRegionRecords(records, feature, regionField, options = {}) {
+  const value = popupRegionValue(feature, regionField);
+  return regionKey(value) ? records.filter(record => popupFeaturesMatch({ properties: record }, feature, regionField, options)) : [];
+}
+
+export function buildPopupChart({ records, columns, feature, regionField, kind, selection, chartType = "choropleth" }) {
   const empty = message => ({ config: null, message });
   const region = popupRegionValue(feature, regionField);
-  let selected = popupRegionRecords(records, feature, regionField);
-  if (!selected.length) return empty("Không có dữ liệu cho vùng vừa chọn.");
+  let selected = popupRegionRecords(records, feature, regionField, { chartType, columns });
+  if (!selected.length) return empty(chartType === "map_line" ? "Không có dữ liệu cho tuyến vừa chọn." : "Không có dữ liệu cho vùng vừa chọn.");
   const time = popupTimeColumn(columns);
   if (kind === "line" && !time) return empty("Biểu đồ đường cần cột thời gian.");
   if (time) {
@@ -59,7 +75,7 @@ export function buildPopupChart({ records, columns, feature, regionField, kind, 
   if (kind === "bar") choices.add("count");
   if (!metrics?.length || metrics.some(metric => !choices.has(metric))) return empty("Chưa có chỉ số hợp lệ để vẽ biểu đồ.");
   const x = time?.name || regionField;
-  const suggestion = { id: "polygon-popup", chartType: kind, title: `Dữ liệu của ${region}`, reason: "", agg: null, bindings: { x, y: kind === "line" ? metrics : metrics[0] } };
+  const suggestion = { id: "map-popup", chartType: kind, title: `Dữ liệu của ${region}`, reason: "", agg: null, bindings: { x, y: kind === "line" ? metrics : metrics[0] } };
   // Multiple observations need an explicit, meaningful aggregation. Do not turn
   // an unknown aggregation into a silent average or a missing chart point.
   for (const metric of metrics) {
