@@ -69,7 +69,7 @@ const state = {
   roadDisplayStyle: { ...DEFAULT_ROAD_DISPLAY_STYLE }, polygonPalette: null,
   metroData: null, metroTime: null, metroPopup: null, lineData: EMPTY_FEATURE_COLLECTION,
   dataOrigin: null,
-  uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0,
+  uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0, primaryUploadId: null,
   metroParts: {}, separateMetroActive: false,
   aiDataset: null, pendingSheet: null,
   mapStyle: "liberty"
@@ -701,6 +701,32 @@ function pointFeatureCollection(data) {
   return { type: "FeatureCollection", features };
 }
 
+function registerPrimaryUpload(file, { role = "primary", data = null, detail = "" } = {}) {
+  const previous = state.uploadedFiles.find(item => item.id === state.primaryUploadId);
+  if (previous?.fileKey) state.uploadedFileKeys.delete(previous.fileKey);
+  state.uploadedFiles = state.uploadedFiles.filter(item => item.id !== state.primaryUploadId);
+  const id = `primary-${++state.uploadLayerSequence}`;
+  const fileKey = uploadFileKey(file);
+  state.primaryUploadId = id;
+  state.uploadedFileKeys.add(fileKey);
+  state.uploadedFiles.unshift({ id, name: file.name, fileKey, role, data, detail });
+}
+
+function setCurrentFileNote(note) {
+  const file = state.uploadedFiles.find(item => item.id === state.primaryUploadId);
+  if (file) {
+    file.detail = note;
+    renderUploadedFiles();
+  } else $("file-note").textContent = note;
+}
+
+function showCurrentFile(name, note) {
+  $("file-name").textContent = name;
+  $("remove-current-file").hidden = state.uploadedFiles.length > 0;
+  $("selected-file").hidden = false;
+  setCurrentFileNote(note);
+}
+
 function renderUploadedFiles() {
   const list = $("uploaded-layer-list");
   if (!list) return;
@@ -710,6 +736,7 @@ function renderUploadedFiles() {
     const detail = document.createElement("em");
     const remove = document.createElement("button");
     name.textContent = file.name;
+    name.title = file.name;
     detail.textContent = file.detail;
     remove.type = "button";
     remove.className = "remove-uploaded-layer";
@@ -722,7 +749,7 @@ function renderUploadedFiles() {
   }));
   if (!state.uploadedFiles.length) return;
   $("remove-current-file").hidden = true;
-  $("file-name").textContent = `${state.uploadedFiles.length} lớp dữ liệu`;
+  $("file-name").textContent = `${state.uploadedFiles.length} tệp dữ liệu`;
   $("file-note").textContent = "Các file được xếp chồng theo từng lớp";
   $("selected-file").hidden = false;
 }
@@ -769,6 +796,7 @@ function clearUploadLayers() {
   }
   state.uploadLayers = [];
   state.uploadedFiles = [];
+  state.primaryUploadId = null;
   state.uploadedFileKeys.clear();
   state.uploadLayerSequence = 0;
   state.metroParts = {};
@@ -1106,7 +1134,7 @@ async function replaceMetroData(data, name) {
   for (const id of ["show-map-layers", "show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).checked = true;
   $("show-map-layers-status").textContent = "Đang bật";
   renderCompatibleMapTypes(state.boundary); applyStyle();
-  $("file-note").textContent = `${data.hexagons.features.length} ô · ${data.stations.features.length} ga · Dữ liệu mô phỏng`;
+  setCurrentFileNote(`${data.hexagons.features.length} ô · ${data.stations.features.length} ga · Dữ liệu mô phỏng`);
   setStatus("Đã hiển thị vùng dữ liệu, đường bao, các ga và tuyến Metro.", true);
 }
 
@@ -1293,7 +1321,7 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
   updateModelSections();
 }
 
-function clearUploadedData() {
+function clearUploadedData({ preserveUploads = false } = {}) {
   closeMapPopup();
   regionHexBuildRevision += 1;
   state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
@@ -1302,7 +1330,8 @@ function clearUploadedData() {
   cancelAiBoundaryLoad();
   weatherLoadRevision += 1;
   clearMetroData();
-  clearUploadLayers();
+  if (!preserveUploads) clearUploadLayers();
+  state.primaryUploadId = null;
   state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
   state.pointData = { type: "FeatureCollection", features: [] };
   state.mapType = null; state.dataProfile = null; state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; state.baselineCount = null; state.page = 1; state.dataOrigin = null; state.aiDataset = null; state.pendingSheet = null;
@@ -2454,7 +2483,7 @@ function refreshPointView(suggestion, { rebuildControls = false } = {}) {
   if (rebuildControls) populatePointControls(suggestion);
   else syncPointControls();
   updateModelSections(); applyStyle();
-  $("file-note").textContent = `${view.stats.visibleCount.toLocaleString("vi-VN")}/${view.stats.totalCount.toLocaleString("vi-VN")} điểm · ${Math.round(view.stats.coordinateRate * 100)}% tọa độ hợp lệ`;
+  setCurrentFileNote(`${view.stats.visibleCount.toLocaleString("vi-VN")}/${view.stats.totalCount.toLocaleString("vi-VN")} điểm · ${Math.round(view.stats.coordinateRate * 100)}% tọa độ hợp lệ`);
   refreshMapPopup();
   setStatus(view.stats.visibleCount ? `Đang hiển thị ${view.stats.visibleCount.toLocaleString("vi-VN")} điểm dữ liệu.` : "Không có điểm phù hợp với bộ lọc. Hãy chọn nhóm hoặc thời gian khác.", view.stats.visibleCount > 0);
 }
@@ -2510,7 +2539,7 @@ function refreshAiRoadMap({ fit = false } = {}) {
   const stats = data.stats;
   const areaLabels = dataset.roadArea.networkIds.map(id => ROAD_NETWORKS.find(network => network.id === id)?.label || id);
   const skipped = dataset.roadArea.unknownAreas.length ? ` Bỏ qua khu vực chưa hỗ trợ: ${dataset.roadArea.unknownAreas.join(", ")}.` : "";
-  $("file-note").textContent = `${stats.matchedRows}/${stats.totalRows} bản ghi khớp · ${stats.segmentCount.toLocaleString("vi-VN")} đoạn đường`;
+  setCurrentFileNote(`${stats.matchedRows}/${stats.totalRows} bản ghi khớp · ${stats.segmentCount.toLocaleString("vi-VN")} đoạn đường`);
   setStatus(data.features.length ? `Đang hiển thị Bản đồ Line tại ${areaLabels.join(", ")}.${skipped}`
     : `Không có tuyến khớp. Hãy kiểm tra Khu vực, tên/mã đường hoặc bộ lọc đã chọn.${skipped}`, data.features.length > 0);
 }
@@ -2525,7 +2554,7 @@ function refreshAiCoordinateLine({ fit = false } = {}) {
   map.getSource("line-data")?.setData(data);
   updateModelSections(); applyStyle(); refreshMapPopup();
   if (fit && data.features.length) fitGeoJSON(data);
-  $("file-note").textContent = `${data.features.length} tuyến · ${Math.round(data.stats.coordinateRate * 100)}% tọa độ hợp lệ`;
+  setCurrentFileNote(`${data.features.length} tuyến · ${Math.round(data.stats.coordinateRate * 100)}% tọa độ hợp lệ`);
   setStatus(data.features.length ? "Đang hiển thị các chuỗi tọa độ trên Bản đồ Line."
     : "Chưa có chuỗi gồm ít nhất hai tọa độ khác nhau. Kiểm tra nhóm tuyến, cột thứ tự hoặc dữ liệu tọa độ.", data.features.length > 0);
 }
@@ -2540,7 +2569,7 @@ async function loadAiRoadNetwork({ fit = false } = {}) {
   map.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
   closeMapPopup();
   updateModelSections(); applyStyle();
-  if (!area.field) { setStatus("Cần cột Khu vực để tự động xác định mạng đường tỉnh/thành phố."); return true; }
+  if (!area.field) { setStatus("Cần cột Khu vực để tự động xác định mạng đường thuộc tỉnh/thành phố nào."); return true; }
   if (!area.networkIds.length) {
     const values = area.unknownAreas.length ? `: ${area.unknownAreas.join(", ")}` : "";
     setStatus(`Không nhận diện được mạng đường từ cột ${area.field}${values}.`);
@@ -2641,7 +2670,7 @@ async function refreshAiH3({ fit = false } = {}) {
   $("cell-count").textContent = result.stats.cellCount.toLocaleString("vi-VN"); $("cell-label").textContent = `Tổng số cell (res ${state.resolution})`;
   updateModelSections(); syncPolygonPaletteControls(); applyStyle(); updateDashboard();
   if (fit) fitGeoJSON(state.pointData);
-  $("file-note").textContent = `${result.stats.cellCount} ô H3 · ${Math.round(result.stats.coordinateRate * 100)}% tọa độ hợp lệ`;
+  setCurrentFileNote(`${result.stats.cellCount} ô H3 · ${Math.round(result.stats.coordinateRate * 100)}% tọa độ hợp lệ`);
 }
 
 async function activateAiH3(suggestion) {
@@ -2703,7 +2732,7 @@ async function filteredAiBoundary({ fit = false } = {}) {
     syncPolygonPaletteControls(); applyStyle();
     if (fit && data.features.length) fitBoundary();
   }
-  $("file-note").textContent = `${data.features.length} khu vực · ${recommendation.metricField} · ${recommendation.source === "ai" ? "GPT-5.6 Luna đề xuất" : "quy tắc dự phòng"}`;
+  setCurrentFileNote(`${data.features.length} khu vực · ${recommendation.metricField} · ${recommendation.source === "ai" ? "GPT-5.6 Luna đề xuất" : "quy tắc dự phòng"}`);
   refreshMapPopup();
 }
 
@@ -2781,7 +2810,7 @@ async function activateAiChoropleth(suggestion) {
 async function replaceAiMapData(records, recommendation, name) {
   const profile = { rowCount: records.length, columns: recommendation.numericFields.map(field => ({ name: field, inferredType: "number" })) };
   const pipeline = await requestAiDataAnalysis(records, { profile, source: { fileName: name } });
-  replaceAiPipelineData({ ...pipeline, rawRecords: records }, name);
+  return replaceAiPipelineData({ ...pipeline, rawRecords: records }, name);
 }
 
 async function replaceAiPipelineData(pipeline, name) {
@@ -2808,9 +2837,8 @@ async function replaceAiPipelineData(pipeline, name) {
     recommendation: null,
     boundaries: null
   };
-  $("file-name").textContent = name;
-  $("file-note").textContent = `${pipeline.records.length.toLocaleString("vi-VN")} bản ghi · ${pipeline.analysis.source === "ai" ? "AI đã phân tích" : "đang dùng quy tắc dự phòng"}`;
-  $("remove-current-file").hidden = false; $("selected-file").hidden = false; $("chart-canvas").hidden = true;
+  showCurrentFile(name, `${pipeline.records.length.toLocaleString("vi-VN")} bản ghi · ${pipeline.analysis.source === "ai" ? "AI đã phân tích" : "đang dùng quy tắc dự phòng"}`);
+  $("chart-canvas").hidden = true;
   document.querySelector(".map-panel").classList.remove("chart-mode"); setDataPanelVisible(false); showChartStyleControls(false);
   renderAiSuggestionGrid();
   let selected = false;
@@ -2869,7 +2897,7 @@ function replaceChartData(analysis, name) {
     button.title = `${option.label} · Recharts`; renderChartIcon(icon, option.icon); button.append(icon, option.label); return button;
   }));
   $("map-type-summary").textContent = `Tìm thấy ${analysis.rowCount} bản ghi tại ${analysis.sourcePath} · ${analysis.numericFields.length} trường số · ${options.length} kiểu biểu đồ phù hợp`;
-  $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu biểu đồ đã tải · đang sử dụng"; $("remove-current-file").hidden = false; $("selected-file").hidden = false;
+  showCurrentFile(name, "Dữ liệu biểu đồ đã tải · đang sử dụng");
   const canvas = $("chart-canvas"); canvas.hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
   setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(options[0].id);
 }
@@ -2893,7 +2921,7 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   state.lineData = { type: "FeatureCollection", features: features.filter(feature => ["LineString", "MultiLineString"].includes(feature.geometry?.type)) };
   map.getSource("line-data")?.setData(state.lineData);
   map.getSource("polygon-data")?.setData(data); updateModelSections();
-  map.getSource("vietnam-boundary")?.setData(data); $("file-name").textContent = name; $("file-note").textContent = "Dữ liệu đã tải · đang sử dụng"; $("remove-current-file").hidden = false; $("selected-file").hidden = false; state.baselineCount = null;
+  map.getSource("vietnam-boundary")?.setData(data); showCurrentFile(name, "Dữ liệu đã tải · đang sử dụng"); state.baselineCount = null;
   if (preservePolygons) {
     state.h3Data = EMPTY_FEATURE_COLLECTION; map.getSource("h3-grid")?.setData(state.h3Data); updateDashboard(); fitBoundary();
   } else await rebuildGrid({ fit: true });
@@ -2979,11 +3007,13 @@ function showSheetSelection(file, sheetNames, fileKey = null) {
 
 async function applyReadResult(result, file) {
   if (result.kind === "sheet-selection") return showSheetSelection(file, result.sheetNames);
+  registerPrimaryUpload(file, { data: result.data });
   if (result.kind === "metro") await replaceMetroData(result.data, file.name);
   else if (result.kind === "ai-pipeline") await replaceAiPipelineData(result.pipeline, file.name);
   else if (result.kind === "ai-map") await replaceAiMapData(result.records, result.recommendation, file.name);
   else if (result.kind === "chart") replaceChartData(result.analysis, file.name);
   else await replaceBoundary(result.data, file.name, result.profile);
+  renderUploadedFiles();
 }
 
 async function processSpatialFile(file) {
@@ -3075,19 +3105,16 @@ async function removeUploadedFile(id) {
   }
   state.uploadedFiles = state.uploadedFiles.filter(item => item.id !== id);
   if (file.fileKey) state.uploadedFileKeys.delete(file.fileKey);
+  if (id === state.primaryUploadId || file.role === "base") {
+    clearUploadedData({ preserveUploads: true });
+    refreshClippedUploadLayers();
+    applyMapLayerVisibility();
+    updateDashboard();
+  }
   if (removedMetroPart && state.separateMetroActive) {
     const canRemainActive = state.metroParts.hexagons && state.metroParts.travel_times;
     if (canRemainActive) await activateSeparateMetroData();
     else deactivateSeparateMetroData();
-  }
-  if (file.role === "base") {
-    state.boundary = null; state.sourceBoundary = null; state.mapType = null; state.dataProfile = null;
-    map?.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
-    map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
-    map?.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION);
-    refreshClippedUploadLayers();
-    updateModelSections();
-    applyMapLayerVisibility();
   }
   renderUploadedFiles();
   if (!state.uploadedFiles.length) $("selected-file").hidden = true;
@@ -3141,33 +3168,11 @@ async function processSpatialFiles(files) {
     return;
   }
 
-  const metro = valid.find(item => item.result.kind === "metro");
-  if (metro) {
-    await replaceMetroData(metro.result.data, metro.file.name);
-    if (valid.length === 1) {
-      if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
-      return;
-    }
-  }
   const spatial = valid.filter(item => !item.result.kind && item.result.data);
   const metroParts = valid.filter(item => item.result.kind === "metro-part");
-  const aiMaps = valid.filter(item => item.result.kind === "ai-map");
-  const aiPipelines = valid.filter(item => item.result.kind === "ai-pipeline");
-  const charts = valid.filter(item => item.result.kind === "chart");
-  if (!spatial.length && !metroParts.length && aiPipelines.length) {
-    const item = aiPipelines[0];
-    await replaceAiPipelineData(item.result.pipeline, item.file.name);
-    if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
-    return;
-  }
-  if (!spatial.length && !metroParts.length && aiMaps.length) {
-    const item = aiMaps[0];
-    await replaceAiMapData(item.result.records, item.result.recommendation, item.file.name);
-    if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
-    return;
-  }
-  if (!spatial.length && !metroParts.length && charts.length) {
-    replaceChartData(charts[0].result.analysis, charts[0].file.name);
+  const primary = valid.find(item => ["metro", "ai-pipeline", "ai-map", "chart"].includes(item.result.kind));
+  if (primary) await applyReadResult(primary.result, primary.file);
+  if (primary && !spatial.length && !metroParts.length) {
     if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
     return;
   }
@@ -3176,9 +3181,9 @@ async function processSpatialFiles(files) {
   // Hexagon không bao giờ tự trở thành mặt nạ của chính nó.
   const base = !state.boundary && spatial.find(item => geometryKinds(item.result.data).includes("area") && !isHexagonGeoJSON(item.result.data, item.file.name) && !transportGeometryKind(item.file.name, item.result.data));
   if (base) {
+    registerPrimaryUpload(base.file, { role: "base", data: base.result.data });
     await replaceBoundary(base.result.data, base.file.name, base.result.profile, { preservePolygons: true });
-    const id = `base-${++state.uploadLayerSequence}`;
-    state.uploadedFiles.push({ id, name: base.file.name, fileKey: base.key, data: base.result.data, role: "base", detail: `${featureCount(base.result.data).toLocaleString("vi-VN")} vùng nền` });
+    setCurrentFileNote(`${featureCount(base.result.data).toLocaleString("vi-VN")} vùng nền`);
   }
 
   const overlays = spatial.filter(item => item !== base);
@@ -3200,7 +3205,7 @@ async function processSpatialFiles(files) {
   refreshClippedUploadLayers();
   const metroActivated = await activateSeparateMetroData();
   renderUploadedFiles();
-  const added = overlays.length + metroParts.length + (base ? 1 : 0);
+  const added = overlays.length + metroParts.length + (base ? 1 : 0) + (primary ? 1 : 0);
   const suffix = [
     failures.length ? `${failures.length} file lỗi` : "",
     duplicates.length ? `${duplicates.length} file trùng bị bỏ qua` : ""
@@ -3603,7 +3608,7 @@ function bindUI() {
   $("clear-provinces").addEventListener("click", () => { document.querySelectorAll('#province-filter-options input:checked').forEach(input => input.checked = false); updateProvinceFilterLabel([]); });
   $("apply-provinces").addEventListener("click", async () => {
     const names = selectedProvinceNames(); const toggle = $("province-filter-toggle"); state.boundary = boundaryForProvinces(state.sourceBoundary, names); state.baselineCount = null;
-    map.getSource("vietnam-boundary")?.setData(state.boundary); $("file-note").textContent = names.length ? `Đang lọc: ${names.map(formatProvinceName).join(", ")}` : "Dữ liệu đã tải · đang sử dụng";
+    map.getSource("vietnam-boundary")?.setData(state.boundary); setCurrentFileNote(names.length ? `Đang lọc: ${names.map(formatProvinceName).join(", ")}` : "Dữ liệu đã tải · đang sử dụng");
     map.getSource("polygon-data")?.setData(state.boundary);
     $("province-filter-menu").hidden = true; toggle.setAttribute("aria-expanded", "false"); toggle.disabled = true;
     try { await rebuildGrid({ fit: true }); refreshClippedUploadLayers(); } finally { toggle.disabled = false; }

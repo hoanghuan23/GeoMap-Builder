@@ -145,15 +145,17 @@
     </aside>
     <section class="content-area table-hidden">
       <div class="map-panel"><div id="map"></div><div id="chart-canvas" class="chart-canvas" hidden></div><div id="status" class="status-pill" hidden></div>
-        <div id="metro-legend" class="metro-legend" hidden aria-live="polite"></div>
-        <div id="transport-legend" class="transport-legend" hidden aria-live="polite"></div>
-        <div id="point-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ điểm" aria-live="polite"></div>
-        <div id="ai-line-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ mạng lưới" aria-live="polite"></div>
-        <div id="weather-legend" class="weather-legend" hidden aria-live="polite">
-          <strong id="weather-legend-title">Nhiệt độ không khí (°C)</strong>
-          <div id="weather-legend-scale" class="weather-legend-scale"></div>
-          <div id="weather-legend-labels" class="weather-legend-labels"><span>10</span><span>20</span><span>25</span><span>30</span><span>38</span></div>
-          <small id="weather-legend-note"></small>
+        <div class="map-legends" role="group" aria-label="Chú giải bản đồ">
+          <div id="metro-legend" class="metro-legend" hidden aria-live="polite"></div>
+          <div id="ai-line-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ mạng lưới" aria-live="polite"></div>
+          <div id="point-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ điểm" aria-live="polite"></div>
+          <div id="transport-legend" class="transport-legend" hidden aria-live="polite"></div>
+          <div id="weather-legend" class="weather-legend" hidden aria-live="polite">
+            <strong id="weather-legend-title">Nhiệt độ không khí (°C)</strong>
+            <div id="weather-legend-scale" class="weather-legend-scale"></div>
+            <div id="weather-legend-labels" class="weather-legend-labels"><span>10</span><span>20</span><span>25</span><span>30</span><span>38</span></div>
+            <small id="weather-legend-note"></small>
+          </div>
         </div>
         <div class="map-query-panel">
         <div id="map-search" class="map-search">

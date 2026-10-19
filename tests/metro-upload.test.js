@@ -12,19 +12,29 @@ import { PolygonRenderer } from "../src/renderers/polygon-renderer.js";
 import * as congestion from "../src/congestion-data.js";
 import * as transport from "../src/transport-style.js";
 import * as layerOrder from "../src/layer-order.js";
+import * as pipeline from "../src/ai-chart-pipeline.js";
+import * as popupChart from "../src/ai-popup-chart.js";
+import * as coordinates from "../src/coordinate-data.js";
+import * as roadMap from "../src/road-map-data.js";
+import * as timeValues from "../src/time-values.js";
+import { AI_CHART_REGISTRY } from "../src/ai-chart-contract.js";
+import { displayFilterValue, comparableFilterValue } from "../src/ai-data-analysis.js";
+import { parseSpreadsheetFile } from "../src/tabular-worker-client.js";
 import { metroFixture } from "./fixtures/metro-fixture.js";
+import { createRoadTrafficWorkbook, trafficAiAnalysis } from "./fixtures/road-traffic-fixture.js";
 
 // Exercise the actual upload and UI handlers with a MapLibre/DOM adapter.
 function createHarness() {
   const elements = new Map();
   const element = () => ({
-    checked: true, hidden: false, value: "", textContent: "", style: {}, dataset: {}, children: [],
+    checked: true, hidden: false, value: "", textContent: "", style: { setProperty() {} }, dataset: {}, children: [],
     classList: { add() {}, remove() {}, toggle() {} },
     replaceChildren(...children) { this.children = children; },
     append(...children) { this.children.push(...children); },
     setAttribute() {}, addEventListener() {}
   });
   const get = id => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
+  const descendants = node => [node, ...node.children.flatMap(descendants)];
   get("fixed-color").value = "#6c5ce7"; get("opacity").value = ".72";
   get("border-color").value = "#ffffff"; get("line-width").value = ".5";
   const sources = new Map(); const layers = new Map();
@@ -42,14 +52,23 @@ function createHarness() {
   };
   const context = vm.createContext({
     ...metro, ...capabilities, ...polygonStyle, ...pointStyle, ...geojsonLayers, ...congestion, ...transport, ...layerOrder, PointRenderer, PolygonRenderer,
+    ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue,
+    requestAiDataAnalysis: async records => ({ analysis: { ...trafficAiAnalysis, source: "ai" }, records, validRowRate: 1 }),
+    roadNetworkUrl: () => "/roads/hanoi_roads.json",
+    fetch: async () => ({ ok: true, json: async () => ({ type: "FeatureCollection", features: [{
+      type: "Feature", properties: { name: "Đường Lĩnh Nam" },
+      geometry: { type: "LineString", coordinates: [[105.8, 21], [105.81, 21.01]] }
+    }] }) }),
     CONFIG: { DEFAULT_RESOLUTION: 5, MAX_RENDER_CELLS: 120000 },
     DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     mergeBarConfig: () => ({}), mergePieConfig: () => ({}),
     clearDataMappingPanel() {}, clearBarStylePanel() {}, clearPieStylePanel() {}, renderMapIcon() {}, renderChartIcon() {},
-    humanizeField: field => field,
+    humanizeField: field => field, keepSelectOpenAfterMouseClick: control => control,
     geoJSONToCells() { throw new Error("Metro polygons must not be regenerated as H3"); },
     geoJSONToH3FeatureCollection: () => ({ type: "FeatureCollection", features: [] }),
-    document: { getElementById: get, createElement: element, querySelector: () => element(), querySelectorAll: () => [] },
+    document: { getElementById: get, createElement: element, querySelector: () => element(),
+      querySelectorAll: selector => selector === "#ai-filter-controls .ai-generated-filter"
+        ? descendants(get("ai-filter-controls")).filter(node => node.className === "ai-generated-filter") : [] },
     maplibregl: {
       LngLatBounds: class { extend() { return this; } },
       Popup: class {
@@ -218,6 +237,81 @@ test("skips a file uploaded more than once and allows it again after removal", a
   await vm.runInContext("processSpatialFiles([file])", context);
   assert.equal(vm.runInContext("state.uploadedFiles.length", context), 1);
   assert.equal(vm.runInContext("state.uploadLayers.length", context), 1);
+});
+
+function trafficUploadFiles() {
+  const workbook = createRoadTrafficWorkbook();
+  return {
+    roadsFile: { name: "un_tac.xlsx", size: workbook.length, lastModified: 1,
+      arrayBuffer: async () => workbook.buffer.slice(workbook.byteOffset, workbook.byteOffset + workbook.byteLength) },
+    stopsFile: { name: "dulieu_diem_phuongtien.geojson", lastModified: 2, text: async () => JSON.stringify({
+      type: "FeatureCollection", features: ["bus_stop", "ferry_terminal"].map((fclass, index) => ({
+        type: "Feature", properties: { name: fclass, fclass },
+        geometry: { type: "Point", coordinates: [105.8 + index * .01, 21] }
+      }))
+    }) }
+  };
+}
+
+test("Excel đường và các điểm giao thông cùng hiện trong input khi tải nối tiếp hoặc cùng lúc", async () => {
+  for (const together of [false, true]) {
+    const { context, get, sources } = createHarness();
+    Object.assign(context, trafficUploadFiles(), { parseSpreadsheetFile });
+    if (together) await vm.runInContext("processSpatialFiles([roadsFile, stopsFile])", context);
+    else {
+      await vm.runInContext("processSpatialFiles([roadsFile])", context);
+      await vm.runInContext("processSpatialFiles([stopsFile])", context);
+    }
+    const roadData = sources.get("line-data").data;
+    assert.ok(roadData.features.length > 0);
+    assert.equal(get("file-name").textContent, "2 tệp dữ liệu");
+    assert.deepEqual(get("uploaded-layer-list").children.map(item => item.children[0].textContent),
+      [context.roadsFile.name, context.stopsFile.name]);
+    assert.match(get("uploaded-layer-list").children[0].children[1].textContent, /bản ghi khớp.*đoạn đường/);
+    assert.equal(get("uploaded-layer-list").children[1].children[1].textContent, "2 đối tượng");
+    assert.equal(get("selected-file").hidden, false);
+    assert.equal(get("remove-current-file").hidden, true);
+    assert.equal(get("ai-line-legend").hidden, false);
+    assert.equal(get("transport-legend").hidden, false);
+
+    await vm.runInContext("processSpatialFiles([roadsFile, stopsFile])", context);
+    assert.equal(vm.runInContext("state.uploadedFiles.length", context), 2, "tệp gốc cũng được kiểm tra trùng");
+    await vm.runInContext("filteredAiBoundary()", context);
+    assert.equal(get("file-name").textContent, "2 tệp dữ liệu", "lọc dữ liệu không ghi đè tiêu đề input");
+    assert.equal(get("uploaded-layer-list").children.length, 2);
+
+    await vm.runInContext("removeUploadedFile(state.uploadLayers[0].id)", context);
+    assert.equal(get("uploaded-layer-list").children.length, 1);
+    assert.equal(get("uploaded-layer-list").children[0].children[0].textContent, context.roadsFile.name);
+    assert.ok(sources.get("line-data").data.features.length > 0);
+    assert.equal(get("ai-line-legend").hidden, false);
+    assert.equal(get("transport-legend").hidden, true);
+  }
+});
+
+test("xóa tệp đường giữ lớp điểm và có thể tải lại tệp đường", async () => {
+  const { context, get, sources } = createHarness();
+  Object.assign(context, trafficUploadFiles(), { parseSpreadsheetFile });
+  await vm.runInContext("processSpatialFiles([roadsFile, stopsFile])", context);
+  const stopsSource = vm.runInContext("state.uploadLayers[0].sourceId", context);
+  const stopsData = sources.get(stopsSource).data;
+  await vm.runInContext("removeUploadedFile(state.primaryUploadId)", context);
+  assert.equal(sources.get(stopsSource).data, stopsData);
+  assert.equal(sources.get("line-data").data.features.length, 0);
+  assert.equal(get("uploaded-layer-list").children.length, 1);
+  assert.equal(get("uploaded-layer-list").children[0].children[0].textContent, context.stopsFile.name);
+  assert.equal(get("ai-line-legend").hidden, true);
+  assert.equal(get("transport-legend").hidden, false);
+
+  await vm.runInContext("processSpatialFiles([roadsFile])", context);
+  assert.equal(get("uploaded-layer-list").children.length, 2);
+  assert.ok(sources.get("line-data").data.features.length > 0);
+  assert.equal(sources.get(stopsSource).data, stopsData);
+  vm.runInContext("deleteData()", context);
+  assert.equal(vm.runInContext("state.uploadedFileKeys.size", context), 0);
+  assert.equal(get("selected-file").hidden, true);
+  assert.equal(get("ai-line-legend").hidden, true);
+  assert.equal(get("transport-legend").hidden, true);
 });
 
 test("recognizes an Excel travel-time table as a Metro part", async () => {
