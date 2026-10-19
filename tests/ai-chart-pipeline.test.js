@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBarChartOption, buildLineChartOption, defaultTimeFilter, evaluateSuggestion, prepareSuggestions, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
+import { buildBarChartOption, buildLineChartOption, defaultBarMetrics, defaultTimeFilter, evaluateSuggestion, prepareSuggestions, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
 import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
 import { normalizeTabularRecords } from "../src/tabular-data.js";
 import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
@@ -19,6 +19,111 @@ test("bar aggregate theo nhóm và gộp phần dư thành Khác", () => {
   assert.equal(option.config.data.length, 4);
   assert.equal(option.config.data.at(-1).province, "Khác");
   assert.equal(option.config.data.at(-1).rain, 78);
+});
+
+test("bar ghép mặc định hai chỉ số và gộp từng chỉ số đúng phép tính", () => {
+  const metricColumns = [
+    ...columns,
+    { name: "temperature", role: "measure", aggDefault: "mean", labelVi: "Nhiệt độ", unit: "°C" },
+    { name: "humidity", role: "measure", aggDefault: "mean", labelVi: "Độ ẩm", unit: "%" }
+  ];
+  const suggestion = { id: "bar", title: "Thời tiết", reason: "", bindings: { x: "province", y: "rain" }, agg: "sum" };
+  assert.deepEqual(defaultBarMetrics(suggestion, metricColumns, "grouped"), ["rain"]);
+  const option = buildBarChartOption(suggestion, [
+    { province: "A", rain: 2, temperature: 20, humidity: 70 },
+    { province: "A", rain: 3, temperature: 30, humidity: 80 },
+    { province: "B", rain: 4, temperature: 25, humidity: 75 }
+  ], metricColumns, { variant: "grouped", metrics: ["rain", "temperature"] });
+  assert.equal(option.config.variant, "grouped");
+  assert.equal(option.icon, "groupedBar");
+  assert.equal(option.config.showLegend, true);
+  assert.deepEqual(option.config.series.map(item => item.key), ["rain", "temperature"]);
+  assert.deepEqual(option.config.data.find(row => row.province === "A"), { province: "A", rain: 5, temperature: 25 });
+});
+
+test("bar cột đơn ưu tiên SUM hoặc AVG người dùng chọn so với cấu hình AI và chỉ số", () => {
+  const metricColumns = [...columns, { name: "temperature", role: "measure", aggDefault: "mean" }];
+  const suggestion = { id: "bar", title: "Nhiệt độ", bindings: { x: "province", y: "temperature" }, agg: "mean" };
+  const records = [{ province: "A", temperature: 20 }, { province: "A", temperature: 30 }];
+  for (const [aggregation, expected] of [["sum", 50], ["mean", 25]]) {
+    const option = buildBarChartOption(suggestion, records, metricColumns, { aggregation });
+    assert.equal(option.config.aggregation, aggregation);
+    assert.equal(option.config.data[0].temperature, expected);
+  }
+  const sumSuggestion = { ...suggestion, agg: "sum" };
+  assert.equal(buildBarChartOption(sumSuggestion, records, metricColumns, { aggregation: "mean" }).config.data[0].temperature, 25);
+  assert.equal(suggestion.agg, "mean");
+});
+
+test("bar ghép áp dụng phép tính đã chọn cho mọi chỉ số, tính Khác từ dữ liệu gốc và giữ phép đếm", () => {
+  const metricColumns = [...columns, { name: "temperature", role: "measure", aggDefault: "mean" }];
+  const suggestion = { id: "bar", title: "Thời tiết", bindings: { x: "province", y: "rain" }, agg: "sum" };
+  const records = [
+    { province: "A", rain: 100, temperature: 10 },
+    { province: "A", rain: 200, temperature: 30 },
+    { province: "B", rain: 20, temperature: 50 },
+    { province: "C", rain: 10, temperature: 70 },
+    { province: "C", rain: 20, temperature: null }
+  ];
+  const options = { variant: "grouped", metrics: ["rain", "temperature", "count"], top: 1 };
+  const summed = buildBarChartOption(suggestion, records, metricColumns, { ...options, aggregation: "sum" });
+  assert.deepEqual(summed.config.data, [
+    { province: "A", rain: 300, temperature: 40, __count: 2 },
+    { province: "Khác", rain: 50, temperature: 120, __count: 3 }
+  ]);
+  const averaged = buildBarChartOption(suggestion, records, metricColumns, { ...options, aggregation: "mean" });
+  assert.deepEqual(averaged.config.data, [
+    { province: "A", rain: 150, temperature: 20, __count: 2 },
+    { province: "Khác", rain: 50 / 3, temperature: 60, __count: 3 }
+  ]);
+});
+
+test("bảng doanh thu T01-T12 được bổ sung bar theo thời gian và giữ đúng thứ tự tháng", () => {
+  const records = Array.from({ length: 12 }, (_, index) => ({
+    "Tháng": `T${String(index + 1).padStart(2, "0")}`,
+    "Miền Bắc": 100 + index,
+    "Miền Trung": 80 + index,
+    "Miền Nam": 70 + index,
+    "Tổng doanh thu": 250 + index * 3
+  }));
+  const profile = {
+    rowCount: records.length,
+    columns: [
+      { name: "Tháng", inferredType: "text", uniqueCount: 12 },
+      { name: "Miền Bắc", inferredType: "number", uniqueCount: 12 },
+      { name: "Miền Trung", inferredType: "number", uniqueCount: 12 },
+      { name: "Miền Nam", inferredType: "number", uniqueCount: 12 },
+      { name: "Tổng doanh thu", inferredType: "number", uniqueCount: 12 }
+    ]
+  };
+  const analysis = validateAndNormalizeAnalysis({
+    datasetTitle: "Doanh thu theo tháng và miền",
+    grain: "một tháng",
+    columns: [
+      { name: "Tháng", role: "time", timeParse: "text", granularity: "month", labelVi: "Tháng" },
+      { name: "Miền Bắc", role: "measure", aggDefault: "sum", unit: "VND" },
+      { name: "Miền Trung", role: "measure", aggDefault: "sum", unit: "VND" },
+      { name: "Miền Nam", role: "measure", aggDefault: "sum", unit: "VND" },
+      { name: "Tổng doanh thu", role: "measure", aggDefault: "sum", unit: "VND" }
+    ],
+    suggestions: [{
+      id: "revenue-line",
+      chartType: "line",
+      title: "Biểu đồ đường theo tháng",
+      bindings: { x: "Tháng", y: ["Miền Bắc", "Miền Trung", "Miền Nam"] },
+      confidence: .98
+    }]
+  }, profile);
+  const normalized = normalizeTabularRecords(records, analysis.columns);
+  const suggestions = prepareSuggestions(analysis, normalized.records, normalized.validRowRate);
+  const line = suggestions.find(item => item.chartType === "line");
+  const bar = suggestions.find(item => item.chartType === "bar");
+
+  assert.equal(line.available, true);
+  assert.equal(bar.available, true);
+  assert.deepEqual(bar.bindings, { x: "Tháng", y: "Tổng doanh thu" });
+  const option = buildBarChartOption(bar, normalized.records, analysis.columns, { top: "all" });
+  assert.deepEqual(option.config.data.map(row => row["Tháng"]), records.map(record => record["Tháng"]));
 });
 
 test("line long format chỉ chọn năm series có nhiều điểm nhất và pivot đúng", () => {
@@ -221,7 +326,7 @@ test("chỉ bổ sung biểu đồ vùng khi có số liệu hợp lệ ở ít 
   assert.deepEqual(analysis.suggestions, []);
 });
 
-test("cặp tọa độ luôn tạo đề xuất Point và loại đề xuất H3", () => {
+test("chuỗi tọa độ hỗ trợ Line và Point, loại H3 và biểu đồ độc lập trong luồng input", () => {
   const analysis = {
     columns: [
       { name: "Vĩ độ", role: "geo", geoLevel: "point_lat" },
@@ -248,9 +353,9 @@ test("cặp tọa độ luôn tạo đề xuất Point và loại đề xuất H
   const suggestions = prepareSuggestions(analysis, [
     { "Vĩ độ": 21.02, "Kinh độ": 105.83, "Doanh thu": 10 },
     { "Vĩ độ": 21.05, "Kinh độ": 105.79, "Doanh thu": 20 }
-  ], { "Vĩ độ": 1, "Kinh độ": 1, "Doanh thu": 1 });
+  ], { "Vĩ độ": 1, "Kinh độ": 1, "Doanh thu": 1 }, { mapOnly: true });
 
-  assert.deepEqual(suggestions.map(item => item.chartType), ["point", "bar"]);
+  assert.deepEqual(suggestions.map(item => item.chartType), ["map_line", "point"]);
   assert.equal(suggestions[0].available, true);
 });
 

@@ -4,6 +4,7 @@ import {
   analyzeDataSets,
   createBarOptions,
   dataForBarMapping,
+  defaultMetricSelection,
   nextMetricSelection,
   reconcileSeriesColors,
   validateBarMapping
@@ -30,12 +31,22 @@ test("phân tích toàn bộ dataset, đường dẫn lồng nhau và schema", (
   assert.equal(regional.records[0]["breakdown.freedom"], 5.2);
 });
 
-test("tạo đủ lựa chọn cột khi có hai chỉ số", () => {
+test("tạo lựa chọn cột đơn và cột ghép khi có hai chỉ số", () => {
   const dataset = analyzeDataSets(input)[0];
   const options = createBarOptions(dataset);
-  assert.deepEqual(options.map(option => option.id), ["single_bar", "double_bar", "grouped_bar"]);
-  assert.deepEqual(options.map(option => option.icon), ["singleBar", "doubleBar", "groupedBar"]);
-  assert.equal(options[2].config.series.length, 2);
+  assert.deepEqual(options.map(option => option.id), ["single_bar", "grouped_bar"]);
+  assert.deepEqual(options.map(option => option.icon), ["singleBar", "groupedBar"]);
+  assert.equal(options[1].config.series.length, 2);
+});
+
+test("cột ghép mặc định đúng hai chỉ số dù dataset có nhiều trường số", () => {
+  const dataset = analyzeDataSets([
+    { region: "A", revenue: 10, cost: 4, profit: 6 },
+    { region: "B", revenue: 12, cost: 5, profit: 7 }
+  ])[0];
+  assert.deepEqual(defaultMetricSelection(dataset, "single"), ["revenue"]);
+  assert.deepEqual(defaultMetricSelection(dataset, "grouped"), ["revenue", "cost"]);
+  assert.deepEqual(createBarOptions(dataset)[1].config.series.map(item => item.key), ["revenue", "cost"]);
 });
 
 test("kiểm tra đúng quy tắc số chỉ số và không tự sửa lựa chọn", () => {
@@ -43,7 +54,7 @@ test("kiểm tra đúng quy tắc số chỉ số và không tự sửa lựa ch
   const mapping = { xField: "region", metrics: ["average_score"] };
   assert.equal(validateBarMapping(dataset, mapping, "single").valid, true);
   assert.deepEqual(mapping.metrics, ["average_score"]);
-  assert.equal(validateBarMapping(dataset, mapping, "double").message, "Cột đôi cần đúng 2 chỉ số.");
+  assert.equal(validateBarMapping(dataset, mapping, "grouped").message, "Cột ghép cần từ 2 chỉ số trở lên.");
   assert.equal(validateBarMapping(dataset, { ...mapping, metrics: ["average_score", "breakdown.freedom"] }, "grouped").valid, true);
 });
 
@@ -52,15 +63,14 @@ test("loại bản ghi thiếu giá trị thay vì biến null thành 0", () => 
   assert.deepEqual(dataForBarMapping(dataset, { xField: "region", metrics: ["score"] }), [{ region: "A", score: 2 }]);
 });
 
-test("cột đơn chỉ giữ một chỉ số và cột đôi bỏ lựa chọn cũ nhất", () => {
+test("cột đơn chỉ giữ một chỉ số và cột ghép cho phép nhiều chỉ số", () => {
   assert.deepEqual(nextMetricSelection(["desktop"], "mobile", "single"), ["mobile"]);
-  assert.deepEqual(nextMetricSelection(["desktop", "mobile"], "tablet", "double"), ["mobile", "tablet"]);
-  assert.deepEqual(nextMetricSelection(["desktop", "mobile"], "desktop", "double"), ["mobile"]);
   assert.deepEqual(nextMetricSelection(["desktop", "mobile"], "tablet", "grouped"), ["desktop", "mobile", "tablet"]);
+  assert.deepEqual(nextMetricSelection(["desktop", "mobile"], "desktop", "grouped"), ["mobile"]);
   assert.deepEqual(nextMetricSelection(["desktop"], "mobile", "line"), ["desktop", "mobile"]);
 });
 
-test("không giữ màu trùng khi thay chỉ số của biểu đồ đôi", () => {
+test("không giữ màu trùng khi thay chỉ số của biểu đồ ghép", () => {
   const next = [
     { key: "mobile", label: "Mobile", color: "#63c785" },
     { key: "desktop", label: "Desktop", color: "#f58b61" }

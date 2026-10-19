@@ -1,3 +1,5 @@
+import { inferTimeGranularity, normalizeTimeValue, timeValueInfo } from "./time-values.js";
+
 function isDate(value) {
   return Object.prototype.toString.call(value) === "[object Date]" && !Number.isNaN(value.getTime());
 }
@@ -7,7 +9,10 @@ function cleanString(value, maxLength = 160) {
 }
 
 function jsonValue(value) {
-  if (isDate(value)) return value.toISOString().slice(0, 10);
+  if (isDate(value)) {
+    const iso = value.toISOString();
+    return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso;
+  }
   if (typeof value === "string") return cleanString(value);
   if (["number", "boolean"].includes(typeof value) || value == null) return value;
   return cleanString(value);
@@ -27,16 +32,18 @@ function numericValue(value, commaDecimal = false) {
   return Number.isFinite(number) ? number : null;
 }
 
-const TIME_COLUMN_HINT = /(^|[ _-])(date|time|day|month|year|ngay|ngày|thang|tháng|nam|năm|timestamp)([ _-]|$)/i;
+const TIME_COLUMN_HINT = /(^|[ _-])(date|time|day|month|quarter|week|year|period|kỳ|ky|ngay|ngày|thời điểm|thoi diem|thang|tháng|quý|quy|tuần|tuan|nam|năm|timestamp|datetime)([ _-]|$)/i;
 const ISO_DATE = /^\d{4}-\d{2}(?:-\d{2})?/;
 
 function dateHint(name, state) {
   if (state.nonNullCount && state.allDates) return "iso";
-  if (state.nonNullCount && state.allIsoStrings) return "iso";
-  if (!TIME_COLUMN_HINT.test(name)) return null;
-  if (state.nonNullCount && state.allExcelNumbers) return "excel_serial";
-  if (state.nonNullCount && state.allUnixMilliseconds) return "unix_ms";
-  if (state.nonNullCount && state.allUnixSeconds) return "unix_s";
+  if (state.nonNullCount && state.allIsoStrings && state.allTemporal) return "iso";
+  if (TIME_COLUMN_HINT.test(name)) {
+    if (state.nonNullCount && state.allExcelNumbers) return "excel_serial";
+    if (state.nonNullCount && state.allUnixMilliseconds) return "unix_ms";
+    if (state.nonNullCount && state.allUnixSeconds) return "unix_s";
+  }
+  if (state.nonNullCount && state.allTemporal) return "text";
   return null;
 }
 
@@ -61,6 +68,9 @@ function createColumnState(name) {
     allExcelNumbers: true,
     allUnixSeconds: true,
     allUnixMilliseconds: true,
+    allTemporal: true,
+    temporalKind: null,
+    temporalGranularity: null,
     dateMin: Infinity,
     dateMax: -Infinity,
     uniques: new Set(),
@@ -119,6 +129,13 @@ export function profileTabularData(records, { includeSamples = false, maxSamples
       state.allExcelNumbers &&= typeof value === "number" && value >= 20_000 && value <= 80_000;
       state.allUnixSeconds &&= typeof value === "number" && value >= 1e9 && value < 1e12;
       state.allUnixMilliseconds &&= typeof value === "number" && value >= 1e12;
+      const temporalContext = TIME_COLUMN_HINT.test(name) || isDate(value) || typeof value === "string" && numericValue(value) == null;
+      const temporal = temporalContext ? timeValueInfo(value, { timeParse: "text", granularity: TIME_COLUMN_HINT.test(name) ? inferTimeGranularity(name) : null }) : null;
+      state.allTemporal &&= Boolean(temporal) && (!state.temporalKind || state.temporalKind === temporal.kind);
+      if (temporal) {
+        state.temporalKind ||= temporal.kind;
+        state.temporalGranularity = state.temporalGranularity && state.temporalGranularity !== temporal.granularity ? "day" : temporal.granularity;
+      }
       if (isDate(value)) {
         state.dateMin = Math.min(state.dateMin, value.getTime());
         state.dateMax = Math.max(state.dateMax, value.getTime());
@@ -165,6 +182,7 @@ export function profileTabularData(records, { includeSamples = false, maxSamples
       min,
       max,
       dateHint: hint,
+      temporalGranularity: hint ? state.temporalGranularity || inferTimeGranularity(state.name) : null,
       commaDecimal
     };
     if (includeSamples) column.samples = state.samples.map(jsonValue);
@@ -175,45 +193,9 @@ export function profileTabularData(records, { includeSamples = false, maxSamples
   return profile;
 }
 
-function excelSerialDate(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return null;
-  const timestamp = Date.UTC(1899, 11, 30) + number * 86_400_000;
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
 export function parseTimeValue(value, hint = null, granularity = null) {
-  if (isDate(value)) return new Date(value.getTime());
-  if (value == null || value === "") return null;
-  const number = typeof value === "number" ? value : Number(String(value).trim());
-  const fromNumber = mode => {
-    if (!Number.isFinite(number)) return null;
-    if (mode === "excel_serial") return excelSerialDate(number);
-    if (mode === "unix_s") return new Date(number * 1000);
-    if (mode === "unix_ms") return new Date(number);
-    return null;
-  };
-  let parsed = fromNumber(hint);
-  if (!parsed && granularity === "year" && Number.isInteger(number) && number >= 1900 && number <= 2200) parsed = new Date(Date.UTC(number, 0, 1));
-  if (!parsed && hint === "text" && typeof value === "string") {
-    const timestamp = Date.parse(String(value));
-    if (!Number.isNaN(timestamp)) parsed = new Date(timestamp);
-  }
-  if (!parsed && hint === "iso" && typeof value === "string" && ISO_DATE.test(value.trim())) {
-    const timestamp = Date.parse(value.trim());
-    if (!Number.isNaN(timestamp)) parsed = new Date(timestamp);
-  }
-  if (!parsed && Number.isFinite(number)) {
-    if (number >= 1e12) parsed = new Date(number);
-    else if (number >= 1e9) parsed = new Date(number * 1000);
-    else if (number >= 20_000 && number <= 80_000) parsed = excelSerialDate(number);
-  }
-  if (!parsed && typeof value === "string" && ISO_DATE.test(value.trim())) {
-    const timestamp = Date.parse(value.trim());
-    if (!Number.isNaN(timestamp)) parsed = new Date(timestamp);
-  }
-  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+  const info = timeValueInfo(value, { timeParse: hint, granularity });
+  return info?.kind === "instant" ? info.value : null;
 }
 
 export function normalizeTabularRecords(records, columns) {
@@ -228,7 +210,9 @@ export function normalizeTabularRecords(records, columns) {
   const normalized = records.map(record => {
     const next = { ...record };
     for (const [name, column] of columnMap) {
-      if (column.role === "time") next[name] = parseTimeValue(record?.[name], column.timeParse, column.granularity);
+      if (column.role === "time") {
+        next[name] = normalizeTimeValue(record?.[name], column);
+      }
       else if (column.role === "measure") next[name] = numericValue(record?.[name], commaDecimal.get(name));
       if (next[name] !== null && next[name] !== "" && next[name] !== undefined) validByColumn.set(name, validByColumn.get(name) + 1);
     }

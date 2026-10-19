@@ -1,5 +1,6 @@
 import { humanizeField } from "../charts/data-transformers.js";
 import { serializeTabularValue } from "../tabular-data.js";
+import { timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "../time-values.js";
 
 export const POINT_COLOR = "#00d084";
 export const POINT_COLORS = Object.freeze(["#5b8ff9", "#f58b61", "#63c785", "#f6bd16", "#9270ca", "#6dc8ec", "#d9548a", "#2f9e9e"]);
@@ -45,12 +46,6 @@ function groupKey(value) {
   return value == null || String(value).trim() === "" ? null : String(value);
 }
 
-function timestamp(value) {
-  if (value == null || value === "") return null;
-  const time = Date.parse(serializeTabularValue(value));
-  return Number.isFinite(time) ? time : null;
-}
-
 function fieldLabel(column) {
   return column.labelVi || humanizeField(column.name);
 }
@@ -66,14 +61,17 @@ export function createPointModel(records, columns, { lat, lng }) {
     for (const column of measures) properties[column.name] = numberValue(properties[column.name]);
     return [{ type: "Feature", id: index, properties, geometry: { type: "Point", coordinates: [longitude, latitude] } }];
   });
-  const groups = columns.filter(column => column.role === "category" && ![lat, lng].includes(column.name)).flatMap(column => {
+  const groups = columns.filter(column => ![lat, lng].includes(column.name) && (
+    ["category", "text"].includes(column.role)
+    || column.role === "geo" && !["point_lat", "point_lng", "h3"].includes(column.geoLevel)
+  )).flatMap(column => {
     const counts = new Map();
     for (const feature of features) {
       const key = groupKey(feature.properties[column.name]);
       if (key != null) counts.set(key, (counts.get(key) || 0) + 1);
       if (counts.size > 80) return [];
     }
-    if (counts.size < 2) return [];
+    if (!counts.size) return [];
     const values = [...counts].map(([key, count]) => ({ key, label: key, count }))
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "vi"));
     return [{ ...column, label: fieldLabel(column), values }];
@@ -81,10 +79,10 @@ export function createPointModel(records, columns, { lat, lng }) {
   let timeColumn = null;
   let times = [];
   for (const column of columns.filter(column => column.role === "time")) {
-    const values = [...new Set(features.map(feature => timestamp(feature.properties[column.name])).filter(value => value != null))].sort((a, b) => a - b);
-    if (values.length < 2) continue;
+    const values = uniqueTimeValues(features.map(feature => feature.properties), column);
+    if (!values.length || !timeValuesAreComparable(values, column)) continue;
     timeColumn = column;
-    times = values.map(value => new Date(value).toISOString());
+    times = values.map(value => String(serializeTabularValue(value)));
     break;
   }
   return {
@@ -99,18 +97,17 @@ export function createPointModel(records, columns, { lat, lng }) {
 
 export function normalizePointSelection(model, saved = {}) {
   const metric = model.measures.find(column => column.name === saved.metricField) || model.measures[0];
-  const group = model.groups.find(column => column.name === saved.groupField) || model.groups[0];
+  const group = model.groups.find(column => column.name === saved.groupField)
+    || model.groups.find(column => column.values.length > 1) || model.groups[0];
   const validKeys = new Set(group?.values.map(item => item.key));
   let selectedValues = [...new Set(saved.selectedValues || [])].filter(key => validKeys.has(key)).slice(0, POINT_GROUP_LIMIT);
   if (!selectedValues.length) selectedValues = group?.values.slice(0, POINT_DEFAULT_GROUPS).map(item => item.key) || [];
-  let from = model.times.includes(saved.from) ? saved.from : model.times[0] || null;
-  let to = model.times.includes(saved.to) ? saved.to : model.times.at(-1) || null;
-  if (from && to && from > to) [from, to] = [to, from];
+  const time = model.times.includes(saved.time) ? saved.time : model.times.at(-1) || null;
   return {
     metricField: metric?.name || null,
     groupField: group?.name || null,
     mode: group && saved.mode !== "all" ? "pick" : "all",
-    selectedValues, from, to
+    selectedValues, time
   };
 }
 
@@ -163,12 +160,12 @@ export function buildPointView(model, saved = {}, previousColors = {}, inputStyl
   const selected = new Set(selection.selectedValues);
   const paletteColors = assignColors(selection.selectedValues, previousColors);
   const colors = Object.fromEntries(selection.selectedValues.map(key => [key, colorValue(inputStyle.groupColors?.[key], paletteColors[key])]));
-  const from = timestamp(selection.from); const to = timestamp(selection.to);
+  const selectedTime = model.timeColumn ? timeValueInfo(selection.time, model.timeColumn) : null;
   const features = model.data.features.filter(feature => {
     if (selection.mode === "pick" && !selected.has(groupKey(feature.properties[selection.groupField]))) return false;
     if (model.timeColumn) {
-      const time = timestamp(feature.properties[model.timeColumn.name]);
-      if (time == null || time < from || time > to) return false;
+      const time = timeValueInfo(feature.properties[model.timeColumn.name], model.timeColumn);
+      if (!time || time.key !== selectedTime?.key) return false;
     }
     return true;
   });

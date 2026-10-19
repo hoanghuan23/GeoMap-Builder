@@ -45,9 +45,10 @@ function createHarness() {
     CONFIG: { DEFAULT_RESOLUTION: 5, MAX_RENDER_CELLS: 120000 },
     DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     mergeBarConfig: () => ({}), mergePieConfig: () => ({}),
-    clearDataMappingPanel() {}, clearBarStylePanel() {}, clearPieStylePanel() {}, renderMapIcon() {},
+    clearDataMappingPanel() {}, clearBarStylePanel() {}, clearPieStylePanel() {}, renderMapIcon() {}, renderChartIcon() {},
     humanizeField: field => field,
     geoJSONToCells() { throw new Error("Metro polygons must not be regenerated as H3"); },
+    geoJSONToH3FeatureCollection: () => ({ type: "FeatureCollection", features: [] }),
     document: { getElementById: get, createElement: element, querySelector: () => element(), querySelectorAll: () => [] },
     maplibregl: {
       LngLatBounds: class { extend() { return this; } },
@@ -70,6 +71,21 @@ function createHarness() {
   vm.runInContext("map = testMap; addMapLayers();", context);
   return { context, get, sources, layers };
 }
+
+test("danh sách kiểu bản đồ chỉ có Polygon, Line và Point", () => {
+  const { context, get } = createHarness();
+  vm.runInContext("renderSupportedChartCatalog()", context);
+  const labels = get("supported-chart-grid").children.map(item => item.children[1].textContent);
+  assert.deepEqual(labels, ["Bản đồ Polygon", "Bản đồ Line", "Bản đồ Point"]);
+  const areaTypes = capabilities.compatibleMapTypes({ hasPoints: false, hasLines: false, hasArea: true, numericFields: [], textFields: [] });
+  assert.deepEqual(areaTypes.map(type => type.id), ["polygon"], "H3 is no longer a selectable map type");
+  context.roadData = metroFixture.metro_route;
+  vm.runInContext("renderCompatibleMapTypes(roadData)", context);
+  const card = get("map-type-grid").children.find(item => item.dataset.type === "line");
+  assert.equal(card.dataset.label, "Bản đồ Line");
+  assert.equal(card.title, "Bản đồ Line · MapLibre");
+  assert.equal(card.children[1], "Bản đồ Line");
+});
 
 test("upload displays independent Metro layers, changes departure, and clears all sources", async () => {
   const { context, get, sources, layers } = createHarness();
@@ -105,10 +121,35 @@ test("upload displays independent Metro layers, changes departure, and clears al
   await vm.runInContext("resetConfiguration()", context);
   assert.equal(sources.get("polygon-data").data.features[0].properties.departure_time, "05:30");
   assert.equal(layers.get("data-lines").layout.visibility, "visible");
+  assert.equal(get("show-weather").checked, false);
+  assert.equal(get("show-weather-status").textContent, "Đang tắt");
   vm.runInContext("deleteData()", context);
   for (const id of ["polygon-data", "vietnam-boundary", "metro-station-data", "line-data"]) assert.equal(sources.get(id).data.features.length, 0);
   assert.equal(get("metro-time-section").hidden, true);
   assert.equal(get("metro-legend").hidden, true);
+});
+
+test("area search recommends Polygon by default without uploaded data", async () => {
+  const { context, get, sources, layers } = createHarness();
+  context.searchBoundaries = [{
+    type: "Feature",
+    properties: { name: "Hà Nội" },
+    geometry: { type: "Polygon", coordinates: [[[105, 20], [106, 20], [106, 21], [105, 20]]] }
+  }];
+  get("show-weather").checked = true;
+
+  await vm.runInContext("applySearchBoundaries(searchBoundaries)", context);
+
+  assert.equal(vm.runInContext("state.dataOrigin", context), "search");
+  assert.equal(vm.runInContext("state.mapType", context), "polygon");
+  assert.equal(sources.get("polygon-data").data.features.length, 1);
+  assert.equal(layers.get("polygon-fill").layout.visibility, "visible");
+  assert.equal(layers.get("h3-fill").layout.visibility, "none");
+  assert.deepEqual(get("map-type-grid").children.map(button => button.dataset.type), ["polygon"]);
+  assert.equal(get("map-type-grid").children.find(button => button.dataset.type === "polygon").className, "map-type active");
+  assert.equal(get("map-type-summary").textContent, "Khu vực tìm kiếm · Polygon theo ranh giới đã chọn");
+  assert.equal(get("show-weather").checked, false);
+  assert.equal(get("show-weather-status").textContent, "Đang tắt");
 });
 
 test("Point style panel applies appearance and resets it without rebuilding H3 or changing filters", async () => {

@@ -1,4 +1,4 @@
-import { fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
+import { AI_MAP_REGISTRY, fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
 import { normalizeTabularRecords, profileTabularData } from "./tabular-data.js";
 
 const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area)/i;
@@ -61,6 +61,7 @@ export async function requestAiDataAnalysis(records, { signal, includeSamples = 
     fallbackReason = error?.message || "Không thể gọi AI.";
     analysis = fallbackAnalysis(profile);
   }
+  analysis.suggestions = analysis.suggestions.filter(item => Object.hasOwn(AI_MAP_REGISTRY, item.chartType));
   const normalized = normalizeTabularRecords(records, analysis.columns);
   return { analysis, profile, records: normalized.records, validRowRate: normalized.validRowRate, fallbackReason };
 }
@@ -93,8 +94,11 @@ export async function requestAiMapRecommendation(records, options = {}) {
 }
 
 export function displayFilterValue(value, control = "") {
-  const date = isDate(value) ? value : control === "date-select" ? new Date(value) : null;
-  if (date && !Number.isNaN(date.getTime())) return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" }).format(date);
+  const date = isDate(value) ? value : ["date-select", "datetime-select"].includes(control) ? new Date(value) : null;
+  if (date && !Number.isNaN(date.getTime())) return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    ...(control === "datetime-select" ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23" } : {})
+  }).format(date);
   return String(value ?? "");
 }
 

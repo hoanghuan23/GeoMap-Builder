@@ -1,4 +1,5 @@
 import { humanizeField } from "./charts/data-transformers.js";
+import { formatTimeValue } from "./time-values.js";
 
 function isEmpty(value) {
   return value == null || typeof value === "string" && value.trim() === "";
@@ -8,27 +9,8 @@ function normalizedText(value) {
   return String(value ?? "").trim().toLocaleLowerCase("vi-VN").replace(/\s+/g, " ");
 }
 
-function parsedDate(value) {
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function formatTime(value, granularity) {
-  const date = parsedDate(value);
-  if (!date) return String(value);
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  if (granularity === "year") return String(year);
-  if (granularity === "month") return `${month}/${year}`;
-  const fullDate = new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC"
-  }).format(date);
-  return granularity === "week" ? `Tuần ${fullDate}` : fullDate;
-}
-
 function formatPopupValue(value, column, label) {
-  if (column.role === "time") return formatTime(value, column.granularity);
+  if (column.role === "time") return formatTimeValue(value, column, column.granularity === "datetime");
   if (column.role === "measure" && typeof value === "number" && Number.isFinite(value)) {
     const formatted = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 20 }).format(value);
     const unit = String(column.unit || "").trim();

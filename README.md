@@ -36,20 +36,35 @@ Excel/CSV được parse và profile trong Web Worker bằng package SheetJS đi
 
 Mặc định request AI chỉ chứa tên cột, kiểu suy luận và thống kê như tỷ lệ null, số giá trị phân biệt, min/max. Tùy chọn **“Gửi giá trị mẫu cho AI”** mặc định tắt. Khi bật, request có tối đa 5 mẫu cho mỗi cột và 8 dòng đầu; chuỗi được loại control character và cắt ở 160 ký tự. Không có trường `samples` hoặc `head` khi tùy chọn này tắt.
 
-Mỗi dataset chỉ tạo đúng một request OpenAI. Server tự đưa registry được phép vào prompt, coi tên cột và mẫu là dữ liệu không tin cậy, rồi kiểm tra structured output trước khi trả về client. AI chỉ đề xuất bốn loại:
+Mỗi dataset chỉ tạo đúng một request OpenAI. Server tự đưa registry được phép vào prompt, coi tên cột và mẫu là dữ liệu không tin cậy, rồi kiểm tra structured output trước khi trả về client. Đầu vào chỉ hỗ trợ ba kiểu bản đồ:
 
-- `bar`
-- `line`
-- `choropleth`
-- `hex_h3`
+- `choropleth`: **Bản đồ Polygon**, theo khu vực hành chính như tỉnh/thành phố.
+- `map_line`: **Bản đồ Line**, theo tên đường hoặc chuỗi tọa độ.
+- `point`: **Bản đồ Point**, theo tọa độ của từng đối tượng.
 
-AI đánh giá mức phù hợp của kiểu hiển thị theo grain, role và ý nghĩa dữ liệu; mỗi kiểu chỉ xuất hiện một lần, với bindings làm cấu hình mặc định. Không tách đề xuất theo chỉ số hoặc tự nhóm theo thuộc tính mô tả để tạo thêm bài toán thống kê. Kết quả AI không có đề xuất vẫn được giữ ở bước chuẩn hóa. Khi chuẩn bị hiển thị bảng có địa danh hành chính và chỉ số hợp lệ tại ít nhất hai địa phương (không phải bảng tọa độ), client bổ sung Choropleth nếu AI bỏ sót; đề xuất bổ sung mang nguồn `rule`. Bảng có tọa độ được ưu tiên Point. Không tự chọn một biểu đồ thủ công thay thế cho quyết định không đề xuất.
+AI đánh giá mức phù hợp của kiểu hiển thị theo grain, role và ý nghĩa dữ liệu; mỗi kiểu chỉ xuất hiện một lần, với bindings làm cấu hình mặc định. Không tách đề xuất theo chỉ số hoặc tự nhóm theo thuộc tính mô tả để tạo thêm bài toán thống kê. Kết quả AI không có đề xuất vẫn được giữ ở bước chuẩn hóa. Khi chuẩn bị hiển thị bảng có địa danh hành chính và chỉ số hợp lệ tại ít nhất hai địa phương (không phải bảng tọa độ), client bổ sung Choropleth nếu AI bỏ sót; đề xuất bổ sung mang nguồn `rule`. Các đối tượng cố định có tọa độ được ưu tiên Point, dù có nhiều quan sát theo thời gian. Không tự chọn một biểu đồ độc lập khi dữ liệu không phù hợp với bản đồ.
 
-Response AI lỗi, không hợp lệ hoặc chỉ chứa suggestion sai contract sẽ chuyển ngay sang rule-based fallback với cùng contract; không retry. Pie, Half Pie và các biến thể bar vẫn là lựa chọn thủ công. Thay đổi filter, ngày, series, metric, palette hoặc H3 resolution chỉ dựng lại payload tại client và không gọi AI thêm lần nữa.
+Thời gian dùng bộ xử lý chung cho profile, chuẩn hóa, sắp xếp và lọc khoảng. Hỗ trợ Date, ISO, Excel serial, Unix, ngày dạng `dd/mm/yyyy` trong chế độ text, tháng/quý/tuần có hoặc không có năm và tên tháng tiếng Anh. Kỳ không có năm giữ nhãn gốc; không tự bổ sung năm. Chuỗi lẫn kỳ không có năm và ngày có năm được báo chưa tương thích; giá trị không nhận diện được không bị đoán thành ngày. Schema hỗ trợ granularity `day`, `week`, `month`, `quarter`, `year`.
 
-`AI_DEBUG` mặc định tắt. Khi tắt, middleware không log sample/head hoặc raw profile. Chỉ bật `AI_DEBUG=true` trong môi trường phát triển có dữ liệu phù hợp để ghi log.
+Với cả ba kiểu bản đồ, mục 2 chỉ liệt kê các kiểu bản đồ; mục 3 cho chọn popup **Chỉ hiển thị thông tin** (mặc định), **Biểu đồ cột** hoặc **Biểu đồ đường**. Khi chọn cột/đường, popup chỉ hiển thị biểu đồ, ẩn phần thông tin phía trên. Các điều chỉnh biểu đồ chỉ hiện khi chọn cột/đường; khoảng thời gian biểu đồ độc lập với bộ lọc bản đồ và mặc định bao phủ toàn bộ dữ liệu. Bộ dữ liệu mới trở về popup thông tin. Polygon vẫn hỗ trợ lưới lục giác kế thừa dữ liệu của vùng; H3 từ tọa độ không còn là một kiểu đầu vào riêng.
 
-Choropleth lấy geometry hành chính từ MapTiler và cho phép thiếu một phần địa danh, đồng thời báo `matched`, `unmatched` và `matchRate`. GADM chỉ được dùng làm mặt nạ đất liền, không ép tên hoặc số lượng tỉnh. Thiếu MapTiler key chỉ khóa choropleth; Bar, Line và H3 vẫn hoạt động nếu dữ liệu phù hợp.
+Trong luồng **Bản đồ Polygon**, bấm một vùng hoặc ô lục giác thuộc polygon để xem thông tin hoặc biểu đồ riêng của vùng đó. Ngày tô màu bản đồ độc lập với khoảng ngày biểu đồ. Chọn địa phương bằng cách bấm trên bản đồ.
+
+Dữ liệu giao thông theo khu vực, tên/mã đường và thời điểm được ưu tiên **Bản đồ Line**; biểu đồ cột/đường nằm trong lựa chọn popup tại mục 3. Khi AI bỏ sót bản đồ tuyến, client bổ sung đề xuất theo quy tắc từ metadata đường và chỉ số quan sát; không tự thêm polygon theo khu vực cho grain tuyến đường. Bấm một đoạn đường để xem thông tin hoặc chuỗi số liệu của đúng tuyến đó, phân biệt bằng khu vực, tên và mã đường. Popup biểu đồ ẩn các thẻ thông tin; chỉ số số và khoảng thời gian của biểu đồ độc lập với chỉ số/trạng thái tô màu và thời điểm của bản đồ. Bộ lọc khu vực, tên đường và thời điểm vẫn được giữ; nếu bộ lọc loại tuyến đang xem, popup đóng lại.
+
+Trong luồng **Bản đồ Point**, bấm một điểm để xem biểu đồ của đúng đối tượng qua các kỳ. Ưu tiên mã đối tượng ổn định (ví dụ `ma_cua_hang`); khi thiếu mã, dùng cặp tọa độ. Các cửa hàng cùng thành phố hoặc trùng tọa độ nhưng khác mã không bị gộp chung. Mục **Hiển thị theo** cho chọn tên cửa hàng, thành phố hoặc cột phân loại/văn bản/địa danh khác có tối đa 80 giá trị. Thời gian bản đồ chỉ chọn một giá trị, mặc định là kỳ mới nhất; chỉ các điểm ở kỳ đó được hiển thị. Bộ lọc nhóm điểm, chỉ số kích thước và thời gian bản đồ hoạt động độc lập với cấu hình và khoảng thời gian biểu đồ popup.
+
+**Line từ chuỗi tọa độ** dùng `bindings.lat`/`lng`, `region` để tách nhóm tuyến nếu có và `x` làm cột thứ tự/thời gian nếu có. Thiếu `x` sẽ nối theo thứ tự dòng trong file. Mỗi nhóm được nối riêng; tọa độ thiếu hoặc sai làm ngắt đường. Dữ liệu cửa hàng cố định lặp theo tháng không tự trở thành tuyến. Nhánh này dùng tọa độ trực tiếp, không cần tải mạng đường hoặc ranh giới hành chính.
+
+Popup cột và đường dùng trục thời gian, giữ đầy đủ kỳ, giá trị 0 và khoảng thiếu số liệu. Khi không có cột thời gian, cột hiển thị giá trị tổng hợp của đối tượng và đường bị vô hiệu hóa kèm lý do. Đường cần ít nhất hai mốc có số liệu. Tọa độ và cột thứ tự không được dùng làm chỉ số biểu đồ.
+
+Phép tính mặc định của biểu đồ cột là “Theo từng chỉ số”, giữ `aggDefault` riêng của từng cột. Người dùng có thể chọn SUM, AVG, MIN hoặc MAX; số bản ghi luôn dùng count. Không tự lấy trung bình khi có nhiều dòng trong một nhóm nhưng chưa xác định được phép gộp. Lựa chọn nhiều chỉ số mặc định ưu tiên cùng đơn vị. Các nhãn thời gian ngoài định dạng được hỗ trợ hoặc chỉ số cần phép tính chuyên biệt (ví dụ tỷ lệ cần trọng số) cần metadata/chuẩn hóa bổ sung; không coi mọi cột số đều cộng được.
+
+Response AI lỗi, không hợp lệ hoặc chỉ chứa suggestion sai contract sẽ chuyển ngay sang rule-based fallback với cùng contract; không retry. Biểu đồ cột/đường là lựa chọn popup, không xuất hiện như kiểu đầu vào riêng. Thay đổi filter, ngày, metric, palette hoặc độ phân giải lưới polygon chỉ dựng lại payload tại client và không gọi AI thêm lần nữa.
+
+`AI_DEBUG` mặc định tắt. Khi tắt, middleware không log sample/head hoặc raw profile. Chỉ bật `AI_DEBUG=true` trong môi trường phát triển có dữ liệu phù hợp để ghi log. Khi bật, mỗi lần phân tích sẽ thêm một phần tử JSON gồm tên file/sheet, input gửi AI, raw output và output sau chuẩn hóa vào `test/ai-analysis-input-output.json`. Có thể đổi đường dẫn bằng biến `AI_DEBUG_FILE`; toàn bộ các lần phân tích được lưu chung trong một mảng JSON và có thể format trực tiếp trong IDE.
+
+Choropleth lấy geometry hành chính từ MapTiler và cho phép thiếu một phần địa danh, đồng thời báo `matched`, `unmatched` và `matchRate`. GADM chỉ được dùng làm mặt nạ đất liền, không ép tên hoặc số lượng tỉnh. Thiếu MapTiler key chỉ khóa choropleth; Point và Line vẫn hoạt động nếu dữ liệu phù hợp.
 
 Các file GeoJSON độc lập cũng được xếp lớp theo nội dung thay vì thứ tự upload. Rule nền luôn đặt polygon/hexagon dưới line/route và đặt point/station trên cùng; AI nhận metadata của các lớp để đề xuất thứ tự chi tiết giữa những lớp cùng nhóm. Nếu chưa cấu hình OpenAI hoặc API lỗi, thứ tự hình học này vẫn được áp dụng ngay ở trình duyệt.
 
@@ -109,17 +124,11 @@ Các lựa chọn hiển thị cần phụ thuộc vào:
 - Cấu trúc dữ liệu người dùng upload
 - Khả năng của thư viện bản đồ đang sử dụng
 
-Một số nhóm visualization dự kiến:
+Các kiểu bản đồ hiện được hỗ trợ:
 
 - Point
 - Line
 - Polygon
-- Circle
-- Hexagon
-- Column
-- Heatmap
-- Grid
-- Các loại khác có thể bổ sung sau
 
 ## 6. Hệ thống thư viện
 
@@ -218,7 +227,7 @@ Ví dụ tổng quát:
 
 ```text
 Point data
-→ Point / Hexagon / Column / Heatmap
+→ Point (hoặc Line nếu là chuỗi tọa độ)
 
 Line geometry
 → Line

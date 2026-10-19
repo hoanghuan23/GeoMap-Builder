@@ -51,16 +51,16 @@
         <div class="tab-panel" data-panel="coordinates"><textarea id="coordinate-input" rows="4" placeholder="Nhập GeoJSON Polygon hoặc danh sách lng,lat"></textarea><button id="apply-coordinates" class="secondary-button">Áp dụng tọa độ</button></div>
       </section>
       <section class="panel-section">
-        <div class="section-title"><span class="step">2</span><div><h2>Chọn kiểu bản đồ</h2><p>Chỉ hiển thị các kiểu phù hợp với dữ liệu</p></div></div>
+        <div class="section-title"><span class="step">2</span><div><h2>Chọn kiểu hiển thị</h2><p>Chỉ hiển thị các kiểu phù hợp với dữ liệu</p></div></div>
         <div id="map-type-grid" class="map-type-grid is-empty" aria-live="polite">Chưa có dữ liệu để đề xuất mô hình.</div>
         <p id="map-type-summary" class="map-type-summary" aria-live="polite"></p>
         <div id="supported-chart-catalog" class="supported-chart-catalog">
-          <div class="supported-chart-heading"><h3>Các kiểu bản đồ và biểu đồ được hỗ trợ</h3><span title="Các kiểu hiển thị chương trình hiện hỗ trợ" aria-label="Thông tin">ⓘ</span></div>
-          <div id="supported-chart-grid" class="supported-chart-grid" role="list" aria-label="Các kiểu bản đồ và biểu đồ được hỗ trợ"></div>
+          <div class="supported-chart-heading"><h3>Các kiểu bản đồ được hỗ trợ</h3><span title="Các kiểu hiển thị chương trình hiện hỗ trợ" aria-label="Thông tin">ⓘ</span></div>
+          <div id="supported-chart-grid" class="supported-chart-grid" role="list" aria-label="Các bản đồ được hỗ trợ"></div>
         </div>
       </section>
       <section id="ai-data-filters" class="panel-section ai-data-filters" hidden>
-        <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p id="ai-filter-description">Chọn chỉ số, địa phương và khoảng thời gian</p></div></div>
+        <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p id="ai-filter-description">Chọn chỉ số, nhóm dữ liệu và khoảng thời gian</p></div></div>
         <div id="ai-filter-controls" class="ai-filter-controls"></div>
       </section>
       <section id="resolution-section" class="panel-section" hidden>
@@ -79,21 +79,27 @@
         <div class="section-title"><span class="step">3</span><div><h2>Thời gian di chuyển</h2><p>So sánh thời gian xe buýt và xe máy</p></div></div>
         <label class="field">Thời gian xuất phát<select id="metro-departure" aria-label="Thời gian xuất phát"></select></label>
       </section>
-      <section id="congestion-time-section" class="panel-section" hidden>
-        <div class="section-title"><span class="step">3</span><div><h2>Trạng thái giao thông</h2><p>Chọn thời điểm quan sát mật độ ùn tắc</p></div></div>
-        <label class="field">Thời điểm<select id="congestion-time" aria-label="Thời điểm ùn tắc"></select></label>
-      </section>
       <section id="feature-section" class="panel-section feature-section" hidden>
         <button id="feature-toggle" class="section-title collapsible" aria-expanded="true"><span class="step">4</span><div><h2>Chức năng</h2><p>Bật/tắt tính năng bổ sung</p></div><span class="chevron">⌃</span></button>
         <div id="feature-controls" class="feature-controls">
           <label class="toggle-row feature-toggle-row"><span class="feature-copy"><b>Hiển thị lớp bản đồ</b><small>Bật để vẽ các đối tượng/lớp dữ liệu lên bản đồ</small></span><span class="switch-control"><input id="show-map-layers" type="checkbox" checked><i></i><em id="show-map-layers-status">Đang bật</em></span></label>
-          <label id="weather-toggle-field" class="toggle-row feature-toggle-row" hidden><span class="feature-copy"><b>Dữ liệu thời tiết</b><small>Nhiệt độ, độ ẩm, tầm nhìn và gió theo ô H3</small></span><span class="switch-control"><input id="show-weather" type="checkbox" checked><i></i><em id="show-weather-status">Đang bật</em></span></label>
+          <label id="weather-toggle-field" class="toggle-row feature-toggle-row" hidden><span class="feature-copy"><b>Dữ liệu thời tiết</b><small>Nhiệt độ, độ ẩm, tầm nhìn và gió theo ô H3</small></span><span class="switch-control"><input id="show-weather" type="checkbox"><i></i><em id="show-weather-status">Đang tắt</em></span></label>
+          <div id="region-hex-controls" class="region-hex-controls" hidden>
+            <label class="toggle-row feature-toggle-row"><span class="feature-copy"><b>Hiển thị lưới lục giác</b><small>Biểu diễn dữ liệu bằng các ô lục giác thay cho vùng hành chính</small></span><input id="show-region-hex" type="checkbox" aria-controls="region-hex-resolution-control"><i></i></label>
+            <div id="region-hex-resolution-control" class="field range-field resolution-control" hidden>
+              <div class="field-label"><label for="region-hex-resolution">Độ phân giải lưới (Resolution)</label><output id="region-hex-resolution-value" for="region-hex-resolution">6</output></div>
+              <input id="region-hex-resolution" type="range" min="0" max="15" step="1" value="6" disabled aria-describedby="region-hex-resolution-help">
+              <div class="resolution-hints" aria-hidden="true"><span>Ô lớn (0)</span><span>Ô nhỏ (15)</span></div>
+              <small id="region-hex-resolution-help">Độ phân giải càng cao, các ô lục giác càng nhỏ và bản đồ càng chi tiết.</small>
+              <small id="region-hex-note" class="region-hex-note" role="status"></small>
+            </div>
+          </div>
           <div id="metro-layer-controls" hidden>
             <label class="toggle-row"><span>Hiển thị vùng dữ liệu</span><input id="show-metro-cells" type="checkbox" checked><i></i></label>
             <label class="toggle-row"><span>Hiển thị đường bao vùng</span><input id="show-metro-boundary" type="checkbox" checked><i></i></label>
             <label class="toggle-row"><span>Hiển thị các điểm ga</span><input id="show-metro-stations" type="checkbox" checked><i></i></label>
           </div>
-          <label id="line-toggle-field" class="toggle-row" hidden><span>Hiển thị đường nối giữa các điểm</span><input id="show-map-lines" type="checkbox" checked><i></i></label>
+          <label id="line-toggle-field" class="toggle-row" hidden><span id="line-toggle-label">Hiển thị đường nối giữa các điểm</span><input id="show-map-lines" type="checkbox" checked><i></i></label>
         </div>
       </section>
       <section id="style-section" class="panel-section style-section" hidden>
@@ -126,6 +132,12 @@
             <div class="field range-field compact"><div class="field-label"><label for="point-border-width">Độ dày đường viền</label><output id="point-border-width-value">1 px</output></div><input id="point-border-width" type="range" min="0" max="4" step=".1" value="1"></div>
             <label id="point-show-legend-field" class="toggle-row"><span>Hiển thị chú giải</span><input id="point-show-legend" type="checkbox" checked><i></i></label>
           </div>
+          <div id="road-style-controls" hidden>
+            <div id="road-color-field" class="field"><div class="field-label"><span>Màu sắc</span></div><div id="road-style-colors" class="bar-color-list"></div></div>
+            <div class="field range-field compact"><div class="field-label"><label for="road-line-width">Độ dày tuyến</label><output id="road-line-width-value">3 px</output></div><input id="road-line-width" type="range" min="1" max="10" step=".5" value="3"></div>
+            <div class="field range-field compact"><div class="field-label"><label for="road-line-opacity">Độ mờ tuyến</label><output id="road-line-opacity-value">100%</output></div><input id="road-line-opacity" type="range" min="0" max="1" step=".05" value="1"></div>
+            <label class="toggle-row"><span>Hiển thị chú giải</span><input id="road-show-legend" type="checkbox" checked><i></i></label>
+          </div>
           <div id="bar-style-controls" hidden></div>
           <div class="builder-actions"><button id="reset-config">♙&nbsp; Đặt lại cấu hình</button><button id="clear-data">↻&nbsp; Xóa dữ liệu</button></div>
         </div>
@@ -134,9 +146,9 @@
     <section class="content-area table-hidden">
       <div class="map-panel"><div id="map"></div><div id="chart-canvas" class="chart-canvas" hidden></div><div id="status" class="status-pill" hidden></div>
         <div id="metro-legend" class="metro-legend" hidden aria-live="polite"></div>
-        <div id="congestion-legend" class="congestion-legend" hidden aria-live="polite"></div>
         <div id="transport-legend" class="transport-legend" hidden aria-live="polite"></div>
         <div id="point-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ điểm" aria-live="polite"></div>
+        <div id="ai-line-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ mạng lưới" aria-live="polite"></div>
         <div id="weather-legend" class="weather-legend" hidden aria-live="polite">
           <strong id="weather-legend-title">Nhiệt độ không khí (°C)</strong>
           <div id="weather-legend-scale" class="weather-legend-scale"></div>

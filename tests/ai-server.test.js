@@ -50,7 +50,13 @@ test("middleware chỉ gọi OpenAI một lần và fallback ngay khi output kh�
     assert.ok(response.body.suggestions.some(item => item.chartType === "choropleth"));
     const sent = JSON.parse(upstreamBody.input);
     assert.equal(sent.profile.rowCount, 2);
-    assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "point", "hex_h3", "line", "bar"]);
+    assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "map_line", "point"]);
+    assert.ok(sent.supportedCharts.map_line.slots.x.includes("time"));
+    assert.ok(sent.supportedCharts.map_line.slots.lat.includes("geo"));
+    assert.ok(sent.supportedCharts.point.slots.region.includes("id"));
+    assert.deepEqual(upstreamBody.text.format.schema.properties.suggestions.items.properties.chartType.enum, ["choropleth", "map_line", "point"]);
+    assert.ok(response.body.suggestions.every(item => ["choropleth", "map_line", "point"].includes(item.chartType)));
+    assert.match(upstreamBody.instructions, /Gán role, đơn vị, phép gộp và grain/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -123,7 +129,7 @@ test("AI_DEBUG ghi input và output của lần phân tích vào cùng một fil
     assert.equal(entries.length, 2);
     assert.deepEqual(entries[0].source, source);
     assert.deepEqual(entries[0].input.profile, profile);
-    assert.deepEqual(Object.keys(entries[0].input.supportedCharts), ["choropleth", "point", "hex_h3", "line", "bar"]);
+    assert.deepEqual(Object.keys(entries[0].input.supportedCharts), ["choropleth", "map_line", "point"]);
     assert.deepEqual(entries[0].output.raw, rawOutput);
     assert.equal(entries[0].output.normalized.source, "ai");
   } finally {

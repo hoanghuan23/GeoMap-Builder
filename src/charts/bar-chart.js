@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Bar,
@@ -12,8 +12,9 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { mergeBarConfig, prepareBarData } from "./configs/bar-config.js";
+import { getBarAutoWindowSize, mergeBarConfig, prepareBarData } from "./configs/bar-config.js";
 import { analyzeDataSets, createBarOptions } from "./data-transformers.js";
+import { formatTimeValue } from "../time-values.js";
 
 const roots = new WeakMap();
 const DEFAULT_COLORS = ["#5470C6", "#91CC75", "#FAC858", "#EE6666", "#73C0DE", "#9A60B4"];
@@ -78,6 +79,10 @@ export function normalizeBarChartConfig(input) {
     }
     const normalized = { ...record, [xField]: String(category) };
     for (const item of series) {
+      if (input.preserveMissingValues && (record[item.key] == null || record[item.key] === "")) {
+        normalized[item.key] = null;
+        continue;
+      }
       const value = Number(record[item.key]);
       if (!Number.isFinite(value)) {
         throw new Error(`Giá trị "${item.key}" tại data[${rowIndex}] phải là số.`);
@@ -89,7 +94,7 @@ export function normalizeBarChartConfig(input) {
 
   return {
     ...mergeBarConfig(input),
-    variant: input.variant || (series.length === 1 ? "single" : series.length === 2 ? "double" : "grouped"),
+    variant: series.length === 1 ? "single" : "grouped",
     title: typeof input.title === "string" ? input.title.trim() : "",
     unit: typeof input.unit === "string" ? input.unit.trim() : "",
     xField,
@@ -112,10 +117,23 @@ function tooltipValue(value, _name, item, unit) {
 }
 
 function Chart({ config }) {
+  const formatTime = config.timeColumn ? value => formatTimeValue(value, config.timeColumn, config.timeColumn.granularity === "datetime") : undefined;
   const data = useMemo(() => prepareBarData(config.data, config, config.series), [config]);
-  const initialWindow = Math.min(data.length, 24);
-  const [range, setRange] = useState({ startIndex: 0, endIndex: Math.max(0, initialWindow - 1) });
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const isHorizontal = config.orientation === "horizontal";
+  const axisSize = isHorizontal ? dimensions.height : dimensions.width;
+  const autoWindow = getBarAutoWindowSize(data.length, config.series.length, config, dimensions);
+  const [range, setRange] = useState(() => ({ startIndex: 0, endIndex: Math.max(0, autoWindow - 1) }));
+  const [brushRevision, setBrushRevision] = useState(0);
+  // Normalization creates fresh arrays on every render; compare plotted values so
+  // changing colors or tooltip settings preserves a manually selected range.
+  const fitKey = useMemo(() => JSON.stringify([
+    config.xField,
+    config.series.map(item => item.key),
+    data.map(row => [row[config.xField], ...config.series.map(item => row[item.key])]),
+    config.limit, config.sort, config.orientation, config.barWidth, config.barGap
+  ]), [config, data]);
+  const previousFitKey = useRef(fitKey);
   const minimumWindow = Math.min(6, data.length);
   const canZoom = data.length > minimumWindow;
   const visibleCount = range.endIndex - range.startIndex + 1;
@@ -123,8 +141,30 @@ function Chart({ config }) {
   const canZoomOut = canZoom && visibleCount < data.length;
 
   useEffect(() => {
-    setRange({ startIndex: 0, endIndex: Math.max(0, Math.min(data.length, 24) - 1) });
-  }, [data.length, config.limit, config.sort]);
+    // Recharts can retain stale traveller positions after replacing chart data.
+    // Wait for its data effects before restoring the controlled Brush selection.
+    const frame = requestAnimationFrame(() => setBrushRevision(revision => revision + 1));
+    return () => cancelAnimationFrame(frame);
+  }, [data]);
+
+  useEffect(() => {
+    const inputsChanged = previousFitKey.current !== fitKey;
+    previousFitKey.current = fitKey;
+    setRange(current => {
+      const startIndex = inputsChanged ? 0 : Math.max(0, Math.min(current.startIndex, data.length - autoWindow));
+      const endIndex = Math.max(0, startIndex + autoWindow - 1);
+      return current.startIndex === startIndex && current.endIndex === endIndex ? current : { startIndex, endIndex };
+    });
+  }, [fitKey, axisSize, autoWindow, data.length]);
+
+  const handleResize = (width, height) => {
+    if (width <= 0 || height <= 0) return;
+    const nextWidth = Math.round(width);
+    const nextHeight = Math.round(height);
+    setDimensions(current => current.width === nextWidth && current.height === nextHeight
+      ? current
+      : { width: nextWidth, height: nextHeight });
+  };
 
   const zoom = direction => setRange(current => {
     const size = current.endIndex - current.startIndex + 1;
@@ -143,6 +183,7 @@ function Chart({ config }) {
     fill: item.color,
     radius: isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0],
     maxBarSize: config.barWidth,
+    isAnimationActive: config.animate !== false,
     animationDuration: 550
   }, config.showDataLabels ? h(LabelList, {
     dataKey: item.key,
@@ -171,16 +212,17 @@ function Chart({ config }) {
       )
     ),
     h("div", { className: "bar-chart-plot" },
-      h(ResponsiveContainer, { width: "100%", height: "100%" },
+      h(ResponsiveContainer, { width: "100%", height: "100%", onResize: handleResize },
         h(BarChart, { data, layout: isHorizontal ? "vertical" : "horizontal", margin: { top: 18, right: config.showDataLabels ? 50 : 20, left: isHorizontal ? 30 : 4, bottom: canZoom ? 4 : 8 }, barCategoryGap: `${config.barGap}%`, barGap: 3 },
           config.showGrid ? h(CartesianGrid, { stroke: "#e9edf2", strokeDasharray: "3 3", vertical: isHorizontal }) : null,
           isHorizontal
             ? h(XAxis, { type: "number", axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, tickFormatter: compactNumber })
-            : h(XAxis, { type: "category", dataKey: config.xField, axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, interval: 0, height: 42 }),
+            : h(XAxis, { type: "category", dataKey: config.xField, tickFormatter: formatTime, axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, interval: config.timeColumn ? "preserveStartEnd" : 0, minTickGap: 8, height: 42 }),
           isHorizontal
             ? h(YAxis, { type: "category", dataKey: config.xField, axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, interval: 0, width: 82 })
             : h(YAxis, { type: "number", axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, tickFormatter: compactNumber, width: 54 }),
           config.showTooltip ? h(Tooltip, {
+            labelFormatter: formatTime,
             formatter: (value, name, item) => tooltipValue(value, name, item, config.unit),
             cursor: { fill: "rgba(15, 23, 42, 0.035)" },
             contentStyle: { border: "1px solid #e2e8f0", borderRadius: 8, boxShadow: "0 8px 24px rgba(15,23,42,.10)" }
@@ -188,6 +230,7 @@ function Chart({ config }) {
           config.showLegend ? h(Legend, { iconType: "circle", iconSize: 8, wrapperStyle: { paddingTop: 12, fontSize: 11 } }) : null,
           ...bars,
           canZoom ? h(Brush, {
+            key: brushRevision,
             dataKey: config.xField,
             height: 22,
             travellerWidth: 8,

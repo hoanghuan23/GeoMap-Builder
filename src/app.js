@@ -1,5 +1,6 @@
 import { CONFIG } from "./config.js";
 import { cellAtMaxResolution, geoJSONToCells, geoJSONToH3FeatureCollection, h3CellCenter, recordsToAggregatedH3, recordsToPointGeoJSON } from "./h3-utils.js";
+import { buildRegionHexGrid } from "./region-hex-grid.js";
 import { analyzeSpatialData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
 import { BarRenderer, analyzeBarData } from "./charts/bar-chart.js";
 import { createLineOption, LINE_COLORS, lineSeriesFromFields, LineRenderer } from "./charts/line-chart.js";
@@ -16,7 +17,7 @@ import {
 import { DEFAULT_BAR_CONFIG, mergeBarConfig } from "./charts/configs/bar-config.js";
 import { clearBarStylePanel, renderBarStylePanel } from "./charts/components/bar-style-panel.jsx";
 import { clearDataMappingPanel, renderDataMappingPanel } from "./charts/components/data-mapping-panel.jsx";
-import { BAR_COLORS, dataForBarMapping, humanizeField, reconcileSeriesColors, seriesFromFields, validateBarMapping } from "./charts/data-transformers.js";
+import { BAR_COLORS, dataForBarMapping, defaultMetricSelection, humanizeField, reconcileSeriesColors, seriesFromFields, validateBarMapping } from "./charts/data-transformers.js";
 import { renderChartIcon } from "./charts/chart-icons.js";
 import { renderMapIcon } from "./renderers/map-icons.js";
 import { PointRenderer } from "./renderers/point-renderer.js";
@@ -31,16 +32,21 @@ import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } f
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
 import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
-import { applyPipelineFilters, chartOptionForSuggestion, defaultTimeFilter, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
+import { applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
+import { compareTimeValues, filterTimeRange, formatTimeValue, timeValueInfo, uniqueTimeValues } from "./time-values.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
+import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupChartColumns, popupFeaturesMatch, popupTimeColumn } from "./ai-popup-chart.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-client.js";
 import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
 import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
-import { CONGESTION_COLORS, congestionAtTime, congestionLineColorExpression, joinCongestionToRoads, normalizeCongestionRecords } from "./congestion-data.js";
 import { TRANSPORT_KIND_LABELS, transportClasses, transportClassStyle, transportColorExpression, transportGeometryKind } from "./transport-style.js";
+import { joinRoadRecordsByArea, roadAreaField, ROAD_NETWORKS, roadMapStyle, roadNetworksFromRecords, roadValueColumns } from "./road-map-data.js";
+import { roadNetworkUrl } from "./road-network-assets.js";
+import { buildCoordinateLines, isCoordinateLine, pointTitleField } from "./coordinate-data.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
+const DEFAULT_ROAD_DISPLAY_STYLE = Object.freeze({ width: 3, opacity: 1, showLegend: true });
 const MAP_STYLES = Object.freeze({
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
@@ -48,35 +54,28 @@ const MAP_STYLES = Object.freeze({
 });
 const MAP_STYLE_LABELS = Object.freeze({ liberty: "Liberty", bright: "Sáng", dark: "Tối" });
 const SUPPORTED_VIEW_TYPES = Object.freeze([
-  { label: "Point", icon: "point", kind: "map" },
-  { label: "Circle", icon: "circle", kind: "map" },
-  { label: "H3 Hexagon", icon: "hexagon", kind: "map" },
-  { label: "Heatmap", icon: "heatmap", kind: "map" },
-  { label: "Line", icon: "line", kind: "map" },
-  { label: "Polygon", icon: "polygon", kind: "map" },
-  { label: "Cột đơn", icon: "singleBar", kind: "chart" },
-  { label: "Cột đôi", icon: "doubleBar", kind: "chart" },
-  { label: "Cột ghép", icon: "groupedBar", kind: "chart" },
-  { label: "Biểu đồ đường", icon: "line", kind: "chart" },
-  { label: "Pie chart", icon: "pieChart", kind: "chart" },
-  { label: "Half pie", icon: "halfPie", kind: "chart" }
+  { label: "Bản đồ Polygon", icon: "polygon", kind: "map" },
+  { label: "Bản đồ Line", icon: "line", kind: "map" },
+  { label: "Bản đồ Point", icon: "point", kind: "map" }
 ]);
 const state = {
   resolution: CONFIG.DEFAULT_RESOLUTION, boundary: null, sourceBoundary: null, h3Data: { type: "FeatureCollection", features: [] },
   page: 1, pageSize: 10, query: "", baselineCount: null,
   mapType: null, dataProfile: null,
+  regionHexEnabled: false, regionHexResolution: CONFIG.DEFAULT_RESOLUTION,
   pointData: { type: "FeatureCollection", features: [] },
   chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null,
-  barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, pointStyle: { ...DEFAULT_POINT_STYLE }, polygonPalette: null,
+  barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, pointStyle: { ...DEFAULT_POINT_STYLE },
+  roadDisplayStyle: { ...DEFAULT_ROAD_DISPLAY_STYLE }, polygonPalette: null,
   metroData: null, metroTime: null, metroPopup: null, lineData: EMPTY_FEATURE_COLLECTION,
-  congestionData: null, congestionTime: null, congestionPopup: null,
   dataOrigin: null,
   uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0,
   metroParts: {}, separateMetroActive: false,
   aiDataset: null, pendingSheet: null,
   mapStyle: "liberty"
 };
-let map; let toastTimer; let cellPopup; let pointPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
+let map; let toastTimer; let statusTimer; let cellPopup; let pointPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
+let mapPopupView = null;
 let layerOrderRevision = 0;
 let mapLayerEventsBound = false;
 const uploadedPointerLayerIds = new Set();
@@ -161,7 +160,13 @@ function clearChartCanvas() {
 }
 
 function showToast(message) { const el = $("toast"); el.textContent = message; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2800); }
-function setStatus(message, hide = false) { const el = $("status"); el.textContent = message; el.hidden = false; if (hide) setTimeout(() => { el.hidden = true; }, 2200); }
+function setStatus(message, hide = false) {
+  const el = $("status");
+  clearTimeout(statusTimer);
+  el.textContent = message;
+  el.hidden = false;
+  if (hide) statusTimer = setTimeout(() => { el.hidden = true; }, 2200);
+}
 function setDataPanelVisible(visible) { $("data-panel").hidden = !visible; document.querySelector(".content-area").classList.toggle("table-hidden", !visible); map?.resize(); }
 function fmt(value, digits = 1) { return Number.isFinite(value) ? value.toFixed(digits) : "--"; }
 
@@ -312,31 +317,52 @@ function showSupportedChartCatalog(visible) {
   $("supported-chart-catalog").hidden = !visible;
 }
 
+function isRegionHexMode() {
+  return state.mapType === "polygon" && !state.metroData && state.regionHexEnabled;
+}
+
+function syncRegionHexControls() {
+  $("show-region-hex").checked = state.regionHexEnabled;
+  $("region-hex-resolution-control").hidden = !state.regionHexEnabled;
+  $("region-hex-resolution").disabled = !state.regionHexEnabled;
+  $("region-hex-resolution").value = state.regionHexResolution;
+  $("region-hex-resolution-value").value = state.regionHexResolution;
+}
+
 function updateModelSections() {
   const hasModel = Boolean(state.mapType);
   const isChart = Boolean(state.chartConfig);
   const isPoint = !isChart && state.mapType === "point";
+  const isRoad = Boolean(activeRoadSuggestion());
   $("metro-time-section").hidden = !state.metroData || isChart;
-  $("congestion-time-section").hidden = !state.congestionData || isChart;
   $("metro-layer-controls").hidden = !state.metroData || isChart;
-  $("line-toggle-field").hidden = isChart || !state.lineData.features.length || Boolean(state.congestionData);
+  $("line-toggle-field").hidden = isChart || isRoad || !state.lineData.features.length;
+  $("line-toggle-label").textContent = activeRoadSuggestion() ? "Hiển thị tuyến đường" : "Hiển thị đường nối giữa các điểm";
   $("travel-palette").hidden = !state.metroData;
   $("weather-toggle-field").hidden = state.dataOrigin !== "search" || isChart;
   $("chart-data-mapping-section").hidden = !isChart || !state.chartMapping;
   $("resolution-section").hidden = !hasModel || isChart || state.mapType !== "h3";
   $("feature-section").hidden = !hasModel || isChart;
-  $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon", "point"].includes(state.mapType));
-  $("map-style-controls").hidden = isChart || isPoint;
+  $("region-hex-controls").hidden = isChart || state.mapType !== "polygon" || Boolean(state.metroData);
+  syncRegionHexControls();
+  $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon", "point"].includes(state.mapType) && !isRoad);
+  $("map-style-controls").hidden = isChart || isPoint || isRoad;
   $("point-style-controls").hidden = !isPoint;
+  $("road-style-controls").hidden = !isRoad;
   $("cell-stats-card").hidden = !hasModel || isChart || state.mapType !== "h3";
+  const activeAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
   $("ai-filter-description").textContent = activePointSuggestion()
-    ? "Chọn chỉ số, nhóm điểm và khoảng thời gian"
-    : "Chọn chỉ số, địa phương và khoảng thời gian";
+    ? "Chọn chỉ số, nhóm điểm và thời gian hiển thị"
+    : activeMapPopupSuggestion()
+    ? "Chọn cách hiển thị và chỉ số dữ liệu"
+    : activeAiSuggestion?.chartType === "bar"
+      ? "Chọn cách hiển thị và chỉ số dữ liệu"
+      : "Chọn chỉ số, nhóm dữ liệu và khoảng thời gian";
   if (!isChart) {
     const isPolygon = state.mapType === "polygon";
     const isWeather = state.dataOrigin === "search" && state.mapType === "h3";
     const isAiThematic = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
-    $("style-description").textContent = isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isWeather ? "Bảng màu nhiệt độ, độ mờ và đường viền" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
+    $("style-description").textContent = isRoad ? "Màu sắc, độ dày, độ mờ và chú giải tuyến" : isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isWeather ? "Bảng màu nhiệt độ, độ mờ và đường viền" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
     $("polygon-color-ramp").hidden = !isPolygon && !isWeather && !isAiThematic;
     $("border-color-field").hidden = isPolygon && !state.metroData;
     $("show-border-field").hidden = false;
@@ -344,8 +370,11 @@ function updateModelSections() {
     if (isPolygon || isWeather || isAiThematic) syncPolygonPaletteControls();
   }
   if (isPoint) renderPointStyleControls();
+  if (isRoad) renderRoadStyleControls();
   renderPointLegend();
+  renderRoadLegend();
   if (!activePointSuggestion()) { pointPopup?.remove(); pointPopup = null; }
+  if (!activeMapPopupSuggestion()) closeMapPopup();
 }
 
 function fillExpression() {
@@ -386,7 +415,7 @@ function renderWeatherLegend() {
   $("weather-legend-title").textContent = `${metric}${hasTemperatureUnit ? " (°C)" : ""}`;
   $("weather-legend-scale").style.background = scale.gradient;
   $("weather-legend-labels").replaceChildren(...scale.values.map(value => Object.assign(document.createElement("span"), { textContent: Number(value.toFixed(1)).toLocaleString("vi-VN") })));
-  $("weather-legend-note").textContent = state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon";
+  $("weather-legend-note").textContent = isRegionHexMode() ? `Dữ liệu tải lên · H3 res ${state.regionHexResolution}` : state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon";
 }
 
 function applyStyle() {
@@ -396,10 +425,10 @@ function applyStyle() {
   const borderColor = $("border-color").value;
   const borderWidth = Number($("line-width").value);
   if (map.getLayer("h3-fill")) {
-    const weatherColor = state.dataOrigin === "search" && $("show-weather").checked
+    const weatherColor = state.dataOrigin === "search" && state.mapType === "h3" && $("show-weather").checked
       ? temperatureFillExpression(state.polygonPalette, color)
-      : state.aiDataset
-      ? polygonFillExpression(state.h3Data, state.dataProfile, state.polygonPalette, color)
+      : state.aiDataset || isRegionHexMode()
+      ? polygonFillExpression(isRegionHexMode() ? state.boundary : state.h3Data, state.dataProfile, state.polygonPalette, color)
       : color;
     map.setPaintProperty("h3-fill", "fill-color", weatherColor);
     map.setPaintProperty("h3-fill", "fill-opacity", opacity);
@@ -413,9 +442,9 @@ function applyStyle() {
     map.setPaintProperty("polygon-border", "line-width", borderWidth);
   }
   if (map.getLayer("data-lines")) {
-    map.setPaintProperty("data-lines", "line-color", state.congestionData ? congestionLineColorExpression() : "#c52e64");
-    map.setPaintProperty("data-lines", "line-width", state.congestionData ? 5 : 3);
-    map.setPaintProperty("data-lines", "line-opacity", state.congestionData ? .9 : 1);
+    map.setPaintProperty("data-lines", "line-color", activeRoadSuggestion() ? state.aiDataset.roadStyle?.color || "#94a3b8" : "#c52e64");
+    map.setPaintProperty("data-lines", "line-width", activeRoadSuggestion() ? state.roadDisplayStyle.width : 3);
+    map.setPaintProperty("data-lines", "line-opacity", activeRoadSuggestion() ? state.roadDisplayStyle.opacity : 1);
   }
   if (map.getLayer("point-marker")) {
     const view = activePointSuggestion() ? state.aiDataset.activePointView : null;
@@ -423,39 +452,39 @@ function applyStyle() {
   }
   applyMapLayerVisibility();
   renderMetroLegend();
-  renderCongestionLegend();
   renderWeatherLegend();
 }
 
 function applyMapLayerVisibility() {
   if (!map) return;
   const showLayers = $("show-map-layers")?.checked ?? false;
-  const showH3 = showLayers && state.mapType === "h3";
-  const showPolygon = showLayers && state.mapType === "polygon" && (!state.metroData || $("show-metro-cells").checked);
+  if (!showLayers) closeMapPopup();
+  const showH3 = showLayers && (state.mapType === "h3" || isRegionHexMode());
+  const showPolygon = showLayers && state.mapType === "polygon" && !isRegionHexMode() && (!state.metroData || $("show-metro-cells").checked);
   if (map.getLayer("h3-fill")) map.setLayoutProperty("h3-fill", "visibility", showH3 ? "visible" : "none");
   if (map.getLayer("h3-border")) map.setLayoutProperty("h3-border", "visibility", showH3 && $("show-border").checked ? "visible" : "none");
   if (map.getLayer("point-marker")) map.setLayoutProperty("point-marker", "visibility", showLayers && state.mapType === "point" ? "visible" : "none");
-  if (map.getLayer("point-circle")) map.setLayoutProperty("point-circle", "visibility", showLayers && state.mapType === "circle" ? "visible" : "none");
   if (map.getLayer("point-heatmap")) map.setLayoutProperty("point-heatmap", "visibility", showLayers && state.mapType === "heatmap" ? "visible" : "none");
   if (map.getLayer("polygon-fill")) map.setLayoutProperty("polygon-fill", "visibility", showPolygon ? "visible" : "none");
   if (map.getLayer("polygon-border")) map.setLayoutProperty("polygon-border", "visibility", showPolygon && $("show-border").checked ? "visible" : "none");
-  if (map.getLayer("vietnam-border")) map.setLayoutProperty("vietnam-border", "visibility", showLayers && (!state.metroData || $("show-metro-boundary").checked) ? "visible" : "none");
+  if (map.getLayer("vietnam-border")) map.setLayoutProperty("vietnam-border", "visibility", showLayers && !isRegionHexMode() && (!state.metroData || $("show-metro-boundary").checked) ? "visible" : "none");
   for (const id of ["metro-stations", "metro-station-labels"]) {
     if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", showLayers && state.metroData && $("show-metro-stations").checked ? "visible" : "none");
   }
-  if (map.getLayer("data-lines")) map.setLayoutProperty("data-lines", "visibility", showLayers && (state.congestionData || ($("show-map-lines").checked && (state.metroData || state.mapType === "line"))) ? "visible" : "none");
+  const showDataLines = activeRoadSuggestion() ? true : $("show-map-lines").checked;
+  if (map.getLayer("data-lines")) map.setLayoutProperty("data-lines", "visibility", showLayers && showDataLines && (state.metroData || state.mapType === "line") ? "visible" : "none");
   for (const layer of state.uploadLayers) {
     for (const layerId of layer.layerIds || []) {
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", showLayers ? "visible" : "none");
     }
   }
   $("metro-legend").hidden = !state.metroData || !showPolygon;
-  $("congestion-legend").hidden = !state.congestionData || !showLayers;
   renderTransportLegend();
   if (!showPolygon) { state.metroPopup?.remove(); state.metroPopup = null; }
   if (!showH3 && !showPolygon) cellPopup?.remove();
   renderWeatherLegend();
   renderPointLegend();
+  renderRoadLegend();
   if (state.mapType !== "point" || !showLayers) { pointPopup?.remove(); pointPopup = null; }
 }
 
@@ -469,7 +498,6 @@ function addMapLayers() {
     "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(33,102,172,0)", .2, "#2c7bb6", .4, "#00a6ca", .6, "#fdae61", .8, "#f46d43", 1, "#d73027"],
     "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 12, 28], "heatmap-opacity": .82
   } });
-  map.addLayer({ id: "point-circle", type: "circle", source: "point-data", paint: { "circle-radius": 7, "circle-color": "#7c5cff", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.25, "circle-opacity": .86 } });
   PointRenderer.render(map, state.pointData, {
     sourceId: "point-data",
     layerId: "point-marker",
@@ -502,13 +530,22 @@ function addMapLayers() {
     const label = document.createElement("strong"); label.textContent = feature.properties?.name || "Ga Metro";
     new maplibregl.Popup({ offset: 8 }).setLngLat(event.lngLat).setDOMContent(label).addTo(map);
   });
-  for (const id of ["polygon-fill", "metro-stations"]) {
+  map.on("click", "data-lines", event => {
+    const suggestion = activeRoadSuggestion(); const feature = event.features?.[0];
+    if (!suggestion || !feature) return;
+    openMapPopup(feature, event.lngLat, "data-lines");
+  });
+  for (const id of ["polygon-fill", "metro-stations", "data-lines"]) {
     map.on("mouseenter", id, () => { if (state.metroData || state.aiDataset) map.getCanvas().style.cursor = "pointer"; });
     map.on("mouseleave", id, () => map.getCanvas().style.cursor = "");
   }
   map.on("click", "h3-fill", event => {
     const p = event.features?.[0]?.properties; if (!p) return;
     const feature = state.h3Data.features.find(cell => cell.properties.h3 === p.h3) || event.features[0];
+    if (activePolygonSuggestion() && isRegionHexMode()) {
+      openMapPopup(feature, event.lngLat, "h3-fill");
+      return;
+    }
     if (state.aiDataset) {
       const popup = new maplibregl.Popup({ offset: 12, maxWidth: "360px", className: "ai-weather-popup" })
         .setDOMContent(aiWeatherPopupContent(feature));
@@ -533,40 +570,17 @@ function addMapLayers() {
     });
   });
   map.on("mouseenter", "h3-fill", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "h3-fill", () => map.getCanvas().style.cursor = "");
-  map.on("click", "point-circle", event => {
-    const feature = event.features?.[0]; if (!feature) return;
-    const rows = Object.entries(feature.properties || {}).map(([key, value]) => `<b>${key}:</b> ${String(value)}`).join("<br>");
-    new maplibregl.Popup({ offset: 9 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
-  });
-  map.on("mouseenter", "point-circle", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "point-circle", () => map.getCanvas().style.cursor = "");
   map.on("click", "point-marker", event => {
     const feature = event.features?.[0]; if (!feature) return;
     const activeSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
     if (activeSuggestion?.chartType === "point") {
-      const columns = state.aiDataset.analysis?.columns || [];
-      const titleColumn = columns.find(column => /(^|[\s_.-])(tên|ten|name)([\s_.-]|$)/i.test(column.name))
-        || columns.find(column => column.role === "id")
-        || columns.find(column => ["category", "text"].includes(column.role));
-      const card = createAiPopupContent(document, feature, columns, titleColumn?.name);
-      pointPopup?.remove();
-      pointPopup = new maplibregl.Popup({ offset: 10, maxWidth: "360px", className: "ai-weather-popup" })
-        .setLngLat(feature.geometry.coordinates)
-        .setDOMContent(card)
-        .addTo(map);
+      openMapPopup(feature, event.lngLat, "point-marker");
       return;
     }
     const rows = Object.entries(feature.properties || {}).map(([key, value]) => `<b>${key}:</b> ${String(value)}`).join("<br>");
     new maplibregl.Popup({ offset: 7 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
   });
   map.on("mouseenter", "point-marker", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "point-marker", () => map.getCanvas().style.cursor = "");
-  map.on("click", "data-lines", event => {
-    if (!state.congestionData) return;
-    const feature = event.features?.[0];
-    if (!feature) return;
-    showCongestionPopup(feature, event.lngLat);
-  });
-  map.on("mouseenter", "data-lines", () => { if (state.congestionData) map.getCanvas().style.cursor = "pointer"; });
-  map.on("mouseleave", "data-lines", () => { if (state.congestionData) map.getCanvas().style.cursor = ""; });
   map.on("click", event => {
     const layerIds = state.uploadLayers.flatMap(layer => layer.layerIds || []).filter(id => map.getLayer(id));
     if (!layerIds.length) return;
@@ -858,126 +872,6 @@ function selectMapStyle(styleKey) {
   }
 }
 
-let hanoiRoadsPromise = null;
-function loadHanoiRoads() {
-  if (!hanoiRoadsPromise) {
-    hanoiRoadsPromise = fetch("/roads/hanoi_roads.json")
-      .then(response => {
-        if (!response.ok) throw new Error(`Không tải được mạng đường Hà Nội (${response.status}).`);
-        return response.json();
-      })
-      .catch(error => { hanoiRoadsPromise = null; throw error; });
-  }
-  return hanoiRoadsPromise;
-}
-
-function clearCongestionData() {
-  state.congestionPopup?.remove();
-  state.congestionPopup = null;
-  state.congestionData = null;
-  state.congestionTime = null;
-  $("congestion-time")?.replaceChildren();
-  if ($("congestion-time-section")) $("congestion-time-section").hidden = true;
-  if ($("congestion-legend")) $("congestion-legend").hidden = true;
-}
-
-function renderCongestionLegend() {
-  const legend = $("congestion-legend");
-  if (!legend || !state.congestionData || !state.congestionTime) { if (legend) legend.hidden = true; return; }
-  const current = congestionAtTime(state.congestionData, state.congestionTime);
-  const { stats } = current;
-  const heading = document.createElement("div");
-  const title = document.createElement("strong");
-  const time = document.createElement("span");
-  heading.className = "congestion-legend-heading";
-  title.textContent = "Mức độ ùn tắc";
-  time.textContent = state.congestionTime;
-  heading.append(title, time);
-  const scale = document.createElement("div");
-  scale.className = "congestion-legend-scale";
-  for (const [label, color] of Object.entries(CONGESTION_COLORS)) {
-    const item = document.createElement("span");
-    const swatch = document.createElement("i");
-    swatch.style.backgroundColor = color;
-    item.append(swatch, label);
-    scale.append(item);
-  }
-  const note = document.createElement("small");
-  note.textContent = `${stats.matchedRows}/${stats.totalRows} tuyến khớp · ${stats.segmentCount.toLocaleString("vi-VN")} đoạn đường${stats.unmatched.length ? ` · Chưa khớp: ${stats.unmatched.join(", ")}` : ""}`;
-  legend.replaceChildren(heading, scale, note);
-  legend.hidden = !($("show-map-layers")?.checked ?? true);
-}
-
-function congestionPopupContent(feature) {
-  const p = feature.properties || {};
-  const card = document.createElement("div");
-  card.className = "congestion-popup";
-  const title = document.createElement("strong");
-  title.textContent = p.traffic_road_name || p.name || "Tuyến đường";
-  const details = [
-    ["Mức độ", p.traffic_level],
-    ["Thời điểm", p.traffic_timestamp],
-    ["Tốc độ TB", p.traffic_speed == null ? null : `${p.traffic_speed} km/h`],
-    ["Tốc độ thông thoáng", p.traffic_free_flow_speed == null ? null : `${p.traffic_free_flow_speed} km/h`],
-    ["Tỷ lệ tốc độ", p.traffic_ratio == null ? null : `${Math.round(Number(p.traffic_ratio) * 100)}%`],
-    ["Lưu lượng", p.traffic_volume == null ? null : `${Number(p.traffic_volume).toLocaleString("vi-VN")} xe/giờ`]
-  ].filter(([, value]) => value != null && value !== "");
-  const list = document.createElement("dl");
-  for (const [label, value] of details) {
-    const row = document.createElement("div");
-    const term = document.createElement("dt"); const description = document.createElement("dd");
-    term.textContent = label; description.textContent = String(value); row.append(term, description); list.append(row);
-  }
-  card.append(title, list);
-  return card;
-}
-
-function showCongestionPopup(feature, lngLat) {
-  state.congestionPopup?.remove();
-  state.congestionPopup = new maplibregl.Popup({ offset: 10, maxWidth: "330px" })
-    .setLngLat(lngLat)
-    .setDOMContent(congestionPopupContent(feature))
-    .addTo(map);
-}
-
-function updateCongestionTime() {
-  if (!state.congestionData) return;
-  state.congestionPopup?.remove(); state.congestionPopup = null;
-  state.congestionTime = $("congestion-time").value;
-  const current = congestionAtTime(state.congestionData, state.congestionTime);
-  state.lineData = { type: "FeatureCollection", features: current.features };
-  map.getSource("line-data")?.setData(state.lineData);
-  renderCongestionLegend();
-  applyStyle();
-  if (current.features.length) fitGeoJSON(state.lineData);
-}
-
-async function replaceCongestionData(records, name) {
-  setStatus("Đang tải và đối chiếu mạng đường Hà Nội…");
-  const roads = await loadHanoiRoads();
-  const congestionData = joinCongestionToRoads(records, roads);
-  clearAiMapState(); clearMetroData(); clearCongestionData();
-  state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null;
-  clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
-  state.dataOrigin = "congestion"; state.congestionData = congestionData; state.congestionTime = congestionData.times[0];
-  state.mapType = "line"; state.boundary = null; state.sourceBoundary = null; state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = EMPTY_FEATURE_COLLECTION;
-  $("congestion-time").replaceChildren(...congestionData.times.map(time => Object.assign(document.createElement("option"), { value: time, textContent: time })));
-  $("congestion-time").value = state.congestionTime;
-  $("file-name").textContent = name; $("file-note").textContent = `${records.length.toLocaleString("vi-VN")} bản ghi ùn tắc · ${congestionData.times.length} thời điểm`;
-  $("remove-current-file").hidden = false; $("selected-file").hidden = false;
-  map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
-  map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
-  const current = congestionAtTime(congestionData, state.congestionTime);
-  state.lineData = { type: "FeatureCollection", features: current.features };
-  map.getSource("line-data")?.setData(state.lineData);
-  renderCompatibleMapTypes(state.lineData);
-  state.mapType = "line";
-  updateModelSections(); applyStyle();
-  if (current.features.length) fitGeoJSON(state.lineData);
-  const missing = current.stats.unmatched.length;
-  setStatus(`Đã khớp ${current.stats.matchedRows}/${current.stats.totalRows} tuyến tại ${state.congestionTime}${missing ? ` · ${missing} tuyến chưa khớp` : ""}.`, true);
-}
-
 function clearMetroData() {
   state.metroPopup?.remove(); state.metroPopup = null;
   state.metroData = null; state.metroTime = null; state.lineData = EMPTY_FEATURE_COLLECTION;
@@ -1061,14 +955,131 @@ function showMetroComparison(event) {
 
 function aiWeatherPopupContent(feature) {
   const { recommendation } = state.aiDataset;
-  return createAiPopupContent(document, feature, state.aiDataset.analysis?.columns || [], recommendation.geometry?.field);
+  const columns = state.aiDataset.analysis?.columns || [];
+  return createAiPopupContent(document, feature, columns.map(column => column.role === "time"
+    && recommendation.filters?.some(filter => filter.field === column.name && filter.control === "datetime-select")
+    ? { ...column, granularity: "datetime" } : column), activeMapPopupSuggestion()?.chartType === "point" ? pointTitleField(columns) : recommendation.geometry?.field);
 }
 
 function showAiPolygonDetails(event) {
   const feature = event.features?.[0];
   if (!feature || !state.aiDataset) return;
+  if (activePolygonSuggestion()) {
+    openMapPopup(feature, event.lngLat);
+    return;
+  }
   const card = aiWeatherPopupContent(feature);
   new maplibregl.Popup({ offset: 12, maxWidth: "360px", className: "ai-weather-popup" }).setLngLat(event.lngLat).setDOMContent(card).addTo(map);
+}
+
+function activePolygonSuggestion() {
+  const dataset = state.aiDataset;
+  const suggestion = dataset?.suggestions?.find(item => item.id === dataset.selectedSuggestionId);
+  return suggestion?.chartType === "choropleth" ? suggestion : null;
+}
+
+function activeMapPopupSuggestion() {
+  const dataset = state.aiDataset;
+  const suggestion = dataset?.suggestions?.find(item => item.id === dataset.selectedSuggestionId);
+  return ["choropleth", "map_line", "point"].includes(suggestion?.chartType) ? suggestion : null;
+}
+
+function popupSelectionFor(suggestion = activeMapPopupSuggestion()) {
+  const dataset = state.aiDataset;
+  dataset.popupSelections ||= {};
+  const selection = dataset.popupSelections[suggestion.id] ||= { mode: "info", bar: null, line: null };
+  if (selection.mode !== "info" && !selection[selection.mode]) {
+    const metric = suggestion.chartType === "point" ? pointSelectionFor(suggestion).metricField : dataset.recommendation.metricField;
+    selection[selection.mode] = createPopupChartSelection(dataset.records, dataset.analysis.columns, metric, selection.mode, suggestion.bindings);
+  }
+  return selection;
+}
+
+function clearMapPopupChart(view) {
+  if (view?.chartContainer) {
+    chartRenderer(view.chartKind).clear(view.chartContainer);
+    view.chartContainer = null;
+  }
+}
+
+function closeMapPopup() {
+  const view = mapPopupView;
+  if (!view) return;
+  mapPopupView = null;
+  clearMapPopupChart(view);
+  view.popup.remove();
+}
+
+function renderMapPopup(view) {
+  clearMapPopupChart(view);
+  const dataset = state.aiDataset;
+  const selection = popupSelectionFor();
+  const card = selection.mode === "info" ? aiWeatherPopupContent(view.feature) : document.createElement("div");
+  let chart;
+  if (selection.mode !== "info") {
+    card.className = "weather-popup ai-popup-chart-only";
+    chart = buildPopupChart({ records: dataset.records, columns: dataset.analysis.columns,
+      feature: view.feature, regionField: dataset.recommendation.geometry.field,
+      kind: selection.mode, selection: selection[selection.mode], chartType: activeMapPopupSuggestion().chartType, bindings: activeMapPopupSuggestion().bindings });
+    const container = document.createElement("div");
+    container.className = chart.config ? "ai-popup-chart" : "weather-popup-status";
+    if (!chart.config) { container.textContent = chart.message; container.setAttribute("role", "status"); }
+    else { view.chartContainer = container; view.chartKind = selection.mode; }
+    card.append(container);
+  }
+  view.popup.setDOMContent(card);
+  const popupElement = view.popup.getElement();
+  popupElement.classList.toggle("has-popup-chart", selection.mode !== "info");
+  sizeMapPopup(view);
+  if (chart?.config) chartRenderer(selection.mode).render(view.chartContainer, chart.config);
+}
+
+function sizeMapPopup(view) {
+  const popupElement = view.popup.getElement();
+  const mapContainer = map.getContainer();
+  popupElement.style.setProperty("--popup-map-width", `${Math.max(0, mapContainer.clientWidth - 32)}px`);
+  popupElement.style.setProperty("--popup-map-height", `${Math.max(0, mapContainer.clientHeight - 32)}px`);
+  // Keep the whole card inside the map, including after changing its type or
+  // resizing the sidebar. The tip is hidden, so a centered card can be clamped.
+  const point = map.project(view.lngLat);
+  const halfWidth = popupElement.offsetWidth / 2;
+  const halfHeight = popupElement.offsetHeight / 2;
+  view.popup.setLngLat(map.unproject([
+    Math.max(halfWidth + 16, Math.min(mapContainer.clientWidth - halfWidth - 16, point.x)),
+    Math.max(halfHeight + 16, Math.min(mapContainer.clientHeight - halfHeight - 16, point.y))
+  ]));
+}
+
+function openMapPopup(feature, lngLat, layerId = null) {
+  closeMapPopup();
+  cellPopup?.remove();
+  const popup = new maplibregl.Popup({ anchor: "center", maxWidth: "520px", className: "ai-weather-popup ai-map-popup" })
+    .setDOMContent(document.createElement("div"));
+  const view = { popup, feature, lngLat, layerId, chartContainer: null, chartKind: null };
+  mapPopupView = view;
+  popup.on("close", () => {
+    clearMapPopupChart(view);
+    if (mapPopupView === view) mapPopupView = null;
+  });
+  if (layerId === "h3-fill") openCellPopup(popup, feature, layerId);
+  else popup.setLngLat(lngLat).addTo(map);
+  renderMapPopup(view);
+}
+
+function refreshMapPopup() {
+  const view = mapPopupView;
+  if (!view) return;
+  const suggestion = activeMapPopupSuggestion();
+  if (!suggestion) { closeMapPopup(); return; }
+  const field = suggestion.bindings.region;
+  const features = view.layerId === "point-marker" ? state.pointData.features : view.layerId === "data-lines" ? state.lineData.features : view.layerId === "h3-fill" ? state.h3Data.features : state.boundary?.features;
+  const feature = (view.layerId === "point-marker" && view.feature.id != null ? features?.find(item => item.id === view.feature.id) : null) || features?.find(item => view.layerId === "h3-fill"
+    ? item.properties.h3 === view.feature.properties.h3
+    : popupFeaturesMatch(item, view.feature, field, { chartType: suggestion.chartType, columns: state.aiDataset.analysis.columns, bindings: suggestion.bindings }));
+  if (!feature) { closeMapPopup(); return; }
+  view.feature = feature;
+  if (view.layerId === "h3-fill") showCellFocus(feature, view.layerId);
+  renderMapPopup(view);
 }
 
 function updateMetroTime() {
@@ -1083,7 +1094,6 @@ function updateMetroTime() {
 }
 
 async function replaceMetroData(data, name) {
-  clearCongestionData();
   await replaceBoundary(metroCellsAtTime(data, data.times[0]), name, null, { preservePolygons: true });
   state.metroData = data; state.metroTime = data.times[0]; state.mapType = "polygon"; state.polygonPalette = "travel";
   state.lineData = data.metro_route;
@@ -1100,16 +1110,15 @@ async function replaceMetroData(data, name) {
   setStatus("Đã hiển thị vùng dữ liệu, đường bao, các ga và tuyến Metro.", true);
 }
 
-function applyPointStyle() {
-  if (!map?.getLayer("point-circle")) return;
+function applyHeatmapWeight() {
+  if (!map?.getLayer("point-heatmap")) return;
   const field = state.dataProfile?.numericFields?.[0];
   const values = field ? state.pointData.features.map(feature => Number(feature.properties?.[field])).filter(Number.isFinite) : [];
   const min = values.length ? Math.min(...values) : 0; const max = values.length ? Math.max(...values) : 0;
   if (field && max > min) {
-    map.setPaintProperty("point-circle", "circle-radius", ["interpolate", ["linear"], ["to-number", ["get", field], min], min, 5, max, 16]);
     map.setPaintProperty("point-heatmap", "heatmap-weight", ["interpolate", ["linear"], ["to-number", ["get", field], min], min, .15, max, 1]);
   } else {
-    map.setPaintProperty("point-circle", "circle-radius", 7); map.setPaintProperty("point-heatmap", "heatmap-weight", 1);
+    map.setPaintProperty("point-heatmap", "heatmap-weight", 1);
   }
 }
 
@@ -1118,7 +1127,42 @@ function estimateCellCount(resolution) {
   return Math.round(state.baselineCount * Math.pow(7, resolution - CONFIG.DEFAULT_RESOLUTION));
 }
 
+let regionHexBuildRevision = 0;
+
+async function rebuildRegionHexGrid({ fit = false } = {}) {
+  const revision = ++regionHexBuildRevision;
+  const boundary = state.boundary;
+  const requestedResolution = state.regionHexResolution;
+  if (!boundary || !isRegionHexMode()) return;
+  setStatus(`Đang tạo lưới lục giác ở độ phân giải ${requestedResolution}…`);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  if (revision !== regionHexBuildRevision || boundary !== state.boundary || !isRegionHexMode()) return;
+  try {
+    const result = buildRegionHexGrid(boundary, requestedResolution, CONFIG.MAX_RENDER_CELLS);
+    state.h3Data = result.data;
+    state.regionHexResolution = result.resolution;
+    syncRegionHexControls();
+    map.getSource("h3-grid")?.setData(state.h3Data);
+    const count = result.data.features.length;
+    $("region-hex-note").textContent = result.resolution !== requestedResolution
+      ? `Đã dùng độ phân giải ${result.resolution} để giữ số ô trong giới hạn ${CONFIG.MAX_RENDER_CELLS.toLocaleString("vi-VN")} ô.`
+      : !count ? "Chưa có ô ở độ phân giải này. Tăng độ phân giải để hiển thị vùng nhỏ." : "";
+    $("cell-count").textContent = count.toLocaleString("vi-VN");
+    $("cell-label").textContent = `Tổng số cell (res ${result.resolution})`;
+    state.page = 1; updateDashboard();
+    syncPolygonPaletteControls(); applyStyle();
+    if (fit && count) fitBoundary();
+    setStatus(`Đã vẽ ${count.toLocaleString("vi-VN")} ô lục giác.`, true);
+  } catch (error) {
+    state.regionHexEnabled = false;
+    syncRegionHexControls(); applyStyle();
+    $("region-hex-note").textContent = error.message || "Không thể tạo lưới lục giác.";
+    setStatus("Không thể tạo lưới lục giác.", true);
+  }
+}
+
 async function rebuildGrid({ fit = false } = {}) {
+  if (isRegionHexMode()) return rebuildRegionHexGrid({ fit });
   const selectedAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
   if (selectedAiSuggestion?.chartType === "hex_h3") return refreshAiH3({ fit });
   if (!state.boundary) { setStatus("Hãy upload dữ liệu không gian trước."); return; }
@@ -1250,11 +1294,14 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 }
 
 function clearUploadedData() {
+  closeMapPopup();
+  regionHexBuildRevision += 1;
+  state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
+  $("region-hex-note").textContent = "";
   tabularAbortController?.abort(); tabularAbortController = null; tabularLoadRevision += 1;
   cancelAiBoundaryLoad();
   weatherLoadRevision += 1;
   clearMetroData();
-  clearCongestionData();
   clearUploadLayers();
   state.boundary = null; state.sourceBoundary = null; state.h3Data = { type: "FeatureCollection", features: [] };
   state.pointData = { type: "FeatureCollection", features: [] };
@@ -1275,10 +1322,16 @@ function clearUploadedData() {
 }
 
 async function resetConfiguration() {
+  regionHexBuildRevision += 1;
+  state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
+  $("region-hex-note").textContent = "";
+  syncRegionHexControls();
   state.resolution = CONFIG.DEFAULT_RESOLUTION;
   state.barStyle = mergeBarConfig();
   state.pieStyle = mergePieConfig();
   state.pointStyle = mergePointStyle();
+  state.roadDisplayStyle = { ...DEFAULT_ROAD_DISPLAY_STYLE };
+  if (activeRoadSuggestion()) state.aiDataset.roadColorOverrides = Object.create(null);
   state.polygonPalette = state.metroData ? "travel" : (state.dataOrigin === "search" || state.aiDataset) ? "diverging" : null;
 
   $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
@@ -1292,11 +1345,18 @@ async function resetConfiguration() {
   $("border-color-value").textContent = "#FFFFFF";
   $("line-width").value = .5;
   $("line-width-value").value = "0.5 px";
+  $("road-line-width").value = DEFAULT_ROAD_DISPLAY_STYLE.width;
+  $("road-line-width-value").value = `${DEFAULT_ROAD_DISPLAY_STYLE.width} px`;
+  $("road-line-opacity").value = DEFAULT_ROAD_DISPLAY_STYLE.opacity;
+  $("road-line-opacity-value").value = "100%";
+  $("road-show-legend").checked = DEFAULT_ROAD_DISPLAY_STYLE.showLegend;
   if (!state.chartConfig) syncPolygonPaletteControls();
   $("show-map-layers").checked = true;
   $("show-map-layers-status").textContent = "Đang bật";
-  $("show-weather").checked = true;
-  $("show-weather-status").textContent = "Đang bật";
+  weatherLoadRevision += 1;
+  cellPopup?.remove();
+  $("show-weather").checked = false;
+  $("show-weather-status").textContent = "Đang tắt";
   for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).checked = true;
 
   if (state.chartConfig) {
@@ -1322,8 +1382,10 @@ async function resetConfiguration() {
   } else if (state.mapType === "point") {
     if (state.aiDataset) state.aiDataset.pointColorOverrides = Object.create(null);
     refreshPointStyle(); renderPointStyleControls();
-  } else if (state.congestionData) {
-    $("congestion-time").value = state.congestionData.times[0]; updateCongestionTime();
+  } else if (activeRoadSuggestion()) {
+    const suggestion = activeRoadSuggestion();
+    state.aiDataset.roadStyle = roadMapStyle(state.lineData, state.aiDataset.analysis.columns.find(column => column.name === suggestion.bindings.value));
+    renderRoadStyleControls();
   } else if (state.metroData) {
     $("metro-departure").value = state.metroData.times[0]; updateMetroTime();
   } else if (state.boundary) {
@@ -1377,7 +1439,7 @@ function renderChartStyleControls() {
   const activeAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
   const isAiBar = activeAiSuggestion?.chartType === "bar" && state.chartConfig.chartKind === "bar";
   const panelConfig = isAiBar
-    ? { ...state.barStyle, limit: state.aiDataset.barLimits?.[activeAiSuggestion.id] ?? 12 }
+    ? { ...state.barStyle, limit: state.aiDataset.barLimits?.[activeAiSuggestion.id] ?? defaultBarLimit(activeAiSuggestion, state.aiDataset.analysis.columns) }
     : state.chartConfig.chartKind === "line"
       ? { ...state.barStyle, showDataLabels: Boolean(state.chartConfig.showDataLabels) }
       : state.barStyle;
@@ -1428,12 +1490,7 @@ function resetDisplayedMetrics() {
   const dataset = state.chartAnalysis?.datasets.find(item => item.path === state.chartMapping?.datasetPath);
   if (!dataset) return;
   const variant = state.chartConfig?.variant;
-  const count = variant === "single" ? 1 : variant === "double" ? 2 : variant === "line"
-    ? Math.min(3, dataset.suggestedMetrics.length)
-    : ["pie", "halfPie"].includes(variant)
-    ? Math.min(6, dataset.suggestedMetrics.length)
-    : Math.min(4, dataset.suggestedMetrics.length);
-  applyChartMappingChange({ metrics: dataset.suggestedMetrics.slice(0, count) });
+  applyChartMappingChange({ metrics: defaultMetricSelection(dataset, variant) });
   showToast("Đã đặt lại chỉ số hiển thị.");
 }
 
@@ -1441,8 +1498,7 @@ function applyChartMappingChange(change) {
   let mapping = { ...state.chartMapping, ...change };
   if (change.datasetPath) {
     const nextDataset = state.chartAnalysis.datasets.find(dataset => dataset.path === change.datasetPath);
-    const count = state.chartConfig.variant === "single" ? 1 : state.chartConfig.variant === "double" ? 2 : state.chartConfig.variant === "line" ? Math.min(3, nextDataset.suggestedMetrics.length) : ["pie", "halfPie"].includes(state.chartConfig.variant) ? Math.min(6, nextDataset.suggestedMetrics.length) : Math.min(4, nextDataset.suggestedMetrics.length);
-    mapping = { datasetPath: nextDataset.path, xField: nextDataset.suggestedCategory, metrics: nextDataset.suggestedMetrics.slice(0, count) };
+    mapping = { datasetPath: nextDataset.path, xField: nextDataset.suggestedCategory, metrics: defaultMetricSelection(nextDataset, state.chartConfig.variant) };
   }
   state.chartMapping = mapping;
   const dataset = state.chartAnalysis.datasets.find(item => item.path === mapping.datasetPath);
@@ -1466,7 +1522,7 @@ function applyChartMappingChange(change) {
           : `Cơ cấu các chỉ số theo ${humanizeField(mapping.xField).toLowerCase()}`
         : state.chartConfig.variant === "single"
         ? `${humanizeField(mapping.metrics[0])} theo ${humanizeField(mapping.xField).toLowerCase()}`
-        : `${state.chartConfig.variant === "double" ? "So sánh hai chỉ số" : "So sánh nhiều chỉ số"} · ${dataset.label}`
+        : `So sánh nhiều chỉ số · ${dataset.label}`
     };
     renderChartCanvas();
     renderChartStyleControls();
@@ -1476,10 +1532,12 @@ function applyChartMappingChange(change) {
 
 function showChartStyleControls(show) {
   const isPoint = !show && state.mapType === "point";
-  $("map-style-controls").hidden = show || isPoint;
+  const isRoad = !show && Boolean(activeRoadSuggestion());
+  $("map-style-controls").hidden = show || isPoint || isRoad;
   $("point-style-controls").hidden = !isPoint;
+  $("road-style-controls").hidden = !isRoad;
   $("bar-style-controls").hidden = !show;
-  $("style-description").textContent = show ? "Tùy chỉnh biểu đồ" : "Màu sắc, độ mờ và đường viền";
+  $("style-description").textContent = show ? "Tùy chỉnh biểu đồ" : isRoad ? "Màu sắc, độ dày, độ mờ và chú giải tuyến" : "Màu sắc, độ mờ và đường viền";
   if (show) renderChartStyleControls();
   else {
     clearBarStylePanel($("bar-style-controls"));
@@ -1487,10 +1545,48 @@ function showChartStyleControls(show) {
   }
 }
 
+function roadColorOverridesFor(suggestion) {
+  const dataset = state.aiDataset;
+  dataset.roadColorOverrides ||= Object.create(null);
+  return dataset.roadColorOverrides[suggestion.bindings.value || dataset.recommendation?.metricField || "__path"] ||= Object.create(null);
+}
+
+function aiLineStyle(data, suggestion) {
+  const dataset = state.aiDataset;
+  const field = suggestion.bindings.value || dataset.recommendation.metricField;
+  const column = dataset.analysis.columns.find(item => item.name === field);
+  const colors = roadColorOverridesFor(suggestion);
+  const color = colors.path || "#00d084";
+  return column ? roadMapStyle(data, column, colors) : { color, rows: [{ key: "path", label: "Chuỗi tọa độ", color }] };
+}
+
+function renderRoadStyleControls() {
+  const suggestion = activeRoadSuggestion();
+  const rows = suggestion ? state.aiDataset.roadStyle?.rows || [] : [];
+  $("road-line-width").value = state.roadDisplayStyle.width;
+  $("road-line-width-value").value = `${state.roadDisplayStyle.width} px`;
+  $("road-line-opacity").value = state.roadDisplayStyle.opacity;
+  $("road-line-opacity-value").value = `${Math.round(state.roadDisplayStyle.opacity * 100)}%`;
+  $("road-show-legend").checked = state.roadDisplayStyle.showLegend;
+  $("road-color-field").hidden = !rows.length;
+  $("road-style-colors").replaceChildren(...rows.map(item => {
+    const row = document.createElement("label"); row.className = "bar-color-row";
+    const label = document.createElement("span"); label.textContent = item.label; label.title = item.label;
+    const control = document.createElement("span"); control.className = "color-control";
+    const input = Object.assign(document.createElement("input"), { type: "color", value: item.color, className: "road-style-color" });
+    input.dataset.key = item.key; input.setAttribute("aria-label", `Màu ${item.label}`);
+    const code = document.createElement("code"); code.textContent = item.color.toUpperCase();
+    control.append(input, code); row.append(label, control);
+    return row;
+  }));
+}
+
 function clearAiMapState() {
+  closeMapPopup();
   cancelAiBoundaryLoad();
   pointPopup?.remove(); pointPopup = null;
   state.aiDataset = null;
+  $("ai-line-legend").hidden = true;
   $("point-legend").hidden = true;
   $("ai-data-filters").hidden = true;
   $("ai-filter-controls").replaceChildren();
@@ -1522,8 +1618,6 @@ function normalizeTravelTimeRecords(records) {
 }
 
 async function analyzeTabularRecords(records, profile, { signal, source = null } = {}) {
-  const congestionRecords = normalizeCongestionRecords(records);
-  if (congestionRecords) return { kind: "congestion", records: congestionRecords };
   const travelRecords = normalizeTravelTimeRecords(records);
   if (travelRecords) return { kind: "metro-part", role: "travel_times", data: travelRecords };
   const pipeline = await requestAiDataAnalysis(records, {
@@ -1585,7 +1679,7 @@ async function readSpatialFile(file, { sheetName = null, signal } = {}) {
       source: { fileName: file.name, extension }
     });
   }
-  return { kind: "chart", analysis: analyzeBarData(parsed) };
+  throw new Error("Dữ liệu đầu vào cần địa danh hành chính, tên đường hoặc tọa độ để tạo bản đồ Polygon, Line hoặc Point.");
 }
 
 function uniqueRecordValues(records, field) {
@@ -1610,6 +1704,11 @@ function lineSelectionFor(dataset, suggestion) {
   };
 }
 
+function barSelectionFor(dataset, suggestion) {
+  dataset.barSelections ||= {};
+  return dataset.barSelections[suggestion.id] = normalizeBarSelection(suggestion, dataset.analysis.columns, dataset.barSelections[suggestion.id]);
+}
+
 function aiLineRegionField(dataset, suggestion) {
   if (suggestion.bindings.series) return suggestion.bindings.series;
   const columns = dataset.analysis.columns;
@@ -1617,27 +1716,24 @@ function aiLineRegionField(dataset, suggestion) {
   return (geo || columns.find(column => column.role === "category"))?.name || null;
 }
 
-function filterByTimeRange(records, field, from, to) {
-  const lo = Date.parse(from);
-  const hi = Date.parse(to);
-  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return records;
-  return records.filter(record => {
-    const value = record?.[field];
-    const time = value instanceof Date ? value.getTime() : Date.parse(value);
-    return Number.isFinite(time) && time >= lo && time <= hi;
-  });
-}
-
 function populateAiFilters(dataset) {
+  const selected = dataset.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+  if (selected?.chartType === "choropleth") return populatePolygonFilters(dataset, selected);
   const { records, recommendation } = dataset;
   const controls = $("ai-filter-controls");
   const initialFilters = {};
   const savedFilters = dataset.filters || {};
   const metricControls = [];
-  const measureColumns = dataset.analysis?.columns?.filter(column => column.role === "measure") || [];
-  if (recommendation.metricField && measureColumns.length > 1) {
+  const suggestion = dataset.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+  const mapColumns = isCoordinateLine(suggestion) ? dataset.analysis.columns.filter(column =>
+    ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name)) : dataset.analysis.columns;
+  const measureColumns = suggestion?.chartType === "map_line"
+    ? roadValueColumns(mapColumns, records, suggestion.bindings.region)
+    : dataset.analysis?.columns?.filter(column => column.role === "measure") || [];
+  if (recommendation.metricField && (measureColumns.length > 1 || suggestion?.chartType === "map_line" && measureColumns.length)) {
     const label = document.createElement("label"); const caption = document.createElement("span"); const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
-    caption.textContent = "Chỉ số"; select.className = "ai-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số hiển thị");
+    caption.textContent = suggestion?.chartType === "map_line" ? "Chỉ số tô màu bản đồ" : "Chỉ số";
+    select.className = "ai-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số hiển thị");
     select.replaceChildren(...measureColumns.map(column => Object.assign(document.createElement("option"), {
       value: column.name,
       textContent: column.labelVi || humanizeField(column.name)
@@ -1645,24 +1741,28 @@ function populateAiFilters(dataset) {
     select.value = recommendation.metricField; label.append(caption, select); metricControls.push(label);
   }
   const filterControls = recommendation.filters.flatMap(filter => {
+    const column = dataset.analysis.columns.find(item => item.name === filter.field);
     const values = uniqueRecordValues(records, filter.field).sort((a, b) =>
-      filter.control === "date-select" ? a[0].localeCompare(b[0]) : String(a[1]).localeCompare(String(b[1]), "vi")
+      column?.role === "time" ? compareTimeValues(a[1], b[1], column) : String(a[1]).localeCompare(String(b[1]), "vi")
     );
-    if (values.length < 2) return [];
+    if (!values.length || values.length < 2 && !filter.showSingle) return [];
     const label = document.createElement("label");
     const caption = document.createElement("span");
     caption.textContent = filter.label || filter.field;
-    if (filter.field === recommendation.geometry.field) {
+    if (filter.toggle || filter.field === recommendation.geometry.field) {
       const multiselect = document.createElement("div");
       const toggle = document.createElement("button");
       const menu = document.createElement("div");
       const toggleText = document.createElement("span");
       const chevron = document.createElement("span");
+      const selectedValues = values.filter(([value]) => Array.isArray(savedFilters[filter.field]) && savedFilters[filter.field].includes(value));
       multiselect.className = "ai-multiselect";
       toggle.type = "button";
       toggle.className = "ai-multiselect-toggle";
       toggle.setAttribute("aria-expanded", "false");
-      toggleText.textContent = `Chọn ${caption.textContent.toLocaleLowerCase("vi")}`;
+      toggleText.textContent = selectedValues.length === 1 ? displayFilterValue(selectedValues[0][1], filter.control)
+        : selectedValues.length > 1 ? `${selectedValues.length} giá trị đã chọn`
+          : filter.emptyLabel || `Chọn ${caption.textContent.toLocaleLowerCase("vi")}`;
       chevron.textContent = "⌄";
       chevron.setAttribute("aria-hidden", "true");
       toggle.append(toggleText, chevron);
@@ -1675,6 +1775,7 @@ function populateAiFilters(dataset) {
         input.type = "checkbox";
         input.className = "ai-generated-filter";
         input.dataset.field = filter.field;
+        if (filter.singleToggle) input.dataset.singleToggle = "true";
         input.value = value;
         input.checked = Array.isArray(savedFilters[filter.field]) && savedFilters[filter.field].includes(value);
         text.textContent = displayFilterValue(raw, filter.control);
@@ -1682,7 +1783,7 @@ function populateAiFilters(dataset) {
         return option;
       }));
       multiselect.append(toggle, menu);
-      initialFilters[filter.field] = values.filter(([value]) => Array.isArray(savedFilters[filter.field]) && savedFilters[filter.field].includes(value)).map(([value]) => value);
+      initialFilters[filter.field] = selectedValues.map(([value]) => value);
       label.append(caption, multiselect);
       return [label];
     }
@@ -1706,7 +1807,11 @@ function populateAiFilters(dataset) {
     label.append(caption, select);
     return [label];
   });
-  controls.replaceChildren(...metricControls, ...filterControls);
+  if (suggestion?.chartType === "map_line") {
+    const mapControls = document.createElement("div"); mapControls.className = "ai-popup-map-controls";
+    mapControls.append(...metricControls, ...filterControls);
+    controls.replaceChildren(...buildMapPopupControls(dataset, suggestion), mapControls);
+  } else controls.replaceChildren(...metricControls, ...filterControls);
   dataset.filters = initialFilters;
   $("ai-data-filters").hidden = controls.children.length === 0;
   return initialFilters;
@@ -1726,21 +1831,30 @@ function selectedAiFilters() {
 function recommendationForSuggestion(suggestion) {
   const dataset = state.aiDataset;
   const columns = new Map(dataset.analysis.columns.map(column => [column.name, column]));
-  const valueField = suggestion.bindings.value || (Array.isArray(suggestion.bindings.y) ? suggestion.bindings.y[0] : suggestion.bindings.y);
+  const coordinateLine = isCoordinateLine(suggestion);
+  const coordinateMap = coordinateLine || suggestion.chartType === "point";
+  const valueField = suggestion.bindings.value || (Array.isArray(suggestion.bindings.y) ? suggestion.bindings.y[0] : suggestion.bindings.y)
+    || (coordinateMap ? dataset.analysis.columns.find(column => column.role === "measure" && ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name))?.name : null);
   const regionField = suggestion.bindings.region;
   const region = columns.get(regionField);
-  const timeFilter = defaultTimeFilter(dataset.records, dataset.analysis.columns, suggestion.chartType);
+  const areaField = suggestion.chartType === "map_line" && !coordinateLine ? roadAreaField(dataset.analysis.columns) : null;
+  const area = columns.get(areaField);
+  const timeFilter = coordinateLine ? null : defaultTimeFilter(dataset.records, dataset.analysis.columns, suggestion.chartType);
   return {
     canRenderMap: true,
-    visualization: suggestion.chartType === "choropleth" ? "polygon" : suggestion.chartType === "point" ? "point" : "h3",
-    geometry: regionField
-      ? { field: regionField, provider: "maptiler", placeType: region?.geoLevel === "admin2" ? "county" : "region" }
+    visualization: suggestion.chartType === "map_line" ? "line" : suggestion.chartType === "choropleth" ? "polygon" : suggestion.chartType === "point" ? "point" : "h3",
+    geometry: coordinateMap ? { field: regionField || null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: coordinateLine ? "line" : "point" } : regionField
+      ? { field: regionField, provider: suggestion.chartType === "map_line" ? "local-roads" : "maptiler", placeType: region?.geoLevel === "admin2" ? "county" : "region" }
       : { field: null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: "point" },
     metricField: valueField,
     numericFields: dataset.analysis.columns.filter(column => column.role === "measure").map(column => column.name),
     filters: [
+      ...(areaField && areaField !== regionField ? [{
+        field: areaField, label: area?.labelVi || areaField, control: "select",
+        toggle: true, singleToggle: true, showSingle: true, emptyLabel: "Chọn khu vực", fit: true
+      }] : []),
       ...(regionField ? [{ field: regionField, label: region?.labelVi || regionField, control: "select", allowAll: true }] : []),
-      ...(timeFilter ? [{ field: timeFilter.column, label: columns.get(timeFilter.column)?.labelVi || timeFilter.column, control: "date-select", allowAll: false, default: timeFilter.default }] : [])
+      ...(timeFilter ? [{ field: timeFilter.column, label: columns.get(timeFilter.column)?.labelVi || timeFilter.column, control: timeFilter.control, allowAll: false, default: timeFilter.default }] : [])
     ],
     title: suggestion.title,
     explanation: suggestion.reason,
@@ -1762,8 +1876,8 @@ function createAiSuggestionButton(suggestion) {
   button.dataset.type = suggestion.id;
   button.disabled = !suggestion.available && !suggestion.repairable;
   button.title = suggestion.available ? suggestion.reason : suggestion.repairable ? `${suggestion.unavailableReason} Bấm để sửa alias.` : suggestion.unavailableReason;
-  if (["choropleth", "point", "hex_h3"].includes(suggestion.chartType)) {
-    renderMapIcon(icon, suggestion.chartType === "choropleth" ? "polygon" : suggestion.chartType === "point" ? "point" : "hexagon");
+  if (["choropleth", "point", "hex_h3", "map_line"].includes(suggestion.chartType)) {
+    renderMapIcon(icon, AI_CHART_REGISTRY[suggestion.chartType].icon);
   }
   else renderChartIcon(icon, suggestion.chartType === "line" ? "line" : "singleBar");
   title.className = "ai-suggestion-title"; title.textContent = AI_CHART_REGISTRY[suggestion.chartType].label;
@@ -1776,22 +1890,26 @@ function createAiSuggestionButton(suggestion) {
 function renderAiSuggestionGrid() {
   if (!state.aiDataset) return;
   const grid = $("map-type-grid");
-  const suggestionButtons = state.aiDataset.suggestions.map(createAiSuggestionButton);
+  const suggestions = mapDisplaySuggestions(state.aiDataset.suggestions, state.aiDataset.selectedSuggestionId);
+  const suggestionButtons = suggestions.map(createAiSuggestionButton);
   const suggestionHeading = document.createElement("div");
   suggestionHeading.className = "ai-manual-heading ai-suggestion-heading";
-  const hasRuleSuggestions = state.aiDataset.suggestions.some(suggestion => suggestion.source === "rule");
-  suggestionHeading.textContent = state.aiDataset.suggestions.length
-    ? hasRuleSuggestions ? "Đề xuất biểu đồ" : "AI đề xuất"
-    : "Chưa có kiểu biểu đồ phù hợp được đề xuất";
+  const hasRuleSuggestions = suggestions.some(suggestion => suggestion.source === "rule");
+  suggestionHeading.textContent = suggestions.length
+    ? hasRuleSuggestions ? "Đề xuất bản đồ" : "AI đề xuất"
+    : "Chưa có kiểu bản đồ phù hợp được đề xuất";
   grid.className = "map-type-grid has-ai-suggestions";
   grid.replaceChildren(suggestionHeading, ...suggestionButtons);
   const source = state.aiDataset.analysis.source === "ai" ? hasRuleSuggestions ? "AI và phân tích dữ liệu" : "AI" : "phân tích dữ liệu";
-  $("map-type-summary").textContent = `${state.aiDataset.analysis.datasetTitle} · ${state.aiDataset.analysis.grain} · ${state.aiDataset.suggestions.length} đề xuất từ ${source}`;
+  $("map-type-summary").textContent = `${state.aiDataset.analysis.datasetTitle} · ${state.aiDataset.analysis.grain} · ${suggestions.length} đề xuất từ ${source}`;
   showSupportedChartCatalog(false);
 }
 
 function clearMapForAiChart() {
+  closeMapPopup();
   state.boundary = null; state.sourceBoundary = null; state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = EMPTY_FEATURE_COLLECTION;
+  state.lineData = EMPTY_FEATURE_COLLECTION;
+  map.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
 }
@@ -1811,6 +1929,149 @@ function aiSelect(className, choices, value) {
     Object.assign(document.createElement("option"), { value: optionValue, textContent: text })));
   select.value = value;
   return keepSelectOpenAfterMouseClick(select);
+}
+
+function buildMapPopupControls(dataset, suggestion) {
+  const columns = dataset.analysis.columns;
+  const selection = popupSelectionFor(suggestion);
+  const group = document.createElement("div");
+  group.className = "ai-control-group";
+  const caption = document.createElement("span"); caption.textContent = "Kiểu hiển thị popup";
+  const types = document.createElement("div");
+  types.className = "ai-popup-types";
+  types.setAttribute("role", "group"); types.setAttribute("aria-label", "Kiểu hiển thị popup");
+  const time = popupTimeColumn(columns);
+  const subject = suggestion.chartType === "map_line" ? "tuyến" : suggestion.chartType === "point" ? "điểm" : "vùng";
+  for (const [mode, label, description, iconName] of [
+    ["info", "Chỉ hiển thị thông tin", "Hiển thị các chỉ số dưới dạng thẻ thông tin", null],
+    ["bar", "Biểu đồ cột", `Hiển thị biểu đồ cột của ${subject} được chọn`, "singleBar"],
+    ["line", "Biểu đồ đường", time ? `Hiển thị biểu đồ đường của ${subject} được chọn` : "Cần cột thời gian để vẽ biểu đồ đường", "line"]
+  ]) {
+    const button = document.createElement("button"); const icon = document.createElement("span");
+    const copy = document.createElement("span"); const title = document.createElement("b");
+    const detail = document.createElement("small"); const check = document.createElement("span");
+    button.type = "button"; button.className = `ai-popup-type${selection.mode === mode ? " active" : ""}`;
+    button.dataset.popupMode = mode; button.setAttribute("aria-pressed", String(selection.mode === mode));
+    button.disabled = mode === "line" && !time;
+    if (button.disabled) button.title = description;
+    icon.className = "ai-popup-type-icon"; icon.setAttribute("aria-hidden", "true");
+    if (iconName) { renderChartIcon(icon, iconName); icon.className = "chart-type-icon ai-popup-type-icon"; }
+    else icon.textContent = "▦";
+    title.textContent = label; detail.textContent = description; copy.append(title, detail);
+    check.className = "ai-popup-type-check"; check.textContent = "✓"; check.setAttribute("aria-hidden", "true");
+    button.append(icon, copy, check); types.append(button);
+  }
+  group.append(caption, types);
+  const nodes = [group];
+  if (selection.mode !== "info") nodes.push(buildMapPopupSettings(dataset, selection));
+  return nodes;
+}
+
+function populatePolygonFilters(dataset, suggestion) {
+  const columns = dataset.analysis.columns;
+  const time = popupTimeColumn(columns);
+  const nodes = buildMapPopupControls(dataset, suggestion);
+  const mapControls = document.createElement("div"); mapControls.className = "ai-popup-map-controls";
+  const measures = columns.filter(column => column.role === "measure");
+  mapControls.append(aiField("Chỉ số tô màu bản đồ", aiSelect("ai-metric-selector",
+    measures.map(column => [column.name, column.labelVi || humanizeField(column.name)]), dataset.recommendation.metricField)));
+  const filters = {};
+  const times = time ? uniqueTimeValues(dataset.records, time) : [];
+  if (times.length) {
+    const choices = times.map(value => [comparableFilterValue(value), formatTimeValue(value, time,
+      value instanceof Date && Boolean(value.getUTCHours() || value.getUTCMinutes() || value.getUTCSeconds()))]);
+    const saved = dataset.filters?.[time.name];
+    const value = choices.some(([key]) => key === saved) ? saved : choices.at(-1)[0];
+    const control = aiSelect("ai-generated-filter", choices, value);
+    control.dataset.field = time.name; control.setAttribute("aria-label", "Ngày hiển thị bản đồ");
+    filters[time.name] = value;
+    mapControls.append(aiField("Ngày hiển thị", control));
+  }
+  nodes.push(mapControls);
+  $("ai-filter-controls").replaceChildren(...nodes);
+  $("ai-data-filters").hidden = false;
+  dataset.filters = filters;
+  return filters;
+}
+
+function buildMapPopupSettings(dataset, selection) {
+  const settings = document.createElement("div"); settings.className = "ai-popup-settings";
+  const columns = popupChartColumns(dataset.analysis.columns, activeMapPopupSuggestion()?.bindings);
+  const config = selection[selection.mode];
+  if (selection.mode === "bar") {
+    const variants = document.createElement("div"); variants.className = "ai-bar-chart-types";
+    for (const [variant, label, iconName] of [["single", "Cột đơn", "singleBar"], ["grouped", "Cột ghép", "groupedBar"]]) {
+      const button = document.createElement("button"); const icon = document.createElement("span"); const text = document.createElement("span");
+      button.type = "button"; button.className = `ai-bar-chart-type${config.variant === variant ? " active" : ""}`;
+      button.dataset.popupBarVariant = variant; button.setAttribute("aria-pressed", String(config.variant === variant));
+      button.disabled = variant === "grouped" && defaultBarMetrics({ bindings: { y: config.metrics[0] } }, columns, "grouped").length < 2;
+      renderChartIcon(icon, iconName); text.textContent = label; button.append(icon, text); variants.append(button);
+    }
+    settings.append(aiField("Hình thức hiển thị", variants));
+  }
+  const metrics = selection.mode === "bar" ? barMetricOptions(columns)
+    : columns.filter(column => column.role === "measure").map(column => ({ key: column.name, label: column.labelVi || humanizeField(column.name) }));
+  if (selection.mode === "bar" && config.variant === "grouped") {
+    const picker = document.createElement("div"); picker.className = "ai-bar-metric-list";
+    for (const metric of metrics) {
+      const input = document.createElement("input"); input.type = "checkbox";
+      input.className = "ai-popup-metric-checkbox"; input.value = metric.key; input.checked = config.metrics.includes(metric.key);
+      const label = document.createElement("label"); const text = document.createElement("span"); text.textContent = metric.label;
+      label.append(input, text); picker.append(label);
+    }
+    const field = document.createElement("div"); field.className = "ai-control-group";
+    const caption = document.createElement("span"); caption.textContent = "Chỉ số (tối thiểu 2)";
+    field.append(caption, picker); settings.append(field);
+  } else settings.append(aiField("Chỉ số biểu đồ", aiSelect("ai-popup-metric", metrics.map(item => [item.key, item.label]),
+    selection.mode === "bar" ? config.metrics[0] : config.measure)));
+  if (selection.mode === "bar") {
+    const aggregation = aiSelect("ai-popup-aggregation", [["auto", "Theo từng chỉ số"], ["sum", "Tổng (SUM)"],
+      ["mean", "Trung bình (AVG)"], ["min", "Nhỏ nhất (MIN)"], ["max", "Lớn nhất (MAX)"]], config.aggregation);
+    aggregation.disabled = config.metrics.every(metric => metric === "count");
+    settings.append(aiField("Cách tính giá trị", aggregation));
+  }
+  const time = popupTimeColumn(columns);
+  const times = time ? uniqueTimeValues(dataset.records, time) : [];
+  if (times.length) {
+    const choices = times.map(value => [comparableFilterValue(value), formatTimeValue(value, time,
+      value instanceof Date && Boolean(value.getUTCHours() || value.getUTCMinutes() || value.getUTCSeconds()))]);
+    const road = activeMapPopupSuggestion()?.chartType === "map_line";
+    for (const [edge, label] of [["from", road ? "Biểu đồ từ thời điểm" : "Biểu đồ từ ngày"], ["to", road ? "Đến thời điểm" : "Đến ngày"]]) {
+      const control = aiSelect("ai-popup-range", choices, config[edge]); control.dataset.edge = edge;
+      settings.append(aiField(label, control));
+    }
+  }
+  return settings;
+}
+
+function refreshMapPopupControls() {
+  if (activeMapPopupSuggestion()?.chartType === "point") populatePointControls(activeMapPopupSuggestion());
+  else populateAiFilters(state.aiDataset);
+  if (activePolygonSuggestion()) renderGeoRepair(state.aiDataset.geoMatch?.unmatched || []);
+  refreshMapPopup();
+}
+
+function changeMapPopupControl(control) {
+  if (!activeMapPopupSuggestion()) return;
+  const selection = popupSelectionFor();
+  const config = selection[selection.mode];
+  if (!config) return;
+  if (control.matches(".ai-popup-metric")) {
+    if (selection.mode === "bar") { config.metrics = [control.value]; config.aggregation = "auto"; }
+    else config.measure = control.value;
+  } else if (control.matches(".ai-popup-metric-checkbox")) {
+    const checked = [...document.querySelectorAll("#ai-filter-controls .ai-popup-metric-checkbox:checked")];
+    if (checked.length < 2) { control.checked = true; showToast("Cột ghép cần ít nhất 2 chỉ số."); return; }
+    config.metrics = checked.map(input => input.value);
+  } else if (control.matches(".ai-popup-aggregation")) config.aggregation = control.value;
+  else if (control.matches(".ai-popup-range")) {
+    const edge = control.dataset.edge;
+    config[edge] = control.value;
+    if (compareTimeValues(config.from, config.to, popupTimeColumn(state.aiDataset.analysis.columns)) > 0) {
+      config[edge === "from" ? "to" : "from"] = control.value;
+    }
+  }
+  refreshMapPopupControls();
 }
 
 function buildAiSeriesPicker(option) {
@@ -1872,17 +2133,16 @@ function populateAiLineSelection(option, suggestion) {
     ], sel.scope)));
     if (sel.scope === "pick") nodes.push(buildAiSeriesPicker(option));
   }
-  const timeColumn = dataset.analysis.columns.find(column => column.role === "time")?.name;
-  const times = timeColumn
-    ? uniqueRecordValues(dataset.records, timeColumn).sort((a, b) => a[0].localeCompare(b[0]))
-    : [];
+  const time = dataset.analysis.columns.find(column => column.name === suggestion.bindings.x && column.role === "time");
+  const times = time ? uniqueTimeValues(dataset.records, time) : [];
   if (times.length > 1) {
-    const choices = times.map(([value, raw]) => [value, displayFilterValue(raw, "date-select")]);
+    const hasTime = times.some(value => value instanceof Date && !value.toISOString().endsWith("T00:00:00.000Z"));
+    const choices = times.map(value => [comparableFilterValue(value), formatTimeValue(value, time, hasTime)]);
     const from = aiSelect("ai-line-range", choices, sel.from ?? choices[0][0]);
     const to = aiSelect("ai-line-range", choices, sel.to ?? choices.at(-1)[0]);
     from.dataset.edge = "from";
     to.dataset.edge = "to";
-    nodes.push(aiField(`${labelOf(timeColumn)} từ`, from), aiField("đến", to));
+    nodes.push(aiField(`${labelOf(time.name)} từ`, from), aiField("đến", to));
   }
   $("ai-filter-controls").replaceChildren(...nodes);
   $("ai-data-filters").hidden = nodes.length === 0;
@@ -1899,17 +2159,57 @@ function syncAiLineSelection(option) {
 
 function populateAiBarMetric(suggestion) {
   const controls = $("ai-filter-controls");
-  const measures = state.aiDataset.analysis.columns.filter(column => column.role === "measure");
+  const dataset = state.aiDataset;
+  const selection = barSelectionFor(dataset, suggestion);
+  const choices = barMetricOptions(dataset.analysis.columns);
   controls.replaceChildren();
-  if (!measures.length) { $("ai-data-filters").hidden = true; return; }
-  const label = document.createElement("label"); const caption = document.createElement("span"); const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
-  caption.textContent = "Chỉ số"; select.className = "ai-chart-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số cho biểu đồ cột");
-  const choices = [{ name: "count", labelVi: "Số bản ghi" }, ...measures];
-  select.replaceChildren(...choices.map(column => Object.assign(document.createElement("option"), {
-    value: column.name,
-    textContent: column.labelVi || humanizeField(column.name)
-  })));
-  select.value = suggestion.bindings.y; label.append(caption, select); controls.append(label); $("ai-data-filters").hidden = false;
+  const typeField = document.createElement("div");
+  const typeCaption = document.createElement("span");
+  const typeOptions = document.createElement("div");
+  typeField.className = "ai-control-group"; typeCaption.textContent = "Hình thức hiển thị"; typeOptions.className = "ai-bar-chart-types";
+  for (const item of [
+    { variant: "single", label: "Cột đơn", icon: "singleBar" },
+    { variant: "grouped", label: "Cột ghép", icon: "groupedBar" }
+  ]) {
+    const button = document.createElement("button"); const icon = document.createElement("span"); const text = document.createElement("span");
+    button.type = "button"; button.className = `ai-bar-chart-type${selection.variant === item.variant ? " active" : ""}`;
+    button.dataset.barVariant = item.variant; button.setAttribute("aria-pressed", String(selection.variant === item.variant));
+    button.disabled = item.variant === "grouped" && defaultBarMetrics(suggestion, dataset.analysis.columns, "grouped").length < 2;
+    renderChartIcon(icon, item.icon); text.textContent = item.label; button.append(icon, text); typeOptions.append(button);
+  }
+  typeField.append(typeCaption, typeOptions);
+
+  let metricControl;
+  if (selection.variant === "single") {
+    const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
+    select.className = "ai-chart-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số cho biểu đồ cột");
+    select.replaceChildren(...choices.map(item => Object.assign(document.createElement("option"), { value: item.key, textContent: item.label })));
+    select.value = selection.metrics[0];
+    metricControl = select;
+  } else {
+    const picker = document.createElement("div"); const head = document.createElement("div"); const list = document.createElement("div");
+    picker.className = "ai-bar-metric-picker"; head.className = "ai-bar-metric-head"; list.className = "ai-bar-metric-list";
+    head.textContent = `${selection.metrics.length} đã chọn · Tối thiểu 2`;
+    list.replaceChildren(...choices.map(item => {
+      const row = document.createElement("label"); const input = document.createElement("input"); const text = document.createElement("span");
+      input.type = "checkbox"; input.className = "ai-bar-metric-checkbox"; input.value = item.key; input.checked = selection.metrics.includes(item.key);
+      text.textContent = item.label; row.append(input, text); return row;
+    }));
+    picker.append(head, list); metricControl = picker;
+  }
+  const metricField = document.createElement("div"); const metricCaption = document.createElement("span");
+  metricField.className = "ai-control-group"; metricCaption.textContent = "Chỉ số"; metricField.append(metricCaption, metricControl);
+  const aggregationControl = aiSelect("ai-bar-aggregation-selector", [
+    ["auto", "Theo từng chỉ số"],
+    ["sum", "Tổng (SUM)"],
+    ["mean", "Trung bình (AVG)"],
+    ["min", "Nhỏ nhất (MIN)"],
+    ["max", "Lớn nhất (MAX)"]
+  ], selection.aggregation);
+  aggregationControl.disabled = selection.metrics.every(metric => metric === "count");
+  if (aggregationControl.disabled) aggregationControl.title = "Số bản ghi luôn đếm số dòng dữ liệu.";
+  controls.append(typeField, metricField, aiField("Cách tính giá trị", aggregationControl));
+  $("ai-data-filters").hidden = false;
 }
 
 function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) {
@@ -1917,11 +2217,12 @@ function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) 
   const isLine = suggestion.chartType === "line";
   const sel = isLine ? lineSelectionFor(dataset, suggestion) : null;
   const regionField = isLine ? aiLineRegionField(dataset, suggestion) : null;
-  const timeColumn = dataset.analysis.columns.find(column => column.role === "time")?.name;
-  const records = isLine && timeColumn && sel.from && sel.to
-    ? filterByTimeRange(dataset.records, timeColumn, sel.from, sel.to)
+  const time = isLine ? dataset.analysis.columns.find(column => column.name === suggestion.bindings.x && column.role === "time") : null;
+  const records = isLine && time && sel.from && sel.to
+    ? filterTimeRange(dataset.records, time, sel.from, sel.to)
     : dataset.records;
-  const top = suggestion.chartType === "bar" ? dataset.barLimits?.[suggestion.id] ?? 12 : undefined;
+  const top = suggestion.chartType === "bar" ? dataset.barLimits?.[suggestion.id] ?? defaultBarLimit(suggestion, dataset.analysis.columns) : undefined;
+  const barSelection = suggestion.chartType === "bar" ? barSelectionFor(dataset, suggestion) : null;
   const lineOptions = isLine ? {
     measure: sel.measure,
     seriesField: !regionField || sel.scope === "all" ? null : regionField,
@@ -1930,7 +2231,11 @@ function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) 
       ? `${uniqueRecordValues(dataset.records, regionField).length} ${(dataset.analysis.columns.find(column => column.name === regionField)?.labelVi || humanizeField(regionField)).toLowerCase()}`
       : ""
   } : {};
-  const option = chartOptionForSuggestion(suggestion, records, dataset.analysis.columns, { top, ...lineOptions });
+  const option = chartOptionForSuggestion(suggestion, records, dataset.analysis.columns, {
+    top,
+    ...(barSelection ? { variant: barSelection.variant, metrics: barSelection.metrics, aggregation: barSelection.aggregation } : {}),
+    ...lineOptions
+  });
   if (!option?.config?.data?.length) throw new Error("Không còn dữ liệu hợp lệ để dựng biểu đồ.");
   dataset.activeChartOption = option;
   clearMapForAiChart();
@@ -1991,12 +2296,12 @@ function populatePointControls(suggestion) {
   if (model.measures.length) {
     nodes.push(aiField("Chỉ số", aiSelect("ai-point-metric", model.measures.map(column => [column.name, column.label]), selection.metricField)));
   }
-  if (model.groups.length > 1) {
-    nodes.push(aiField("Phân nhóm theo", aiSelect("ai-point-group", model.groups.map(column => [column.name, column.label]), selection.groupField)));
+  if (model.groups.length) {
+    nodes.push(aiField("Hiển thị theo", aiSelect("ai-point-group", model.groups.map(column => [column.name, column.label]), selection.groupField)));
   }
   if (group) {
     const label = group.label.toLocaleLowerCase("vi");
-    nodes.push(aiField(group.label, aiSelect("ai-point-mode", [["all", `Gộp tất cả ${label}`], ["pick", `Chọn từng ${label}`]], selection.mode)));
+    nodes.push(aiField(group.label, aiSelect("ai-point-mode", [["all", `Tất cả ${label}`], ["pick", `Chọn từng ${label}`]], selection.mode)));
     if (selection.mode === "pick") {
       const box = document.createElement("div"); box.className = "ai-series-picker ai-point-picker";
       const search = Object.assign(document.createElement("input"), { type: "search", className: "ai-series-search", placeholder: "Tìm…" });
@@ -2019,14 +2324,20 @@ function populatePointControls(suggestion) {
     }
   }
   if (model.timeColumn) {
-    const choices = model.times.map(value => [value, displayFilterValue(value, "date-select")]);
-    const from = aiSelect("ai-point-range", choices, selection.from); from.dataset.edge = "from";
-    const to = aiSelect("ai-point-range", choices, selection.to); to.dataset.edge = "to";
+    const choices = model.times.map(value => {
+      const date = timeValueInfo(value, model.timeColumn)?.value;
+      const hasTime = date instanceof Date && !date.toISOString().endsWith("T00:00:00.000Z");
+      return [value, formatTimeValue(value, model.timeColumn, hasTime)];
+    });
+    const time = aiSelect("ai-point-time", choices, selection.time);
     const label = model.timeColumn.labelVi || humanizeField(model.timeColumn.name);
-    nodes.push(aiField(`${label} từ`, from), aiField("đến", to));
+    time.setAttribute("aria-label", `${label} hiển thị bản đồ`);
+    nodes.push(aiField(label, time));
   }
-  $("ai-filter-controls").replaceChildren(...nodes);
-  $("ai-data-filters").hidden = nodes.length === 0;
+  const mapControls = document.createElement("div"); mapControls.className = "ai-popup-map-controls";
+  mapControls.append(...nodes);
+  $("ai-filter-controls").replaceChildren(...buildMapPopupControls(state.aiDataset, suggestion), mapControls);
+  $("ai-data-filters").hidden = false;
   syncPointControls();
 }
 
@@ -2041,7 +2352,7 @@ function syncPointControls() {
   });
   const counter = document.querySelector("#ai-filter-controls [data-role='point-group-count']");
   if (counter) counter.textContent = `${selected.size}/${POINT_GROUP_LIMIT}`;
-  document.querySelectorAll("#ai-filter-controls .ai-point-range").forEach(select => { select.value = view.selection[select.dataset.edge]; });
+  document.querySelectorAll("#ai-filter-controls .ai-point-time").forEach(select => { select.value = view.selection.time; });
 }
 
 function pointMetricText(metric) {
@@ -2144,7 +2455,142 @@ function refreshPointView(suggestion, { rebuildControls = false } = {}) {
   else syncPointControls();
   updateModelSections(); applyStyle();
   $("file-note").textContent = `${view.stats.visibleCount.toLocaleString("vi-VN")}/${view.stats.totalCount.toLocaleString("vi-VN")} điểm · ${Math.round(view.stats.coordinateRate * 100)}% tọa độ hợp lệ`;
-  setStatus(view.stats.visibleCount ? `Đang hiển thị ${view.stats.visibleCount.toLocaleString("vi-VN")} điểm dữ liệu.` : "Không có điểm phù hợp với bộ lọc. Hãy chọn nhóm hoặc khoảng thời gian khác.", view.stats.visibleCount > 0);
+  refreshMapPopup();
+  setStatus(view.stats.visibleCount ? `Đang hiển thị ${view.stats.visibleCount.toLocaleString("vi-VN")} điểm dữ liệu.` : "Không có điểm phù hợp với bộ lọc. Hãy chọn nhóm hoặc thời gian khác.", view.stats.visibleCount > 0);
+}
+
+function activeRoadSuggestion() {
+  const dataset = state.aiDataset;
+  const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+  return state.mapType === "line" && !state.chartConfig && suggestion?.chartType === "map_line" ? suggestion : null;
+}
+
+function renderRoadLegend() {
+  const legend = $("ai-line-legend");
+  const suggestion = activeRoadSuggestion();
+  legend.hidden = !suggestion || !state.roadDisplayStyle.showLegend || !state.lineData.features.length || !$("show-map-layers").checked;
+  if (legend.hidden) return;
+  const dataset = state.aiDataset;
+  const field = suggestion.bindings.value || dataset.recommendation.metricField;
+  const column = dataset.analysis.columns.find(column => column.name === field);
+  const heading = document.createElement("div"); heading.className = "point-legend-heading";
+  const title = document.createElement("strong"); title.textContent = column?.labelVi || field || "Chuỗi tọa độ";
+  heading.append(title);
+  const rows = document.createElement("div"); rows.className = "point-legend-rows";
+  for (const item of dataset.roadStyle?.rows || []) {
+    const row = document.createElement("div"); row.className = "point-legend-row";
+    const swatch = document.createElement("i"); swatch.style.background = item.color;
+    const label = document.createElement("span"); label.textContent = item.label;
+    row.append(swatch, label); rows.append(row);
+  }
+  const note = document.createElement("small");
+  const timeFilter = dataset.recommendation.filters.find(filter => ["date-select", "datetime-select"].includes(filter.control));
+  const time = timeFilter ? displayFilterValue(dataset.filters[timeFilter.field], timeFilter.control) : "";
+  note.textContent = `${time ? `${time} · ` : ""}${state.lineData.stats.matchedRows}/${state.lineData.stats.totalRows} bản ghi khớp · ${state.lineData.features.length.toLocaleString("vi-VN")} đoạn đường`;
+  legend.replaceChildren(heading, rows, note);
+}
+
+function refreshAiRoadMap({ fit = false } = {}) {
+  const suggestion = activeRoadSuggestion(); const dataset = state.aiDataset;
+  if (isCoordinateLine(suggestion)) return refreshAiCoordinateLine({ fit });
+  if (!suggestion || !dataset.roadArea?.field || !dataset.roadArea.networkIds.every(id => dataset.roadGeometries?.[id])) return;
+  dataset.filters = selectedAiFilters();
+  const records = applyPipelineFilters(dataset.records, dataset.filters);
+  const data = joinRoadRecordsByArea(records, dataset.roadGeometries, {
+    areaField: dataset.roadArea.field,
+    roadField: suggestion.bindings.region, valueField: suggestion.bindings.value,
+    columns: dataset.analysis.columns, aggregation: resolveAggregation(suggestion, dataset.analysis.columns)
+  });
+  state.lineData = data;
+  dataset.roadStyle = aiLineStyle(data, suggestion);
+  map.getSource("line-data")?.setData(data);
+  updateModelSections(); applyStyle();
+  refreshMapPopup();
+  if (fit && data.features.length) fitGeoJSON(data);
+  const stats = data.stats;
+  const areaLabels = dataset.roadArea.networkIds.map(id => ROAD_NETWORKS.find(network => network.id === id)?.label || id);
+  const skipped = dataset.roadArea.unknownAreas.length ? ` Bỏ qua khu vực chưa hỗ trợ: ${dataset.roadArea.unknownAreas.join(", ")}.` : "";
+  $("file-note").textContent = `${stats.matchedRows}/${stats.totalRows} bản ghi khớp · ${stats.segmentCount.toLocaleString("vi-VN")} đoạn đường`;
+  setStatus(data.features.length ? `Đang hiển thị Bản đồ Line tại ${areaLabels.join(", ")}.${skipped}`
+    : `Không có tuyến khớp. Hãy kiểm tra Khu vực, tên/mã đường hoặc bộ lọc đã chọn.${skipped}`, data.features.length > 0);
+}
+
+function refreshAiCoordinateLine({ fit = false } = {}) {
+  const dataset = state.aiDataset; const suggestion = activeRoadSuggestion();
+  if (!isCoordinateLine(suggestion)) return;
+  dataset.filters = selectedAiFilters();
+  const data = buildCoordinateLines(applyPipelineFilters(dataset.records, dataset.filters), dataset.analysis.columns, suggestion.bindings);
+  state.lineData = data;
+  dataset.roadStyle = aiLineStyle(data, suggestion);
+  map.getSource("line-data")?.setData(data);
+  updateModelSections(); applyStyle(); refreshMapPopup();
+  if (fit && data.features.length) fitGeoJSON(data);
+  $("file-note").textContent = `${data.features.length} tuyến · ${Math.round(data.stats.coordinateRate * 100)}% tọa độ hợp lệ`;
+  setStatus(data.features.length ? "Đang hiển thị các chuỗi tọa độ trên Bản đồ Line."
+    : "Chưa có chuỗi gồm ít nhất hai tọa độ khác nhau. Kiểm tra nhóm tuyến, cột thứ tự hoặc dữ liệu tọa độ.", data.features.length > 0);
+}
+
+async function loadAiRoadNetwork({ fit = false } = {}) {
+  cancelAiBoundaryLoad();
+  const dataset = state.aiDataset; const suggestion = activeRoadSuggestion();
+  if (!dataset || !suggestion) return null;
+  const area = roadNetworksFromRecords(dataset.records, dataset.analysis.columns);
+  dataset.roadArea = area; dataset.roadGeometries ||= {};
+  state.lineData = EMPTY_FEATURE_COLLECTION;
+  map.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  closeMapPopup();
+  updateModelSections(); applyStyle();
+  if (!area.field) { setStatus("Cần cột Khu vực để tự động xác định mạng đường tỉnh/thành phố."); return true; }
+  if (!area.networkIds.length) {
+    const values = area.unknownAreas.length ? `: ${area.unknownAreas.join(", ")}` : "";
+    setStatus(`Không nhận diện được mạng đường từ cột ${area.field}${values}.`);
+    return true;
+  }
+  const missing = area.networkIds.filter(id => !dataset.roadGeometries[id]);
+  if (!missing.length) { refreshAiRoadMap({ fit }); return true; }
+  const controller = createAbortController(); aiBoundaryAbortController = controller;
+  const revision = aiBoundaryRevision;
+  const isCurrent = () => revision === aiBoundaryRevision && dataset === state.aiDataset && dataset.selectedSuggestionId === suggestion.id;
+  setStatus("Đang tải mạng đường để ghép dữ liệu tuyến…");
+  try {
+    const loaded = await Promise.all(missing.map(async id => {
+      const url = roadNetworkUrl(id);
+      if (!url) throw new Error(`Chưa có dữ liệu mạng đường cho ${ROAD_NETWORKS.find(network => network.id === id)?.label || id}.`);
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) throw new Error(`Không tải được mạng đường (HTTP ${response.status}).`);
+      const geometry = await response.json();
+      if (geometry?.type !== "FeatureCollection" || !Array.isArray(geometry.features)) throw new Error("Mạng đường không hợp lệ.");
+      return [id, geometry];
+    }));
+    if (!isCurrent()) return null;
+    for (const [id, geometry] of loaded) dataset.roadGeometries[id] = geometry;
+    refreshAiRoadMap({ fit });
+    return true;
+  } catch (error) {
+    if (error?.name === "AbortError" || !isCurrent()) return null;
+    setStatus(`Không thể hiển thị tuyến: ${error.message}`);
+    return true;
+  } finally {
+    if (aiBoundaryAbortController === controller) aiBoundaryAbortController = null;
+  }
+}
+
+async function activateAiRoadMap(suggestion) {
+  const dataset = state.aiDataset;
+  dataset.recommendation = recommendationForSuggestion(suggestion);
+  populateAiFilters(dataset);
+  state.chartConfig = null; state.chartMapping = null; state.mappingWarning = "";
+  clearChartCanvas(); clearMapForAiChart();
+  state.mapType = "line"; state.dataProfile = null;
+  $("show-map-lines").checked = true;
+  $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
+  setDataPanelVisible(false); showChartStyleControls(false);
+  renderAiSuggestionGrid();
+  map.resize();
+  if (isCoordinateLine(suggestion)) {
+    cancelAiBoundaryLoad(); refreshAiCoordinateLine({ fit: true }); return true;
+  }
+  return loadAiRoadNetwork({ fit: true });
 }
 
 function activateAiPoint(suggestion) {
@@ -2213,6 +2659,7 @@ async function activateAiH3(suggestion) {
 async function selectAiSuggestion(id) {
   const suggestion = state.aiDataset?.suggestions.find(item => item.id === id);
   if (!suggestion) return false;
+  if (state.aiDataset.selectedSuggestionId !== id) closeMapPopup();
   if (!suggestion.available && suggestion.repairable) {
     cancelAiBoundaryLoad();
     state.aiDataset.selectedSuggestionId = id;
@@ -2231,6 +2678,7 @@ async function selectAiSuggestion(id) {
     return true;
   }
   if (suggestion.chartType === "point") return activateAiPoint(suggestion);
+  if (suggestion.chartType === "map_line") return activateAiRoadMap(suggestion);
   if (suggestion.chartType === "choropleth") return activateAiChoropleth(suggestion);
   return activateAiH3(suggestion);
 }
@@ -2239,6 +2687,7 @@ async function filteredAiBoundary({ fit = false } = {}) {
   if (!state.aiDataset) return;
   const selected = state.aiDataset.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
   if (selected?.chartType === "hex_h3") return refreshAiH3({ fit });
+  if (selected?.chartType === "map_line") return refreshAiRoadMap({ fit });
   if (selected?.chartType !== "choropleth") return;
   const { records, boundaries, recommendation } = state.aiDataset;
   const filters = selectedAiFilters(); state.aiDataset.filters = filters;
@@ -2249,12 +2698,13 @@ async function filteredAiBoundary({ fit = false } = {}) {
   state.dataProfile = analyzeSpatialData(data, { numericFields });
   map.getSource("polygon-data")?.setData(data);
   map.getSource("vietnam-boundary")?.setData(data);
-  if (state.mapType === "h3") await rebuildGrid({ fit });
+  if (state.mapType === "h3" || isRegionHexMode()) await rebuildGrid({ fit });
   else {
     syncPolygonPaletteControls(); applyStyle();
     if (fit && data.features.length) fitBoundary();
   }
   $("file-note").textContent = `${data.features.length} khu vực · ${recommendation.metricField} · ${recommendation.source === "ai" ? "GPT-5.6 Luna đề xuất" : "quy tắc dự phòng"}`;
+  refreshMapPopup();
 }
 
 async function activateAiChoropleth(suggestion) {
@@ -2335,30 +2785,26 @@ async function replaceAiMapData(records, recommendation, name) {
 }
 
 async function replaceAiPipelineData(pipeline, name) {
-  clearAiMapState(); clearMetroData(); clearCongestionData(); clearChartCanvas();
+  clearAiMapState(); clearMetroData(); clearChartCanvas();
   state.chartConfig = null; state.chartMapping = null; state.mappingWarning = ""; state.activeChartKind = null;
   state.mapType = null; state.dataProfile = null;
   state.dataOrigin = "ai"; state.boundary = null; state.sourceBoundary = null; state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = EMPTY_FEATURE_COLLECTION;
   map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
-  let chartAnalysis = null; let manualOptions = [];
-  try {
-    chartAnalysis = analyzeBarData(pipeline.rawRecords);
-    const primary = chartAnalysis.datasets.find(dataset => dataset.path === chartAnalysis.sourcePath) || chartAnalysis.datasets[0];
-    const lineOption = createLineOption(primary, chartAnalysis.titlePrefix);
-    manualOptions = [...chartAnalysis.options, ...(lineOption ? [lineOption] : []), ...createPieOptions(primary, `Cơ cấu các chỉ số · ${chartAnalysis.titlePrefix}`)];
-    chartAnalysis = { ...chartAnalysis, options: manualOptions };
-  } catch { /* AI suggestions can still render datasets unsupported by legacy charts. */ }
-  state.chartAnalysis = chartAnalysis; state.chartOptions = manualOptions;
-  const suggestions = prepareSuggestions(pipeline.analysis, pipeline.records, pipeline.validRowRate, { mapTilerAvailable: Boolean(CONFIG.MAPTILER_API_KEY) });
+  state.chartAnalysis = null; state.chartOptions = [];
+  const suggestions = prepareSuggestions(pipeline.analysis, pipeline.records, pipeline.validRowRate, { mapTilerAvailable: Boolean(CONFIG.MAPTILER_API_KEY), mapOnly: true });
   state.aiDataset = {
     ...pipeline,
     fileName: name,
+    roadArea: roadNetworksFromRecords(pipeline.records, pipeline.analysis.columns),
+    roadGeometries: {},
     suggestions,
     selectedSuggestionId: null,
     geoAliases: {},
     lineSelections: {},
+    barSelections: {},
     barLimits: {},
+    popupSelections: {},
     recommendation: null,
     boundaries: null
   };
@@ -2368,20 +2814,17 @@ async function replaceAiPipelineData(pipeline, name) {
   document.querySelector(".map-panel").classList.remove("chart-mode"); setDataPanelVisible(false); showChartStyleControls(false);
   renderAiSuggestionGrid();
   let selected = false;
-  for (const suggestion of suggestions.filter(item => item.available)) {
+  const visibleSuggestions = mapDisplaySuggestions(suggestions);
+  const rank = item => item.chartType === "map_line" && item.bindings?.lat ? 4 : item.chartType === "point" ? 3 : item.chartType === "map_line" ? 2 : 1;
+  const initialSuggestions = [...visibleSuggestions].sort((a, b) => rank(b) - rank(a));
+  for (const suggestion of initialSuggestions.filter(item => item.available)) {
     const result = await selectAiSuggestion(suggestion.id);
     if (result === null) return;
     if (result) { selected = true; break; }
   }
-  if (!selected && !suggestions.length && pipeline.analysis.source === "ai") {
+  if (!selected) {
     updateModelSections();
-    setStatus("AI chưa tìm thấy kiểu biểu đồ phù hợp với dữ liệu này.");
-    return;
-  }
-  if (!selected && manualOptions.length) selectChartOption(manualOptions[0].id);
-  else if (!selected) {
-    updateModelSections();
-    throw new Error("Không tìm thấy kiểu trực quan hóa khả thi cho bảng dữ liệu này.");
+    setStatus("Dữ liệu cần có địa danh hành chính, tên đường hoặc tọa độ để tạo bản đồ Polygon, Line hoặc Point.");
   }
 }
 
@@ -2408,7 +2851,6 @@ function selectChartOption(type) {
 function replaceChartData(analysis, name) {
   clearAiMapState();
   clearMetroData();
-  clearCongestionData();
   state.dataOrigin = "upload";
   const primaryDataset = analysis.datasets.find(dataset => dataset.path === analysis.sourcePath) || analysis.datasets[0];
   const lineOption = createLineOption(primaryDataset, analysis.titlePrefix);
@@ -2432,10 +2874,12 @@ function replaceChartData(analysis, name) {
   setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(options[0].id);
 }
 async function replaceBoundary(data, name, profile = null, { preservePolygons = false, preserveAi = false } = {}) {
+  regionHexBuildRevision += 1;
+  state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
+  $("region-hex-note").textContent = "";
   weatherLoadRevision += 1;
   if (!preserveAi) clearAiMapState();
   clearMetroData();
-  clearCongestionData();
   state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; clearDataMappingPanel($("data-mapping-controls")); clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
   showChartStyleControls(false);
   if (!data) throw new Error("Không tìm thấy dữ liệu.");
@@ -2444,7 +2888,7 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   else geoJSONToCells(data, Math.min(state.resolution, 3));
   state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
   renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));
-  state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData); applyPointStyle();
+  state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData); applyHeatmapWeight();
   const features = data.type === "FeatureCollection" ? data.features : data.type === "Feature" ? [data] : [{ type: "Feature", properties: {}, geometry: data }];
   state.lineData = { type: "FeatureCollection", features: features.filter(feature => ["LineString", "MultiLineString"].includes(feature.geometry?.type)) };
   map.getSource("line-data")?.setData(state.lineData);
@@ -2460,7 +2904,6 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
 function renderSearchMapTypes() {
   const grid = $("map-type-grid");
   const types = [
-    { id: "h3", label: "H3 Hexagon", icon: "hexagon", renderer: "H3" },
     { id: "polygon", label: "Polygon", icon: "polygon", renderer: "MapLibre" }
   ];
   grid.replaceChildren(...types.map(type => {
@@ -2476,12 +2919,15 @@ function renderSearchMapTypes() {
     return button;
   }));
   grid.classList.remove("is-empty");
-  $("map-type-summary").textContent = "Khu vực tìm kiếm · H3 Hexagon hoặc Polygon theo ranh giới đã chọn";
+  $("map-type-summary").textContent = "Khu vực tìm kiếm · Polygon theo ranh giới đã chọn";
   showSupportedChartCatalog(false);
 }
 
 async function applySearchBoundaries(boundaries) {
   if (state.dataOrigin && state.dataOrigin !== "search") return;
+  regionHexBuildRevision += 1;
+  state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
+  $("region-hex-note").textContent = "";
   if (!boundaries.length) {
     if (state.dataOrigin === "search") {
       clearUploadedData();
@@ -2492,15 +2938,20 @@ async function applySearchBoundaries(boundaries) {
     return;
   }
 
+  const isNewSearch = state.dataOrigin !== "search";
   clearMetroData();
   cellPopup?.remove();
   state.dataOrigin = "search";
+  if (isNewSearch) {
+    $("show-weather").checked = false;
+    $("show-weather-status").textContent = "Đang tắt";
+  }
   state.polygonPalette = state.polygonPalette && state.polygonPalette !== "travel" ? state.polygonPalette : "diverging";
   state.resolution = CONFIG.DEFAULT_RESOLUTION;
   state.baselineCount = null;
   state.boundary = { type: "FeatureCollection", features: boundaries };
   state.sourceBoundary = state.boundary;
-  state.mapType = "h3";
+  state.mapType = "polygon";
   state.dataProfile = analyzeSpatialData(state.boundary);
   state.pointData = EMPTY_FEATURE_COLLECTION;
   state.lineData = EMPTY_FEATURE_COLLECTION;
@@ -2509,8 +2960,7 @@ async function applySearchBoundaries(boundaries) {
   $("selected-file").hidden = true;
   map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
-  // Keep the selected administrative boundaries available for Polygon mode.
-  // Layer visibility ensures they are only filled after the user chooses Polygon.
+  // Use the selected administrative boundaries directly for the default Polygon mode.
   map.getSource("polygon-data")?.setData(state.boundary);
   map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   renderSearchMapTypes();
@@ -2530,7 +2980,6 @@ function showSheetSelection(file, sheetNames, fileKey = null) {
 async function applyReadResult(result, file) {
   if (result.kind === "sheet-selection") return showSheetSelection(file, result.sheetNames);
   if (result.kind === "metro") await replaceMetroData(result.data, file.name);
-  else if (result.kind === "congestion") await replaceCongestionData(result.records, file.name);
   else if (result.kind === "ai-pipeline") await replaceAiPipelineData(result.pipeline, file.name);
   else if (result.kind === "ai-map") await replaceAiMapData(result.records, result.recommendation, file.name);
   else if (result.kind === "chart") replaceChartData(result.analysis, file.name);
@@ -2700,12 +3149,6 @@ async function processSpatialFiles(files) {
       return;
     }
   }
-  const congestion = valid.find(item => item.result.kind === "congestion");
-  if (congestion) {
-    await replaceCongestionData(congestion.result.records, congestion.file.name);
-    if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);
-    return;
-  }
   const spatial = valid.filter(item => !item.result.kind && item.result.data);
   const metroParts = valid.filter(item => item.result.kind === "metro-part");
   const aiMaps = valid.filter(item => item.result.kind === "ai-map");
@@ -2840,8 +3283,33 @@ function bindUI() {
     state.pointStyle = mergePointStyle({ ...state.pointStyle, [key]: event.target.checked });
     refreshPointStyle();
   });
+  $("road-style-controls").addEventListener("input", event => {
+    const key = { "road-line-width": "width", "road-line-opacity": "opacity" }[event.target.id];
+    if (!key) return;
+    state.roadDisplayStyle = { ...state.roadDisplayStyle, [key]: Number(event.target.value) };
+    $(`${event.target.id}-value`).value = key === "width" ? `${event.target.value} px` : `${Math.round(event.target.value * 100)}%`;
+    applyStyle();
+  });
+  $("road-style-controls").addEventListener("change", event => {
+    if (event.target.matches(".road-style-color")) {
+      const suggestion = activeRoadSuggestion();
+      if (!suggestion) return;
+      roadColorOverridesFor(suggestion)[event.target.dataset.key] = event.target.value;
+      state.aiDataset.roadStyle = aiLineStyle(state.lineData, suggestion);
+      applyStyle(); renderRoadStyleControls();
+      return;
+    }
+    if (event.target.id === "road-show-legend") {
+      state.roadDisplayStyle = { ...state.roadDisplayStyle, showLegend: event.target.checked };
+      renderRoadLegend();
+    }
+  });
   $("ai-filter-controls").addEventListener("change", async event => {
-    if (event.target.matches(".ai-point-metric, .ai-point-group, .ai-point-mode, .ai-point-value, .ai-point-range")) {
+    if (event.target.matches(".ai-popup-metric, .ai-popup-metric-checkbox, .ai-popup-aggregation, .ai-popup-range")) {
+      changeMapPopupControl(event.target);
+      return;
+    }
+    if (event.target.matches(".ai-point-metric, .ai-point-group, .ai-point-mode, .ai-point-value, .ai-point-time")) {
       const suggestion = activePointSuggestion();
       if (!suggestion) return;
       const selection = pointSelectionFor(suggestion);
@@ -2862,11 +3330,7 @@ function bindUI() {
           return;
         }
         selection.selectedValues = values;
-      } else {
-        const edge = control.dataset.edge;
-        selection[edge] = control.value;
-        if (selection.from > selection.to) selection[edge === "from" ? "to" : "from"] = control.value;
-      }
+      } else if (control.matches(".ai-point-time")) selection.time = control.value;
       refreshPointView(suggestion, { rebuildControls });
       return;
     }
@@ -2875,16 +3339,42 @@ function bindUI() {
       const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
       return suggestion?.chartType === "line" ? suggestion : null;
     };
+    if (event.target.matches(".ai-bar-aggregation-selector")) {
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+      if (suggestion?.chartType !== "bar" || !["auto", "sum", "mean", "min", "max"].includes(event.target.value)) return;
+      barSelectionFor(dataset, suggestion).aggregation = event.target.value;
+      activateAiChartSuggestion(suggestion);
+      return;
+    }
     if (event.target.matches(".ai-chart-metric-selector")) {
-      const suggestion = state.aiDataset?.suggestions.find(item => item.id === state.aiDataset.selectedSuggestionId);
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
       if (suggestion?.chartType !== "bar") return;
-      Object.assign(suggestion, withSuggestionMetric(suggestion, event.target.value, state.aiDataset.analysis.columns));
+      const selection = barSelectionFor(dataset, suggestion);
+      selection.variant = "single"; selection.metrics = [event.target.value]; selection.aggregation = "auto";
+      Object.assign(suggestion, withSuggestionMetric(suggestion, event.target.value, dataset.analysis.columns));
+      activateAiChartSuggestion(suggestion);
+      return;
+    }
+    if (event.target.matches(".ai-bar-metric-checkbox")) {
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+      if (suggestion?.chartType !== "bar") return;
+      const checked = [...document.querySelectorAll("#ai-filter-controls .ai-bar-metric-checkbox:checked")];
+      if (checked.length < 2) {
+        event.target.checked = true;
+        showToast("Cột ghép cần ít nhất 2 chỉ số.");
+        return;
+      }
+      const selection = barSelectionFor(dataset, suggestion);
+      selection.variant = "grouped"; selection.metrics = checked.map(input => input.value);
       activateAiChartSuggestion(suggestion);
       return;
     }
     if (event.target.matches(".ai-metric-selector")) {
       const dataset = state.aiDataset; const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-      if (!suggestion || !["choropleth", "hex_h3"].includes(suggestion.chartType)) return;
+      if (!suggestion || !["choropleth", "hex_h3", "map_line"].includes(suggestion.chartType)) return;
       Object.assign(suggestion, withSuggestionMetric(suggestion, event.target.value, dataset.analysis.columns));
       dataset.recommendation = recommendationForSuggestion(suggestion);
       if (suggestion.chartType === "hex_h3") await refreshAiH3();
@@ -2911,7 +3401,8 @@ function bindUI() {
       const sel = lineSelectionFor(state.aiDataset, suggestion);
       const [from, to] = ["from", "to"].map(edge => document.querySelector(`#ai-filter-controls .ai-line-range[data-edge='${edge}']`));
       if (!from || !to) return;
-      if (from.value > to.value) (event.target === from ? to : from).value = event.target.value;
+      const time = state.aiDataset.analysis.columns.find(column => column.name === suggestion.bindings.x);
+      if (compareTimeValues(from.value, to.value, time) > 0) (event.target === from ? to : from).value = event.target.value;
       sel.from = from.value;
       sel.to = to.value;
       activateAiChartSuggestion(suggestion, { rebuildControls: false });
@@ -2931,10 +3422,59 @@ function bindUI() {
       return;
     }
     if (!event.target.matches(".ai-generated-filter")) return;
-    const shouldFit = event.target.dataset.field === state.aiDataset?.recommendation?.geometry?.field;
+    if (event.target.dataset.singleToggle === "true" && event.target.checked) {
+      for (const control of document.querySelectorAll("#ai-filter-controls .ai-generated-filter")) {
+        if (control !== event.target && control.dataset.field === event.target.dataset.field) control.checked = false;
+      }
+    }
+    if (event.target.type === "checkbox") {
+      const picker = event.target.closest(".ai-multiselect");
+      const summary = picker?.querySelector(".ai-multiselect-toggle span");
+      const checked = picker ? [...picker.querySelectorAll(".ai-generated-filter:checked")] : [];
+      if (summary) summary.textContent = checked.length === 0
+        ? state.aiDataset.recommendation.filters.find(filter => filter.field === event.target.dataset.field)?.emptyLabel || `Chọn ${event.target.dataset.field.toLocaleLowerCase("vi")}`
+        : checked.length === 1 ? checked[0].value : `${checked.length} giá trị đã chọn`;
+    }
+    const filter = state.aiDataset?.recommendation?.filters.find(item => item.field === event.target.dataset.field);
+    const shouldFit = filter?.fit || event.target.dataset.field === state.aiDataset?.recommendation?.geometry?.field;
     await filteredAiBoundary({ fit: shouldFit });
   });
   $("ai-filter-controls").addEventListener("click", event => {
+    const popupType = event.target.closest(".ai-popup-type");
+    if (popupType) {
+      if (!activeMapPopupSuggestion() || popupType.disabled) return;
+      const selection = popupSelectionFor();
+      selection.mode = popupType.dataset.popupMode;
+      popupSelectionFor();
+      refreshMapPopupControls();
+      return;
+    }
+    const popupVariant = event.target.closest("[data-popup-bar-variant]");
+    if (popupVariant) {
+      if (!activeMapPopupSuggestion() || popupVariant.disabled) return;
+      const selection = popupSelectionFor();
+      if (selection.mode !== "bar") return;
+      selection.bar.variant = popupVariant.dataset.popupBarVariant;
+      selection.bar.metrics = defaultBarMetrics({ bindings: { y: selection.bar.metrics[0] } }, popupChartColumns(state.aiDataset.analysis.columns, activeMapPopupSuggestion().bindings), selection.bar.variant);
+      refreshMapPopupControls();
+      return;
+    }
+    const barVariant = event.target.closest(".ai-bar-chart-type");
+    if (barVariant) {
+      const dataset = state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+      if (suggestion?.chartType !== "bar") return;
+      const selection = barSelectionFor(dataset, suggestion);
+      const variant = barVariant.dataset.barVariant;
+      if (!variant || selection.variant === variant) return;
+      selection.variant = variant;
+      selection.metrics = defaultBarMetrics(suggestion, dataset.analysis.columns, variant);
+      if (variant === "single" && selection.metrics[0]) {
+        Object.assign(suggestion, withSuggestionMetric(suggestion, selection.metrics[0], dataset.analysis.columns));
+      }
+      activateAiChartSuggestion(suggestion);
+      return;
+    }
     if (event.target.closest(".ai-point-reset")) {
       const suggestion = activePointSuggestion();
       if (!suggestion) return;
@@ -2978,8 +3518,25 @@ function bindUI() {
     });
   });
   $("metro-departure").addEventListener("change", updateMetroTime);
-  $("congestion-time").addEventListener("change", updateCongestionTime);
   for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).addEventListener("change", applyMapLayerVisibility);
+  $("show-region-hex").addEventListener("change", async event => {
+    closeMapPopup();
+    regionHexBuildRevision += 1;
+    state.regionHexEnabled = event.target.checked;
+    cellPopup?.remove();
+    $("region-hex-note").textContent = "";
+    syncRegionHexControls();
+    if (isRegionHexMode()) await rebuildRegionHexGrid();
+    else { applyStyle(); setStatus("Đang hiển thị vùng hành chính.", true); }
+  });
+  $("region-hex-resolution").addEventListener("input", event => {
+    $("region-hex-resolution-value").value = event.target.value;
+  });
+  $("region-hex-resolution").addEventListener("change", async event => {
+    closeMapPopup();
+    state.regionHexResolution = Number(event.target.value);
+    await rebuildRegionHexGrid();
+  });
   $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
   $("opacity").addEventListener("input", e => { $("opacity-value").value = `${Math.round(e.target.value * 100)}%`; applyStyle(); }); $("line-width").addEventListener("input", e => { $("line-width-value").value = `${e.target.value} px`; applyStyle(); });
   for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); if (id === "fixed-color" && (state.mapType === "polygon" || state.dataOrigin === "search" || state.aiDataset)) { state.polygonPalette = null; syncPolygonPaletteControls(); } applyStyle(); }); }
@@ -3003,9 +3560,12 @@ function bindUI() {
     if (selectChartOption(button.dataset.type)) return;
     document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active"));
     button.classList.add("active");
+    regionHexBuildRevision += 1;
+    state.regionHexEnabled = false;
+    $("region-hex-note").textContent = "";
     state.mapType = button.dataset.type;
     updateModelSections();
-    if (state.mapType === "h3" && state.boundary && !state.h3Data.features.length) await rebuildGrid();
+    if (state.mapType === "h3" && state.boundary) await rebuildGrid();
     else applyStyle();
     setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true);
   });
@@ -3021,7 +3581,11 @@ function bindUI() {
       state.pendingSheet = null; $("sheet-selector-field").hidden = true;
       await applyReadResult(result, pending.file);
     } catch (error) {
-      if (error?.name !== "AbortError") { console.error(error); showToast(error.message || "Không thể đọc sheet."); }
+      if (error?.name !== "AbortError") {
+        console.error(error);
+        const message = error.message || "Không thể đọc sheet.";
+        setStatus(message, true);
+      }
     }
   });
   $("uploaded-layer-list").addEventListener("click", event => {
@@ -3084,10 +3648,20 @@ function exportCSV() {
   const blob = new Blob(["\ufeff" + rows.map(row => row.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n")], { type: "text/csv;charset=utf-8" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `h3-res-${state.resolution}.csv`; a.click(); URL.revokeObjectURL(a.href);
 }
 
+function observeMapSize() {
+  if (typeof ResizeObserver === "undefined") return;
+  const observer = new ResizeObserver(() => {
+    map?.resize();
+    if (mapPopupView) sizeMapPopup(mapPopupView);
+  });
+  observer.observe($("map"));
+}
+
 async function init() {
   renderSupportedChartCatalog();
   bindUI(); syncMapStyleControls();
   map = new maplibregl.Map({ container: "map", style: MAP_STYLES[state.mapStyle], center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
+  observeMapSize();
   createMapSearch({ map, apiKey: CONFIG.MAPTILER_API_KEY, onBoundariesChange: applySearchBoundaries });
   map.on("style.load", () => {
     const switchedStyle = pendingMapStyle;
