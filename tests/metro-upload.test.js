@@ -78,7 +78,10 @@ test("mọi thẻ bản đồ tuyến dùng tên Biểu đồ mạng lưới, kh
   const labels = get("supported-chart-grid").children.map(item => item.children[1].textContent);
   assert.ok(labels.includes("Biểu đồ mạng lưới"));
   assert.ok(labels.includes("Biểu đồ đường"), "temporal line charts keep their distinct label");
+  assert.ok(labels.includes("H3 Hexagon"), "the supported-chart catalog keeps the H3 illustration");
   assert.ok(!labels.includes("Line"));
+  const areaTypes = capabilities.compatibleMapTypes({ hasPoints: false, hasLines: false, hasArea: true, numericFields: [], textFields: [] });
+  assert.deepEqual(areaTypes.map(type => type.id), ["polygon"], "H3 is no longer a selectable map type");
   context.roadData = metroFixture.metro_route;
   vm.runInContext("renderCompatibleMapTypes(roadData)", context);
   const card = get("map-type-grid").children.find(item => item.dataset.type === "line");
@@ -145,7 +148,9 @@ test("area search recommends Polygon by default without uploaded data", async ()
   assert.equal(sources.get("polygon-data").data.features.length, 1);
   assert.equal(layers.get("polygon-fill").layout.visibility, "visible");
   assert.equal(layers.get("h3-fill").layout.visibility, "none");
+  assert.deepEqual(get("map-type-grid").children.map(button => button.dataset.type), ["polygon"]);
   assert.equal(get("map-type-grid").children.find(button => button.dataset.type === "polygon").className, "map-type active");
+  assert.equal(get("map-type-summary").textContent, "Khu vực tìm kiếm · Polygon theo ranh giới đã chọn");
   assert.equal(get("show-weather").checked, false);
   assert.equal(get("show-weather-status").textContent, "Đang tắt");
 });

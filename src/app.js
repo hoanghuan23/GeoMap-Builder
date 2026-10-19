@@ -2617,7 +2617,6 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
 function renderSearchMapTypes() {
   const grid = $("map-type-grid");
   const types = [
-    { id: "h3", label: "H3 Hexagon", icon: "hexagon", renderer: "H3" },
     { id: "polygon", label: "Polygon", icon: "polygon", renderer: "MapLibre" }
   ];
   grid.replaceChildren(...types.map(type => {
@@ -2633,7 +2632,7 @@ function renderSearchMapTypes() {
     return button;
   }));
   grid.classList.remove("is-empty");
-  $("map-type-summary").textContent = "Khu vực tìm kiếm · H3 Hexagon hoặc Polygon theo ranh giới đã chọn";
+  $("map-type-summary").textContent = "Khu vực tìm kiếm · Polygon theo ranh giới đã chọn";
   showSupportedChartCatalog(false);
 }
 
