@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
 import { displayFilterValue, requestAiDataAnalysis } from "../src/ai-data-analysis.js";
-import { buildBarChartOption, buildLineChartOption, prepareSuggestions } from "../src/ai-chart-pipeline.js";
+import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
+import { buildPopupChart, createPopupChartSelection } from "../src/ai-popup-chart.js";
 import { formatLineX } from "../src/charts/line-chart.js";
 import { readMetroData } from "../src/metro-data.js";
 import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
@@ -26,7 +27,7 @@ function uploadHarness() {
   return context;
 }
 
-test("traffic XLSX và JSON đi qua API AI chung, đề xuất tuyến bản đồ/Line/Bar và giữ ba mốc giờ", async () => {
+test("traffic XLSX và JSON chỉ đề xuất bản đồ Line, popup cột/đường giữ ba mốc giờ của tuyến bấm", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, options) => {
@@ -47,18 +48,21 @@ test("traffic XLSX và JSON đi qua API AI chung, đề xuất tuyến bản đ�
       const { analysis, records, validRowRate } = result.pipeline;
       assert.equal(analysis.source, "ai");
       assert.equal(records.length, trafficRecords.length);
-      const suggestions = prepareSuggestions(analysis, records, validRowRate);
-      assert.deepEqual(suggestions.map(item => item.chartType), ["map_line", "line", "bar"]);
+      const suggestions = prepareSuggestions(analysis, records, validRowRate, { mapOnly: true });
+      assert.deepEqual(suggestions.map(item => item.chartType), ["map_line"]);
       assert.ok(suggestions.every(item => item.available));
-      const line = buildLineChartOption(suggestions.find(item => item.chartType === "line"), records, analysis.columns, { selectedSeries: ["Đường Lĩnh Nam"] });
+      const popup = kind => buildPopupChart({ records, columns: analysis.columns, chartType: "map_line", kind,
+        bindings: suggestions[0].bindings, regionField: "Tên đường", feature: { properties: records[0] },
+        selection: createPopupChartSelection(records, analysis.columns, TRAFFIC_SPEED, kind) });
+      const line = popup("line");
       assert.deepEqual(line.config.data.map(row => row["Thời điểm"]), TRAFFIC_TIMES.map(time => new Date(`2026-10-13 ${time}`).toISOString()));
-      assert.deepEqual(line.config.data.map(row => row["Đường Lĩnh Nam"]), [24, 20, 38]);
-      assert.equal(line.availableSeries.length, 84);
+      assert.deepEqual(line.config.data.map(row => row[TRAFFIC_SPEED]), [24, 20, 38]);
+      assert.equal(line.config.series.length, 1);
       const labels = line.config.data.map(row => formatLineX(row["Thời điểm"]));
       assert.deepEqual(labels, TRAFFIC_TIMES.map(time => `13/10 ${time}`));
-      const bar = buildBarChartOption(suggestions.find(item => item.chartType === "bar"), records, analysis.columns, { top: "all" });
-      assert.equal(bar.config.data.length, 84);
-      assert.equal(bar.config.data.find(row => row["Tên đường"] === "Đường Lĩnh Nam")[TRAFFIC_SPEED], 82 / 3);
+      const bar = popup("bar");
+      assert.equal(bar.config.data.length, 3);
+      assert.deepEqual(bar.config.data.map(row => row[TRAFFIC_SPEED]), [24, 20, 38]);
     }
     assert.equal(calls.length, 2);
     assert.equal(calls[0].source.sheetName, "Ùn tắc");

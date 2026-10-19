@@ -6,11 +6,10 @@ import { AGGREGATION_VALUES, measureAggregation, measureUnit } from "./measure-s
 import { latLngToCell } from "h3-js";
 import { roadAreaField, roadNameField, roadValueColumns } from "./road-map-data.js";
 import { normalizeRoadText } from "./congestion-data.js";
+import { buildCoordinateLines, coordinateBindings, inferCoordinateLine, isCoordinateLine, stationaryEntities } from "./coordinate-data.js";
 
 const AGGREGATIONS = new Set(AGGREGATION_VALUES);
 const TOTAL_HINT = /(tổng|total)/i;
-const LATITUDE_HINT = /(^|[\s_.-])(lat|latitude|vĩ độ|vi do)([\s_.-]|$)/i;
-const LONGITUDE_HINT = /(^|[\s_.-])(lng|lon|long|longitude|kinh độ|kinh do)([\s_.-]|$)/i;
 
 function columnMap(columns) {
   return new Map((columns || []).map(column => [column.name, column]));
@@ -347,6 +346,14 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
       available = false;
       unavailableReason = "Có nhiều bản ghi trong một nhóm nhưng chưa xác định được phép gộp có ý nghĩa cho chỉ số.";
     }
+  } else if (isCoordinateLine(suggestion)) {
+    const data = buildCoordinateLines(records, columns, suggestion.bindings);
+    feasibilityScore = Math.min(feasibilityScore, data.stats.coordinateRate);
+    if (stationaryEntities(records, columns, { lat: suggestion.bindings.lat, lng: suggestion.bindings.lng })) {
+      available = false; unavailableReason = "Các đối tượng cố định lặp lại theo thời gian phù hợp với Bản đồ Point, không tự nối thành tuyến.";
+    } else if (data.stats.coordinateRate < .7 || !data.features.length) {
+      available = false; unavailableReason = "Cần ít nhất hai tọa độ khác nhau trong cùng chuỗi, với ít nhất 70% tọa độ hợp lệ.";
+    }
   } else if (suggestion.chartType === "map_line") {
     const groups = groupRecords(records, suggestion.bindings.region).length;
     if (!groups) { available = false; unavailableReason = "Không có tên tuyến hợp lệ để ghép với mạng đường."; }
@@ -431,11 +438,12 @@ function complementaryTimeBar(analysis, records) {
 }
 
 export function prepareSuggestions(analysis, records, validRowRate, options = {}) {
-  const latitude = analysis.columns.find(column => column.geoLevel === "point_lat" || LATITUDE_HINT.test(column.name));
-  const longitude = analysis.columns.find(column => column.geoLevel === "point_lng" || LONGITUDE_HINT.test(column.name));
+  const coords = coordinateBindings(analysis.columns);
+  const latitude = analysis.columns.find(column => column.name === coords?.lat);
+  const longitude = analysis.columns.find(column => column.name === coords?.lng);
   let suggestions = analysis.suggestions || [];
   const roadField = roadNameField(analysis.columns);
-  if (roadField && roadAreaField(analysis.columns) && suggestions.length && !suggestions.some(item => item.chartType === "map_line")) {
+  if (roadField && roadAreaField(analysis.columns) && !suggestions.some(item => item.chartType === "map_line")) {
     const values = roadValueColumns(analysis.columns, records, roadField);
     const value = values.find(column => /muc do un tac|congestion|traffic status/.test(normalizeRoadText(column.name)))
       || values.find(column => column.role === "measure");
@@ -484,10 +492,16 @@ export function prepareSuggestions(analysis, records, validRowRate, options = {}
         source: "rule"
       }, ...suggestions];
     }
+    const path = inferCoordinateLine(records, analysis.columns);
+    if (path && !suggestions.some(suggestion => suggestion.chartType === "map_line")) suggestions = [{
+      id: "coordinate-line", chartType: "map_line", title: "Bản đồ Line", bindings: path, agg: null, confidence: .96, source: "rule",
+      reason: "Các tọa độ tạo thành chuỗi; nối theo cột thứ tự/thời gian hoặc thứ tự dòng trong file, tách riêng từng nhóm tuyến."
+    }, ...suggestions];
   }
+  if (options.mapOnly) suggestions = suggestions.filter(suggestion => ["choropleth", "map_line", "point"].includes(suggestion.chartType));
   return suggestions.map(suggestion => evaluateSuggestion(suggestion, records, analysis.columns, validRowRate, options))
     .sort((a, b) => latitude && longitude
-      ? Number(b.chartType === "point") - Number(a.chartType === "point") || b.effectiveConfidence - a.effectiveConfidence || a.title.localeCompare(b.title, "vi")
+      ? Number(isCoordinateLine(b)) - Number(isCoordinateLine(a)) || Number(b.chartType === "point") - Number(a.chartType === "point") || b.effectiveConfidence - a.effectiveConfidence || a.title.localeCompare(b.title, "vi")
       : b.effectiveConfidence - a.effectiveConfidence || a.title.localeCompare(b.title, "vi"));
 }
 

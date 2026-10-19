@@ -54,7 +54,9 @@ test("road observations supplement Bản đồ Line when AI only suggests charts
   assert.equal(road.bindings.value, "Mức độ ùn tắc");
   assert.equal(road.agg, null);
   assert.equal(suggestions.some(item => item.chartType === "choropleth"), false);
-  assert.deepEqual(prepareSuggestions({ ...analysis, suggestions: [] }, data.records, data.validRowRate), []);
+  const maps = prepareSuggestions({ ...analysis, suggestions: [] }, data.records, data.validRowRate, { mapOnly: true });
+  assert.deepEqual(maps.map(item => item.chartType), ["map_line"], "road metadata still provides a map after standalone chart suggestions are removed");
+  assert.equal(maps[0].source, "rule");
 });
 
 test("ghép từng dòng vào đúng mạng theo Khu vực, không ghép chéo tên đường trùng", () => {

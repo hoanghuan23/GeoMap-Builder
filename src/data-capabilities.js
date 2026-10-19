@@ -1,7 +1,6 @@
 const MAP_TYPES = [
-  { id: "point", label: "Point", icon: "point", renderer: "MapLibre", accepts: profile => profile.hasPoints },
-  { id: "heatmap", label: "Heatmap", icon: "heatmap", renderer: "MapLibre", accepts: profile => profile.hasPoints && profile.numericFields.length > 0 },
-  { id: "line", label: "Biểu đồ mạng lưới", icon: "line", renderer: "MapLibre", accepts: profile => profile.hasLines },
+  { id: "point", label: "Bản đồ Point", icon: "point", renderer: "MapLibre", accepts: profile => profile.hasPoints },
+  { id: "line", label: "Bản đồ Line", icon: "line", renderer: "MapLibre", accepts: profile => profile.hasLines },
   { id: "polygon", label: "Polygon", icon: "polygon", renderer: "MapLibre", accepts: profile => profile.hasArea }
 ];
 

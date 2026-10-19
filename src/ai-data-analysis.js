@@ -1,4 +1,4 @@
-import { fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
+import { AI_MAP_REGISTRY, fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
 import { normalizeTabularRecords, profileTabularData } from "./tabular-data.js";
 
 const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area)/i;
@@ -61,6 +61,7 @@ export async function requestAiDataAnalysis(records, { signal, includeSamples = 
     fallbackReason = error?.message || "Không thể gọi AI.";
     analysis = fallbackAnalysis(profile);
   }
+  analysis.suggestions = analysis.suggestions.filter(item => Object.hasOwn(AI_MAP_REGISTRY, item.chartType));
   const normalized = normalizeTabularRecords(records, analysis.columns);
   return { analysis, profile, records: normalized.records, validRowRate: normalized.validRowRate, fallbackReason };
 }

@@ -35,13 +35,14 @@ import { createAiPopupContent } from "./ai-popup.js";
 import { applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
 import { compareTimeValues, filterTimeRange, formatTimeValue, timeValueInfo, uniqueTimeValues } from "./time-values.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
-import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupFeaturesMatch, popupTimeColumn } from "./ai-popup-chart.js";
+import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupChartColumns, popupFeaturesMatch, popupTimeColumn } from "./ai-popup-chart.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-client.js";
 import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
 import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
 import { TRANSPORT_KIND_LABELS, transportClasses, transportClassStyle, transportColorExpression, transportGeometryKind } from "./transport-style.js";
 import { joinRoadRecordsByArea, roadAreaField, ROAD_NETWORKS, roadMapStyle, roadNetworksFromRecords, roadValueColumns } from "./road-map-data.js";
 import { roadNetworkUrl } from "./road-network-assets.js";
+import { buildCoordinateLines, isCoordinateLine, pointTitleField } from "./coordinate-data.js";
 
 const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
@@ -53,16 +54,9 @@ const MAP_STYLES = Object.freeze({
 });
 const MAP_STYLE_LABELS = Object.freeze({ liberty: "Liberty", bright: "Sáng", dark: "Tối" });
 const SUPPORTED_VIEW_TYPES = Object.freeze([
-  { label: "Point", icon: "point", kind: "map" },
-  { label: "H3 Hexagon", icon: "hexagon", kind: "map" },
-  { label: "Heatmap", icon: "heatmap", kind: "map" },
-  { label: "Biểu đồ mạng lưới", icon: "line", kind: "map" },
-  { label: "Polygon", icon: "polygon", kind: "map" },
-  { label: "Cột đơn", icon: "singleBar", kind: "chart" },
-  { label: "Cột ghép", icon: "groupedBar", kind: "chart" },
-  { label: "Biểu đồ đường", icon: "line", kind: "chart" },
-  { label: "Pie chart", icon: "pieChart", kind: "chart" },
-  { label: "Half pie", icon: "halfPie", kind: "chart" }
+  { label: "Bản đồ Polygon", icon: "polygon", kind: "map" },
+  { label: "Bản đồ Line", icon: "line", kind: "map" },
+  { label: "Bản đồ Point", icon: "point", kind: "map" }
 ]);
 const state = {
   resolution: CONFIG.DEFAULT_RESOLUTION, boundary: null, sourceBoundary: null, h3Data: { type: "FeatureCollection", features: [] },
@@ -357,10 +351,10 @@ function updateModelSections() {
   $("road-style-controls").hidden = !isRoad;
   $("cell-stats-card").hidden = !hasModel || isChart || state.mapType !== "h3";
   const activeAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
-  $("ai-filter-description").textContent = activeMapPopupSuggestion()
+  $("ai-filter-description").textContent = activePointSuggestion()
+    ? "Chọn chỉ số, nhóm điểm và thời gian hiển thị"
+    : activeMapPopupSuggestion()
     ? "Chọn cách hiển thị và chỉ số dữ liệu"
-    : activePointSuggestion()
-    ? "Chọn chỉ số, nhóm điểm và khoảng thời gian"
     : activeAiSuggestion?.chartType === "bar"
       ? "Chọn cách hiển thị và chỉ số dữ liệu"
       : "Chọn chỉ số, nhóm dữ liệu và khoảng thời gian";
@@ -580,16 +574,7 @@ function addMapLayers() {
     const feature = event.features?.[0]; if (!feature) return;
     const activeSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
     if (activeSuggestion?.chartType === "point") {
-      const columns = state.aiDataset.analysis?.columns || [];
-      const titleColumn = columns.find(column => /(^|[\s_.-])(tên|ten|name)([\s_.-]|$)/i.test(column.name))
-        || columns.find(column => column.role === "id")
-        || columns.find(column => ["category", "text"].includes(column.role));
-      const card = createAiPopupContent(document, feature, columns, titleColumn?.name);
-      pointPopup?.remove();
-      pointPopup = new maplibregl.Popup({ offset: 10, maxWidth: "360px", className: "ai-weather-popup" })
-        .setLngLat(feature.geometry.coordinates)
-        .setDOMContent(card)
-        .addTo(map);
+      openMapPopup(feature, event.lngLat, "point-marker");
       return;
     }
     const rows = Object.entries(feature.properties || {}).map(([key, value]) => `<b>${key}:</b> ${String(value)}`).join("<br>");
@@ -972,8 +957,8 @@ function aiWeatherPopupContent(feature) {
   const { recommendation } = state.aiDataset;
   const columns = state.aiDataset.analysis?.columns || [];
   return createAiPopupContent(document, feature, columns.map(column => column.role === "time"
-    && recommendation.filters.some(filter => filter.field === column.name && filter.control === "datetime-select")
-    ? { ...column, granularity: "datetime" } : column), recommendation.geometry?.field);
+    && recommendation.filters?.some(filter => filter.field === column.name && filter.control === "datetime-select")
+    ? { ...column, granularity: "datetime" } : column), activeMapPopupSuggestion()?.chartType === "point" ? pointTitleField(columns) : recommendation.geometry?.field);
 }
 
 function showAiPolygonDetails(event) {
@@ -996,7 +981,7 @@ function activePolygonSuggestion() {
 function activeMapPopupSuggestion() {
   const dataset = state.aiDataset;
   const suggestion = dataset?.suggestions?.find(item => item.id === dataset.selectedSuggestionId);
-  return ["choropleth", "map_line"].includes(suggestion?.chartType) ? suggestion : null;
+  return ["choropleth", "map_line", "point"].includes(suggestion?.chartType) ? suggestion : null;
 }
 
 function popupSelectionFor(suggestion = activeMapPopupSuggestion()) {
@@ -1004,7 +989,8 @@ function popupSelectionFor(suggestion = activeMapPopupSuggestion()) {
   dataset.popupSelections ||= {};
   const selection = dataset.popupSelections[suggestion.id] ||= { mode: "info", bar: null, line: null };
   if (selection.mode !== "info" && !selection[selection.mode]) {
-    selection[selection.mode] = createPopupChartSelection(dataset.records, dataset.analysis.columns, dataset.recommendation.metricField, selection.mode);
+    const metric = suggestion.chartType === "point" ? pointSelectionFor(suggestion).metricField : dataset.recommendation.metricField;
+    selection[selection.mode] = createPopupChartSelection(dataset.records, dataset.analysis.columns, metric, selection.mode, suggestion.bindings);
   }
   return selection;
 }
@@ -1034,7 +1020,7 @@ function renderMapPopup(view) {
     card.className = "weather-popup ai-popup-chart-only";
     chart = buildPopupChart({ records: dataset.records, columns: dataset.analysis.columns,
       feature: view.feature, regionField: dataset.recommendation.geometry.field,
-      kind: selection.mode, selection: selection[selection.mode], chartType: activeMapPopupSuggestion().chartType });
+      kind: selection.mode, selection: selection[selection.mode], chartType: activeMapPopupSuggestion().chartType, bindings: activeMapPopupSuggestion().bindings });
     const container = document.createElement("div");
     container.className = chart.config ? "ai-popup-chart" : "weather-popup-status";
     if (!chart.config) { container.textContent = chart.message; container.setAttribute("role", "status"); }
@@ -1086,10 +1072,10 @@ function refreshMapPopup() {
   const suggestion = activeMapPopupSuggestion();
   if (!suggestion) { closeMapPopup(); return; }
   const field = suggestion.bindings.region;
-  const features = view.layerId === "data-lines" ? state.lineData.features : view.layerId === "h3-fill" ? state.h3Data.features : state.boundary?.features;
-  const feature = features?.find(item => view.layerId === "h3-fill"
+  const features = view.layerId === "point-marker" ? state.pointData.features : view.layerId === "data-lines" ? state.lineData.features : view.layerId === "h3-fill" ? state.h3Data.features : state.boundary?.features;
+  const feature = (view.layerId === "point-marker" && view.feature.id != null ? features?.find(item => item.id === view.feature.id) : null) || features?.find(item => view.layerId === "h3-fill"
     ? item.properties.h3 === view.feature.properties.h3
-    : popupFeaturesMatch(item, view.feature, field, { chartType: suggestion.chartType, columns: state.aiDataset.analysis.columns }));
+    : popupFeaturesMatch(item, view.feature, field, { chartType: suggestion.chartType, columns: state.aiDataset.analysis.columns, bindings: suggestion.bindings }));
   if (!feature) { closeMapPopup(); return; }
   view.feature = feature;
   if (view.layerId === "h3-fill") showCellFocus(feature, view.layerId);
@@ -1562,7 +1548,16 @@ function showChartStyleControls(show) {
 function roadColorOverridesFor(suggestion) {
   const dataset = state.aiDataset;
   dataset.roadColorOverrides ||= Object.create(null);
-  return dataset.roadColorOverrides[suggestion.bindings.value] ||= Object.create(null);
+  return dataset.roadColorOverrides[suggestion.bindings.value || dataset.recommendation?.metricField || "__path"] ||= Object.create(null);
+}
+
+function aiLineStyle(data, suggestion) {
+  const dataset = state.aiDataset;
+  const field = suggestion.bindings.value || dataset.recommendation.metricField;
+  const column = dataset.analysis.columns.find(item => item.name === field);
+  const colors = roadColorOverridesFor(suggestion);
+  const color = colors.path || "#00d084";
+  return column ? roadMapStyle(data, column, colors) : { color, rows: [{ key: "path", label: "Chuỗi tọa độ", color }] };
 }
 
 function renderRoadStyleControls() {
@@ -1684,7 +1679,7 @@ async function readSpatialFile(file, { sheetName = null, signal } = {}) {
       source: { fileName: file.name, extension }
     });
   }
-  return { kind: "chart", analysis: analyzeBarData(parsed) };
+  throw new Error("Dữ liệu đầu vào cần địa danh hành chính, tên đường hoặc tọa độ để tạo bản đồ Polygon, Line hoặc Point.");
 }
 
 function uniqueRecordValues(records, field) {
@@ -1730,8 +1725,10 @@ function populateAiFilters(dataset) {
   const savedFilters = dataset.filters || {};
   const metricControls = [];
   const suggestion = dataset.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+  const mapColumns = isCoordinateLine(suggestion) ? dataset.analysis.columns.filter(column =>
+    ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name)) : dataset.analysis.columns;
   const measureColumns = suggestion?.chartType === "map_line"
-    ? roadValueColumns(dataset.analysis.columns, records, suggestion.bindings.region)
+    ? roadValueColumns(mapColumns, records, suggestion.bindings.region)
     : dataset.analysis?.columns?.filter(column => column.role === "measure") || [];
   if (recommendation.metricField && (measureColumns.length > 1 || suggestion?.chartType === "map_line" && measureColumns.length)) {
     const label = document.createElement("label"); const caption = document.createElement("span"); const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
@@ -1834,16 +1831,19 @@ function selectedAiFilters() {
 function recommendationForSuggestion(suggestion) {
   const dataset = state.aiDataset;
   const columns = new Map(dataset.analysis.columns.map(column => [column.name, column]));
-  const valueField = suggestion.bindings.value || (Array.isArray(suggestion.bindings.y) ? suggestion.bindings.y[0] : suggestion.bindings.y);
+  const coordinateLine = isCoordinateLine(suggestion);
+  const coordinateMap = coordinateLine || suggestion.chartType === "point";
+  const valueField = suggestion.bindings.value || (Array.isArray(suggestion.bindings.y) ? suggestion.bindings.y[0] : suggestion.bindings.y)
+    || (coordinateMap ? dataset.analysis.columns.find(column => column.role === "measure" && ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name))?.name : null);
   const regionField = suggestion.bindings.region;
   const region = columns.get(regionField);
-  const areaField = suggestion.chartType === "map_line" ? roadAreaField(dataset.analysis.columns) : null;
+  const areaField = suggestion.chartType === "map_line" && !coordinateLine ? roadAreaField(dataset.analysis.columns) : null;
   const area = columns.get(areaField);
-  const timeFilter = defaultTimeFilter(dataset.records, dataset.analysis.columns, suggestion.chartType);
+  const timeFilter = coordinateLine ? null : defaultTimeFilter(dataset.records, dataset.analysis.columns, suggestion.chartType);
   return {
     canRenderMap: true,
     visualization: suggestion.chartType === "map_line" ? "line" : suggestion.chartType === "choropleth" ? "polygon" : suggestion.chartType === "point" ? "point" : "h3",
-    geometry: regionField
+    geometry: coordinateMap ? { field: regionField || null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: coordinateLine ? "line" : "point" } : regionField
       ? { field: regionField, provider: suggestion.chartType === "map_line" ? "local-roads" : "maptiler", placeType: region?.geoLevel === "admin2" ? "county" : "region" }
       : { field: null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: "point" },
     metricField: valueField,
@@ -1896,8 +1896,8 @@ function renderAiSuggestionGrid() {
   suggestionHeading.className = "ai-manual-heading ai-suggestion-heading";
   const hasRuleSuggestions = suggestions.some(suggestion => suggestion.source === "rule");
   suggestionHeading.textContent = suggestions.length
-    ? hasRuleSuggestions ? "Đề xuất biểu đồ" : "AI đề xuất"
-    : "Chưa có kiểu biểu đồ phù hợp được đề xuất";
+    ? hasRuleSuggestions ? "Đề xuất bản đồ" : "AI đề xuất"
+    : "Chưa có kiểu bản đồ phù hợp được đề xuất";
   grid.className = "map-type-grid has-ai-suggestions";
   grid.replaceChildren(suggestionHeading, ...suggestionButtons);
   const source = state.aiDataset.analysis.source === "ai" ? hasRuleSuggestions ? "AI và phân tích dữ liệu" : "AI" : "phân tích dữ liệu";
@@ -1941,7 +1941,7 @@ function buildMapPopupControls(dataset, suggestion) {
   types.className = "ai-popup-types";
   types.setAttribute("role", "group"); types.setAttribute("aria-label", "Kiểu hiển thị popup");
   const time = popupTimeColumn(columns);
-  const subject = suggestion.chartType === "map_line" ? "tuyến" : "vùng";
+  const subject = suggestion.chartType === "map_line" ? "tuyến" : suggestion.chartType === "point" ? "điểm" : "vùng";
   for (const [mode, label, description, iconName] of [
     ["info", "Chỉ hiển thị thông tin", "Hiển thị các chỉ số dưới dạng thẻ thông tin", null],
     ["bar", "Biểu đồ cột", `Hiển thị biểu đồ cột của ${subject} được chọn`, "singleBar"],
@@ -1996,7 +1996,7 @@ function populatePolygonFilters(dataset, suggestion) {
 
 function buildMapPopupSettings(dataset, selection) {
   const settings = document.createElement("div"); settings.className = "ai-popup-settings";
-  const columns = dataset.analysis.columns;
+  const columns = popupChartColumns(dataset.analysis.columns, activeMapPopupSuggestion()?.bindings);
   const config = selection[selection.mode];
   if (selection.mode === "bar") {
     const variants = document.createElement("div"); variants.className = "ai-bar-chart-types";
@@ -2045,7 +2045,8 @@ function buildMapPopupSettings(dataset, selection) {
 }
 
 function refreshMapPopupControls() {
-  populateAiFilters(state.aiDataset);
+  if (activeMapPopupSuggestion()?.chartType === "point") populatePointControls(activeMapPopupSuggestion());
+  else populateAiFilters(state.aiDataset);
   if (activePolygonSuggestion()) renderGeoRepair(state.aiDataset.geoMatch?.unmatched || []);
   refreshMapPopup();
 }
@@ -2295,12 +2296,12 @@ function populatePointControls(suggestion) {
   if (model.measures.length) {
     nodes.push(aiField("Chỉ số", aiSelect("ai-point-metric", model.measures.map(column => [column.name, column.label]), selection.metricField)));
   }
-  if (model.groups.length > 1) {
-    nodes.push(aiField("Phân nhóm theo", aiSelect("ai-point-group", model.groups.map(column => [column.name, column.label]), selection.groupField)));
+  if (model.groups.length) {
+    nodes.push(aiField("Hiển thị theo", aiSelect("ai-point-group", model.groups.map(column => [column.name, column.label]), selection.groupField)));
   }
   if (group) {
     const label = group.label.toLocaleLowerCase("vi");
-    nodes.push(aiField(group.label, aiSelect("ai-point-mode", [["all", `Gộp tất cả ${label}`], ["pick", `Chọn từng ${label}`]], selection.mode)));
+    nodes.push(aiField(group.label, aiSelect("ai-point-mode", [["all", `Tất cả ${label}`], ["pick", `Chọn từng ${label}`]], selection.mode)));
     if (selection.mode === "pick") {
       const box = document.createElement("div"); box.className = "ai-series-picker ai-point-picker";
       const search = Object.assign(document.createElement("input"), { type: "search", className: "ai-series-search", placeholder: "Tìm…" });
@@ -2328,13 +2329,15 @@ function populatePointControls(suggestion) {
       const hasTime = date instanceof Date && !date.toISOString().endsWith("T00:00:00.000Z");
       return [value, formatTimeValue(value, model.timeColumn, hasTime)];
     });
-    const from = aiSelect("ai-point-range", choices, selection.from); from.dataset.edge = "from";
-    const to = aiSelect("ai-point-range", choices, selection.to); to.dataset.edge = "to";
+    const time = aiSelect("ai-point-time", choices, selection.time);
     const label = model.timeColumn.labelVi || humanizeField(model.timeColumn.name);
-    nodes.push(aiField(`${label} từ`, from), aiField("đến", to));
+    time.setAttribute("aria-label", `${label} hiển thị bản đồ`);
+    nodes.push(aiField(label, time));
   }
-  $("ai-filter-controls").replaceChildren(...nodes);
-  $("ai-data-filters").hidden = nodes.length === 0;
+  const mapControls = document.createElement("div"); mapControls.className = "ai-popup-map-controls";
+  mapControls.append(...nodes);
+  $("ai-filter-controls").replaceChildren(...buildMapPopupControls(state.aiDataset, suggestion), mapControls);
+  $("ai-data-filters").hidden = false;
   syncPointControls();
 }
 
@@ -2349,7 +2352,7 @@ function syncPointControls() {
   });
   const counter = document.querySelector("#ai-filter-controls [data-role='point-group-count']");
   if (counter) counter.textContent = `${selected.size}/${POINT_GROUP_LIMIT}`;
-  document.querySelectorAll("#ai-filter-controls .ai-point-range").forEach(select => { select.value = view.selection[select.dataset.edge]; });
+  document.querySelectorAll("#ai-filter-controls .ai-point-time").forEach(select => { select.value = view.selection.time; });
 }
 
 function pointMetricText(metric) {
@@ -2452,7 +2455,8 @@ function refreshPointView(suggestion, { rebuildControls = false } = {}) {
   else syncPointControls();
   updateModelSections(); applyStyle();
   $("file-note").textContent = `${view.stats.visibleCount.toLocaleString("vi-VN")}/${view.stats.totalCount.toLocaleString("vi-VN")} điểm · ${Math.round(view.stats.coordinateRate * 100)}% tọa độ hợp lệ`;
-  setStatus(view.stats.visibleCount ? `Đang hiển thị ${view.stats.visibleCount.toLocaleString("vi-VN")} điểm dữ liệu.` : "Không có điểm phù hợp với bộ lọc. Hãy chọn nhóm hoặc khoảng thời gian khác.", view.stats.visibleCount > 0);
+  refreshMapPopup();
+  setStatus(view.stats.visibleCount ? `Đang hiển thị ${view.stats.visibleCount.toLocaleString("vi-VN")} điểm dữ liệu.` : "Không có điểm phù hợp với bộ lọc. Hãy chọn nhóm hoặc thời gian khác.", view.stats.visibleCount > 0);
 }
 
 function activeRoadSuggestion() {
@@ -2467,9 +2471,10 @@ function renderRoadLegend() {
   legend.hidden = !suggestion || !state.roadDisplayStyle.showLegend || !state.lineData.features.length || !$("show-map-layers").checked;
   if (legend.hidden) return;
   const dataset = state.aiDataset;
-  const column = dataset.analysis.columns.find(column => column.name === suggestion.bindings.value);
+  const field = suggestion.bindings.value || dataset.recommendation.metricField;
+  const column = dataset.analysis.columns.find(column => column.name === field);
   const heading = document.createElement("div"); heading.className = "point-legend-heading";
-  const title = document.createElement("strong"); title.textContent = column?.labelVi || suggestion.bindings.value;
+  const title = document.createElement("strong"); title.textContent = column?.labelVi || field || "Chuỗi tọa độ";
   heading.append(title);
   const rows = document.createElement("div"); rows.className = "point-legend-rows";
   for (const item of dataset.roadStyle?.rows || []) {
@@ -2487,6 +2492,7 @@ function renderRoadLegend() {
 
 function refreshAiRoadMap({ fit = false } = {}) {
   const suggestion = activeRoadSuggestion(); const dataset = state.aiDataset;
+  if (isCoordinateLine(suggestion)) return refreshAiCoordinateLine({ fit });
   if (!suggestion || !dataset.roadArea?.field || !dataset.roadArea.networkIds.every(id => dataset.roadGeometries?.[id])) return;
   dataset.filters = selectedAiFilters();
   const records = applyPipelineFilters(dataset.records, dataset.filters);
@@ -2496,7 +2502,7 @@ function refreshAiRoadMap({ fit = false } = {}) {
     columns: dataset.analysis.columns, aggregation: resolveAggregation(suggestion, dataset.analysis.columns)
   });
   state.lineData = data;
-  dataset.roadStyle = roadMapStyle(data, dataset.analysis.columns.find(column => column.name === suggestion.bindings.value), roadColorOverridesFor(suggestion));
+  dataset.roadStyle = aiLineStyle(data, suggestion);
   map.getSource("line-data")?.setData(data);
   updateModelSections(); applyStyle();
   refreshMapPopup();
@@ -2507,6 +2513,21 @@ function refreshAiRoadMap({ fit = false } = {}) {
   $("file-note").textContent = `${stats.matchedRows}/${stats.totalRows} bản ghi khớp · ${stats.segmentCount.toLocaleString("vi-VN")} đoạn đường`;
   setStatus(data.features.length ? `Đang hiển thị Bản đồ Line tại ${areaLabels.join(", ")}.${skipped}`
     : `Không có tuyến khớp. Hãy kiểm tra Khu vực, tên/mã đường hoặc bộ lọc đã chọn.${skipped}`, data.features.length > 0);
+}
+
+function refreshAiCoordinateLine({ fit = false } = {}) {
+  const dataset = state.aiDataset; const suggestion = activeRoadSuggestion();
+  if (!isCoordinateLine(suggestion)) return;
+  dataset.filters = selectedAiFilters();
+  const data = buildCoordinateLines(applyPipelineFilters(dataset.records, dataset.filters), dataset.analysis.columns, suggestion.bindings);
+  state.lineData = data;
+  dataset.roadStyle = aiLineStyle(data, suggestion);
+  map.getSource("line-data")?.setData(data);
+  updateModelSections(); applyStyle(); refreshMapPopup();
+  if (fit && data.features.length) fitGeoJSON(data);
+  $("file-note").textContent = `${data.features.length} tuyến · ${Math.round(data.stats.coordinateRate * 100)}% tọa độ hợp lệ`;
+  setStatus(data.features.length ? "Đang hiển thị các chuỗi tọa độ trên Bản đồ Line."
+    : "Chưa có chuỗi gồm ít nhất hai tọa độ khác nhau. Kiểm tra nhóm tuyến, cột thứ tự hoặc dữ liệu tọa độ.", data.features.length > 0);
 }
 
 async function loadAiRoadNetwork({ fit = false } = {}) {
@@ -2566,6 +2587,9 @@ async function activateAiRoadMap(suggestion) {
   setDataPanelVisible(false); showChartStyleControls(false);
   renderAiSuggestionGrid();
   map.resize();
+  if (isCoordinateLine(suggestion)) {
+    cancelAiBoundaryLoad(); refreshAiCoordinateLine({ fit: true }); return true;
+  }
   return loadAiRoadNetwork({ fit: true });
 }
 
@@ -2767,16 +2791,8 @@ async function replaceAiPipelineData(pipeline, name) {
   state.dataOrigin = "ai"; state.boundary = null; state.sourceBoundary = null; state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = EMPTY_FEATURE_COLLECTION;
   map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
-  let chartAnalysis = null; let manualOptions = [];
-  try {
-    chartAnalysis = analyzeBarData(pipeline.rawRecords);
-    const primary = chartAnalysis.datasets.find(dataset => dataset.path === chartAnalysis.sourcePath) || chartAnalysis.datasets[0];
-    const lineOption = createLineOption(primary, chartAnalysis.titlePrefix);
-    manualOptions = [...chartAnalysis.options, ...(lineOption ? [lineOption] : []), ...createPieOptions(primary, `Cơ cấu các chỉ số · ${chartAnalysis.titlePrefix}`)];
-    chartAnalysis = { ...chartAnalysis, options: manualOptions };
-  } catch { /* AI suggestions can still render datasets unsupported by legacy charts. */ }
-  state.chartAnalysis = chartAnalysis; state.chartOptions = manualOptions;
-  const suggestions = prepareSuggestions(pipeline.analysis, pipeline.records, pipeline.validRowRate, { mapTilerAvailable: Boolean(CONFIG.MAPTILER_API_KEY) });
+  state.chartAnalysis = null; state.chartOptions = [];
+  const suggestions = prepareSuggestions(pipeline.analysis, pipeline.records, pipeline.validRowRate, { mapTilerAvailable: Boolean(CONFIG.MAPTILER_API_KEY), mapOnly: true });
   state.aiDataset = {
     ...pipeline,
     fileName: name,
@@ -2799,22 +2815,16 @@ async function replaceAiPipelineData(pipeline, name) {
   renderAiSuggestionGrid();
   let selected = false;
   const visibleSuggestions = mapDisplaySuggestions(suggestions);
-  const initialSuggestions = visibleSuggestions === suggestions ? suggestions : [...visibleSuggestions].sort((a, b) =>
-    Number(b.chartType === "map_line") - Number(a.chartType === "map_line") || Number(b.chartType === "choropleth") - Number(a.chartType === "choropleth"));
+  const rank = item => item.chartType === "map_line" && item.bindings?.lat ? 4 : item.chartType === "point" ? 3 : item.chartType === "map_line" ? 2 : 1;
+  const initialSuggestions = [...visibleSuggestions].sort((a, b) => rank(b) - rank(a));
   for (const suggestion of initialSuggestions.filter(item => item.available)) {
     const result = await selectAiSuggestion(suggestion.id);
     if (result === null) return;
     if (result) { selected = true; break; }
   }
-  if (!selected && !suggestions.length && pipeline.analysis.source === "ai") {
+  if (!selected) {
     updateModelSections();
-    setStatus("AI chưa tìm thấy kiểu biểu đồ phù hợp với dữ liệu này.");
-    return;
-  }
-  if (!selected && manualOptions.length) selectChartOption(manualOptions[0].id);
-  else if (!selected) {
-    updateModelSections();
-    throw new Error("Không tìm thấy kiểu trực quan hóa khả thi cho bảng dữ liệu này.");
+    setStatus("Dữ liệu cần có địa danh hành chính, tên đường hoặc tọa độ để tạo bản đồ Polygon, Line hoặc Point.");
   }
 }
 
@@ -3285,8 +3295,7 @@ function bindUI() {
       const suggestion = activeRoadSuggestion();
       if (!suggestion) return;
       roadColorOverridesFor(suggestion)[event.target.dataset.key] = event.target.value;
-      const column = state.aiDataset.analysis.columns.find(item => item.name === suggestion.bindings.value);
-      state.aiDataset.roadStyle = roadMapStyle(state.lineData, column, roadColorOverridesFor(suggestion));
+      state.aiDataset.roadStyle = aiLineStyle(state.lineData, suggestion);
       applyStyle(); renderRoadStyleControls();
       return;
     }
@@ -3300,7 +3309,7 @@ function bindUI() {
       changeMapPopupControl(event.target);
       return;
     }
-    if (event.target.matches(".ai-point-metric, .ai-point-group, .ai-point-mode, .ai-point-value, .ai-point-range")) {
+    if (event.target.matches(".ai-point-metric, .ai-point-group, .ai-point-mode, .ai-point-value, .ai-point-time")) {
       const suggestion = activePointSuggestion();
       if (!suggestion) return;
       const selection = pointSelectionFor(suggestion);
@@ -3321,11 +3330,7 @@ function bindUI() {
           return;
         }
         selection.selectedValues = values;
-      } else {
-        const edge = control.dataset.edge;
-        selection[edge] = control.value;
-        if (compareTimeValues(selection.from, selection.to, pointModelFor(suggestion).timeColumn) > 0) selection[edge === "from" ? "to" : "from"] = control.value;
-      }
+      } else if (control.matches(".ai-point-time")) selection.time = control.value;
       refreshPointView(suggestion, { rebuildControls });
       return;
     }
@@ -3450,7 +3455,7 @@ function bindUI() {
       const selection = popupSelectionFor();
       if (selection.mode !== "bar") return;
       selection.bar.variant = popupVariant.dataset.popupBarVariant;
-      selection.bar.metrics = defaultBarMetrics({ bindings: { y: selection.bar.metrics[0] } }, state.aiDataset.analysis.columns, selection.bar.variant);
+      selection.bar.metrics = defaultBarMetrics({ bindings: { y: selection.bar.metrics[0] } }, popupChartColumns(state.aiDataset.analysis.columns, activeMapPopupSuggestion().bindings), selection.bar.variant);
       refreshMapPopupControls();
       return;
     }

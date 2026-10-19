@@ -9,8 +9,8 @@ const ADMINISTRATIVE_LOCATION_HINT = /(tỉnh|thành phố|province|city|distric
 const TIME_HINT = /(^|[\s_.-])(ngày|ngay|date|datetime|timestamp|time|thời điểm|thoi diem|tháng|thang|month|năm|nam|year|quarter|quý|quy|week|tuần|tuan|period|kỳ|ky)([\s_.-]|$)/i;
 const ROAD_NAME_HINT = /(^|[\s_.-])(tên đường|ten duong|tên tuyến|ten tuyen|tuyến đường|tuyen duong|road[\s_.-]*name|route[\s_.-]*name|street[\s_.-]*name)([\s_.-]|$)/i;
 const ID_HINT = /(^|[\s_.-])(id|mã|ma|code|index|rank)([\s_.-]|$)/i;
-const LAT_HINT = /(^|[\s_.-])(lat|latitude|vĩ độ|vi do)([\s_.-]|$)/i;
-const LNG_HINT = /(^|[\s_.-])(lng|lon|long|longitude|kinh độ|kinh do)([\s_.-]|$)/i;
+const LAT_HINT = /(^|[\s_.-])(lat|latitude|vĩ[\s_.-]*độ|vi[\s_.-]*do)([\s_.-]|$)/i;
+const LNG_HINT = /(^|[\s_.-])(lng|lon|long|longitude|kinh[\s_.-]*(độ|do))([\s_.-]|$)/i;
 
 export const AI_CHART_REGISTRY = Object.freeze({
   choropleth: Object.freeze({
@@ -20,8 +20,8 @@ export const AI_CHART_REGISTRY = Object.freeze({
     renderer: "MapLibre"
   }),
   point: Object.freeze({
-    label: "Biểu đồ Point",
-    slots: Object.freeze({ lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]) }),
+    label: "Bản đồ Point",
+    slots: Object.freeze({ lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]), region: Object.freeze(["id", "category", "text", "geo"]) }),
     icon: "point",
     renderer: "MapLibre"
   }),
@@ -33,7 +33,8 @@ export const AI_CHART_REGISTRY = Object.freeze({
   }),
   map_line: Object.freeze({
     label: "Bản đồ Line",
-    slots: Object.freeze({ region: Object.freeze(["category", "geo"]), value: Object.freeze(["measure", "category"]) }),
+    slots: Object.freeze({ region: Object.freeze(["category", "geo", "id", "text"]), value: Object.freeze(["measure", "category"]),
+      lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]), x: Object.freeze(["time", "id", "measure", "category"]) }),
     icon: "line",
     renderer: "MapLibre"
   }),
@@ -51,8 +52,12 @@ export const AI_CHART_REGISTRY = Object.freeze({
   })
 });
 
+// Only these three types are accepted by the upload/AI interface. The other
+// registry entries remain internal chart/legacy renderers, not input models.
+export const AI_MAP_REGISTRY = Object.freeze(Object.fromEntries(["choropleth", "map_line", "point"].map(type => [type, AI_CHART_REGISTRY[type]])));
+
 export function supportedChartsForPrompt() {
-  return Object.fromEntries(Object.entries(AI_CHART_REGISTRY).map(([chartType, spec]) => [chartType, { slots: spec.slots }]));
+  return Object.fromEntries(Object.entries(AI_MAP_REGISTRY).map(([chartType, spec]) => [chartType, { slots: spec.slots }]));
 }
 
 function nullable(schema) {
@@ -87,14 +92,14 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
     },
     suggestions: {
       type: "array",
-      maxItems: Object.keys(AI_CHART_REGISTRY).length,
+      maxItems: Object.keys(AI_MAP_REGISTRY).length,
       items: {
         type: "object",
         additionalProperties: false,
         required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason"],
         properties: {
           id: { type: "string" },
-          chartType: { type: "string", enum: Object.keys(AI_CHART_REGISTRY) },
+          chartType: { type: "string", enum: Object.keys(AI_MAP_REGISTRY) },
           title: { type: "string" },
           bindings: {
             type: "object",
@@ -186,7 +191,8 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds) {
   const spec = AI_CHART_REGISTRY[raw?.chartType];
   if (!spec || typeof raw.id !== "string" || !raw.id.trim() || seenIds.has(raw.id)) return null;
   const b = raw.bindings || {};
-  const required = ["choropleth", "map_line"].includes(raw.chartType) ? ["region", "value"]
+  const coordinateLine = raw.chartType === "map_line" && b.lat && b.lng;
+  const required = coordinateLine ? ["lat", "lng"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["region", "value"]
     : raw.chartType === "point" ? ["lat", "lng"]
       : raw.chartType === "hex_h3" ? ["lat", "lng", "value"]
         : raw.chartType === "line" ? ["x", "y"] : ["x", "y"];
@@ -199,7 +205,13 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds) {
     }
     const names = list(value).filter(name => typeof name === "string" && name);
     if (!names.length || names.some(name => !fieldNames.has(name) || !spec.slots[slot]?.includes(roleOf.get(name)))) return null;
+    if (raw.chartType === "map_line" && !coordinateLine && slot === "region" && names.some(name => !["category", "geo"].includes(roleOf.get(name)))) return null;
     normalizedBindings[slot] = slot === "y" && raw.chartType === "line" ? [...new Set(names)] : names[0];
+  }
+  for (const slot of coordinateLine ? ["region", "x", "value"] : raw.chartType === "point" ? ["region"] : []) {
+    if (b[slot] == null || b[slot] === "") continue;
+    if (typeof b[slot] !== "string" || !fieldNames.has(b[slot]) || !spec.slots[slot]?.includes(roleOf.get(b[slot]))) return null;
+    normalizedBindings[slot] = b[slot];
   }
   if (raw.chartType === "line" && typeof b.series === "string" && b.series) {
     if (!fieldNames.has(b.series) || !spec.slots.series.includes(roleOf.get(b.series))) return null;

@@ -47,9 +47,13 @@ test("middleware chỉ gọi OpenAI một lần và fallback ngay khi output kh�
     assert.ok(response.body.suggestions.some(item => item.chartType === "choropleth"));
     const sent = JSON.parse(upstreamBody.input);
     assert.equal(sent.profile.rowCount, 2);
-    assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "point", "hex_h3", "map_line", "line", "bar"]);
-    assert.deepEqual(sent.supportedCharts.bar.slots.x, ["category", "geo", "time"]);
-    assert.match(upstreamBody.instructions, /role, grain, đơn vị và phép gộp/);
+    assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "map_line", "point"]);
+    assert.ok(sent.supportedCharts.map_line.slots.x.includes("time"));
+    assert.ok(sent.supportedCharts.map_line.slots.lat.includes("geo"));
+    assert.ok(sent.supportedCharts.point.slots.region.includes("id"));
+    assert.deepEqual(upstreamBody.text.format.schema.properties.suggestions.items.properties.chartType.enum, ["choropleth", "map_line", "point"]);
+    assert.ok(response.body.suggestions.every(item => ["choropleth", "map_line", "point"].includes(item.chartType)));
+    assert.match(upstreamBody.instructions, /Gán role, đơn vị, phép gộp và grain/);
   } finally {
     globalThis.fetch = originalFetch;
   }

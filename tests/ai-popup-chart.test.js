@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions } from "../src/ai-popup-chart.js";
 import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 import { buildRegionHexGrid } from "../src/region-hex-grid.js";
+import { storeColumns, storeRecords, storeBindings } from "./fixtures/store-points-fixture.js";
 
 const columns = [
   { name: "region", role: "geo" }, { name: "date", role: "time" },
@@ -21,25 +22,12 @@ const feature = { type: "Feature", properties: { region: "A", __location: "A", d
 const chart = (kind, overrides = {}) => buildPopupChart({ records, columns, feature, regionField: "region", kind,
   selection: createPopupChartSelection(records, columns, "temperature", kind), ...overrides });
 
-test("polygon suggestions hide standalone charts while other data keeps existing choices", () => {
-  const suggestions = [{ chartType: "line", available: true }, { chartType: "choropleth", available: true }, { chartType: "bar", available: true }];
-  assert.deepEqual(mapDisplaySuggestions(suggestions).map(item => item.chartType), ["choropleth"]);
-  assert.equal(mapDisplaySuggestions(suggestions.slice(0, 1)).length, 1);
-  suggestions[1].available = false;
-  assert.equal(mapDisplaySuggestions(suggestions).length, 3);
-  suggestions[1].repairable = true;
-  assert.equal(mapDisplaySuggestions(suggestions).length, 1);
-  for (const chartType of ["point", "hex_h3"]) {
-    const other = [...suggestions, { id: "other-map", chartType, available: true }];
-    other[1].id = "polygon";
-    assert.equal(mapDisplaySuggestions(other), other, "other map flows retain their existing default choices");
-    assert.equal(mapDisplaySuggestions(other, "other-map"), other);
-    assert.equal(mapDisplaySuggestions(other, "polygon").some(item => item.chartType === "line"), false);
+test("input suggestions contain only Polygon, Line and Point, including unavailable maps", () => {
+  const suggestions = ["line", "choropleth", "bar", "point", "hex_h3", "map_line"].map(chartType => ({ id: chartType, chartType, available: chartType !== "choropleth" }));
+  for (const selected of [null, "point", "line", "choropleth"]) {
+    assert.deepEqual(mapDisplaySuggestions(suggestions, selected).map(item => item.chartType), ["choropleth", "point", "map_line"]);
   }
-  const roads = [{ id: "roads", chartType: "map_line", available: true }, { id: "line", chartType: "line", available: true }, { chartType: "bar", available: true }];
-  assert.deepEqual(mapDisplaySuggestions(roads).map(item => item.chartType), ["map_line"]);
-  assert.deepEqual(mapDisplaySuggestions(roads, "roads").map(item => item.chartType), ["map_line"]);
-  assert.equal(mapDisplaySuggestions(roads, "line"), roads, "standalone charts keep their own flow when selected explicitly");
+  assert.deepEqual(mapDisplaySuggestions(suggestions.slice(0, 1)), [], "standalone charts never replace an unavailable map");
 });
 
 test("popup uses only clicked region, full independent date range, zero and missing points", () => {
@@ -121,4 +109,44 @@ test("road popup isolates the clicked area's name and code across all observatio
     assert.deepEqual(result.config.data.map(row => row["Tốc độ"]), [24, 20, 38]);
     assert.equal(result.config.timeColumn.granularity, "datetime");
   }
+});
+
+test("Point popup isolates the clicked store by ID, even when stores share a city and coordinates", () => {
+  const records = storeRecords.map(record => ({ ...record, vi_do: 21, kinh_do: 105 }));
+  const feature = { properties: { ...records[0], thang: "2026-03-01" } };
+  for (const kind of ["bar", "line"]) {
+    const selection = createPopupChartSelection(records, storeColumns, "doanh_thu_vnd", kind);
+    const result = buildPopupChart({ records, columns: storeColumns, feature, kind, chartType: "point", bindings: storeBindings, selection });
+    assert.equal(result.message, "");
+    assert.deepEqual(result.config.data.map(row => row.doanh_thu_vnd), [0, null, 200]);
+    assert.match(result.config.title, /Cửa hàng CH01/);
+  }
+});
+
+test("Point popup falls back to coordinates when there is no object ID and aggregates without time", () => {
+  const columns = storeColumns.filter(column => !["id", "time"].includes(column.role));
+  const result = buildPopupChart({ records: storeRecords, columns, feature: { properties: storeRecords[0] },
+    kind: "bar", chartType: "point", bindings: { lat: "vi_do", lng: "kinh_do" },
+    selection: createPopupChartSelection(storeRecords, columns, "doanh_thu_vnd", "bar") });
+  assert.equal(result.config.data.length, 1);
+  assert.equal(result.config.data[0].doanh_thu_vnd, 200);
+});
+
+test("coordinate Line popup selects only the clicked route's original time observations", () => {
+  const columns = [{ name: "route", role: "id" }, { name: "date", role: "time" }, { name: "speed", role: "measure", aggDefault: "mean" }];
+  const records = ["A", "B"].flatMap((route, i) => [1, 2].map(day => ({ route, date: new Date(`2026-01-0${day}`), speed: i * 100 + day })));
+  const result = buildPopupChart({ records, columns, feature: { properties: { route: "A" } }, regionField: "route",
+    chartType: "map_line", bindings: { lat: "lat", lng: "lng", region: "route", x: "date" }, kind: "line",
+    selection: createPopupChartSelection(records, columns, "speed", "line") });
+  assert.deepEqual(result.config.data.map(row => row.speed), [1, 2]);
+});
+
+test("coordinate and sequence dimensions cannot become popup measures", () => {
+  const columns = [{ name: "lat", role: "measure" }, { name: "lng", role: "measure" }, { name: "stt", role: "measure" }];
+  const bindings = { lat: "lat", lng: "lng", x: "stt" };
+  const records = [{ lat: 21, lng: 105, stt: 1 }, { lat: 22, lng: 106, stt: 2 }];
+  const selection = createPopupChartSelection(records, columns, "lat", "bar", bindings);
+  assert.deepEqual(selection.metrics, ["count"]);
+  const result = buildPopupChart({ records, columns, bindings, feature: { properties: records[0] }, chartType: "map_line", kind: "bar", selection });
+  assert.equal(result.config.data[0].__count, 2);
 });

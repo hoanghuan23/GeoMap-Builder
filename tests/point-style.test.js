@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildPointView, createPointModel, DEFAULT_POINT_STYLE, mergePointStyle, normalizePointSelection, pointPaint, POINT_COLOR, POINT_COLORS } from "../src/renderers/point-style.js";
+import { storeColumns, storeRecords, storeBindings } from "./fixtures/store-points-fixture.js";
 
 const columns = [
   { name: "code", role: "id" },
@@ -76,7 +77,7 @@ test("Point filtering preserves popup properties, string IDs, source records and
   assert.deepEqual(records, original);
 });
 
-test("Point time range includes both endpoints, normalizes reversed ranges, and allows an empty result", () => {
+test("Point selects one time, defaults to the latest and allows an empty result", () => {
   const records = [
     record("A", 10, { day: new Date("2026-07-01") }),
     record("B", 20, { day: new Date("2026-07-02") }),
@@ -84,24 +85,46 @@ test("Point time range includes both endpoints, normalizes reversed ranges, and 
     record("A", 40, { day: null })
   ];
   const model = createPointModel(records, [...columns, { name: "day", role: "time" }], bindings);
-  const view = buildPointView(model, { from: model.times[2], to: model.times[0] });
-  assert.equal(view.stats.visibleCount, 3);
-  assert.equal(view.selection.from, model.times[0]);
+  const latest = buildPointView(model);
+  assert.equal(latest.selection.time, model.times[2]);
+  assert.deepEqual(latest.data.features.map(feature => feature.properties.revenue), [30]);
+  assert.equal(normalizePointSelection(model, { time: "stale" }).time, model.times[2]);
+  const view = buildPointView(model, { time: model.times[0] });
+  assert.equal(view.stats.visibleCount, 1);
+  assert.equal(view.selection.time, model.times[0]);
   assert.equal(view.data.features[0].properties.day, "2026-07-01T00:00:00.000Z");
-  const empty = buildPointView(model, { selectedValues: ["B"], from: model.times[0], to: model.times[0] }, view.colors);
+  const empty = buildPointView(model, { selectedValues: ["B"], time: model.times[0] }, view.colors);
   assert.equal(empty.stats.visibleCount, 0);
   assert.equal(empty.metric.min, null);
   assert.equal(empty.legendRows[0].count, 0);
   assert.doesNotThrow(() => JSON.stringify(empty.paint));
 });
 
-test("Point dùng cùng bộ lọc khoảng cho kỳ không có năm", () => {
+test("Point chọn một kỳ không có năm và đối chiếu các nhãn thời gian tương đương", () => {
   const records = [record("A", 10, { period: "T10" }), record("A", 20, { period: "T2" }), record("A", 30, { period: "T1" })];
   const model = createPointModel(records, [...columns, { name: "period", role: "time", granularity: "month" }], bindings);
   assert.deepEqual(model.times, ["T1", "T2", "T10"]);
-  const view = buildPointView(model, { from: "T10", to: "T2" });
-  assert.equal(view.selection.from, "T2");
-  assert.equal(view.stats.visibleCount, 2);
+  const view = buildPointView(model, { time: "T2" });
+  assert.equal(view.selection.time, "T2");
+  assert.deepEqual(view.data.features.map(feature => feature.properties.revenue), [20]);
+  const equivalent = createPointModel([...records, record("A", 40, { period: "Tháng 2" })],
+    [...columns, { name: "period", role: "time", granularity: "month" }], bindings);
+  assert.equal(buildPointView(equivalent, { time: "Tháng 2" }).stats.visibleCount, 2);
+});
+
+test("Point offers store names and administrative cities regardless of category/text role", () => {
+  for (const role of ["category", "text"]) {
+    const model = createPointModel(storeRecords, storeColumns.map(column => column.name === "ten_cua_hang" ? { ...column, role } : column), storeBindings);
+    assert.deepEqual(model.groups.map(column => column.name), ["ten_cua_hang", "thanh_pho"]);
+    assert.deepEqual(model.groups[1].values.map(value => value.key), ["Hà Nội"]);
+    const byName = buildPointView(model, { groupField: "ten_cua_hang", selectedValues: ["Cửa hàng CH01"], time: model.times[0] });
+    assert.equal(byName.stats.visibleCount, 1);
+    assert.equal(byName.metric.min, 0);
+    const byCity = buildPointView(model, { groupField: "thanh_pho" });
+    assert.equal(byCity.stats.visibleCount, 2);
+    assert.deepEqual(byCity.data.features.map(feature => feature.properties.ma_cua_hang), ["CH01", "CH02"]);
+    assert.equal(byCity.legendRows[0].count, 2);
+  }
 });
 
 test("Eight selected groups have distinct matching map/legend colors, stable across metric/time changes", () => {
@@ -111,7 +134,7 @@ test("Eight selected groups have distinct matching map/legend colors, stable acr
   assert.equal(new Set(Object.values(initial.colors)).size, 8);
   assert.ok(initial.legendRows.every(row => POINT_COLORS.includes(row.color)));
   for (const row of initial.legendRows) assert.equal(evaluate(initial.paint["circle-color"], { type: row.key }), row.color);
-  const changed = buildPointView(model, { ...initial.selection, metricField: "rating", to: model.times[0] }, initial.colors);
+  const changed = buildPointView(model, { ...initial.selection, metricField: "rating", time: model.times[0] }, initial.colors);
   assert.deepEqual(changed.colors, initial.colors);
   const replaced = buildPointView(model, { ...initial.selection, selectedValues: [...initial.selection.selectedValues.slice(1), "G8"] }, initial.colors);
   assert.equal(new Set(Object.values(replaced.colors)).size, 8);
@@ -133,15 +156,16 @@ test("Point radius handles zero, negative, missing, constant values and zoom", (
   assert.equal(evaluate(constant.paint["circle-radius"], { rating: null }), 4);
 });
 
-test("Missing controls, one date, high-cardinality groups and empty filtered measures have safe defaults", () => {
+test("One date remains selectable while high-cardinality groups and empty measures are omitted", () => {
   const records = Array.from({ length: 81 }, (_, index) => record(`G${index}`, null, { day: "2026-07-01" }));
-  const model = createPointModel(records, columns.filter(column => column.name !== "rating").concat({ name: "day", role: "time" }), bindings);
+  const model = createPointModel(records, columns.filter(column => !["rating", "name"].includes(column.name)).concat({ name: "day", role: "time" }), bindings);
   assert.equal(model.groups.length, 0);
   assert.equal(model.measures.length, 0);
-  assert.equal(model.timeColumn, null);
+  assert.equal(model.timeColumn.name, "day");
   const view = buildPointView(model);
   assert.equal(view.selection.mode, "all");
   assert.equal(view.selection.metricField, null);
+  assert.equal(view.selection.time, "2026-07-01");
   assert.equal(view.data.features.length, 81);
   assert.equal(evaluate(view.paint["circle-radius"], {}, 10), 6);
 });

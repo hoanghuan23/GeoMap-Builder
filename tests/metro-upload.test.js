@@ -72,22 +72,19 @@ function createHarness() {
   return { context, get, sources, layers };
 }
 
-test("mọi thẻ bản đồ tuyến dùng tên Biểu đồ mạng lưới, không còn nhãn Line", () => {
+test("danh sách kiểu bản đồ chỉ có Polygon, Line và Point", () => {
   const { context, get } = createHarness();
   vm.runInContext("renderSupportedChartCatalog()", context);
   const labels = get("supported-chart-grid").children.map(item => item.children[1].textContent);
-  assert.ok(labels.includes("Biểu đồ mạng lưới"));
-  assert.ok(labels.includes("Biểu đồ đường"), "temporal line charts keep their distinct label");
-  assert.ok(labels.includes("H3 Hexagon"), "the supported-chart catalog keeps the H3 illustration");
-  assert.ok(!labels.includes("Line"));
+  assert.deepEqual(labels, ["Bản đồ Polygon", "Bản đồ Line", "Bản đồ Point"]);
   const areaTypes = capabilities.compatibleMapTypes({ hasPoints: false, hasLines: false, hasArea: true, numericFields: [], textFields: [] });
   assert.deepEqual(areaTypes.map(type => type.id), ["polygon"], "H3 is no longer a selectable map type");
   context.roadData = metroFixture.metro_route;
   vm.runInContext("renderCompatibleMapTypes(roadData)", context);
   const card = get("map-type-grid").children.find(item => item.dataset.type === "line");
-  assert.equal(card.dataset.label, "Biểu đồ mạng lưới");
-  assert.equal(card.title, "Biểu đồ mạng lưới · MapLibre");
-  assert.equal(card.children[1], "Biểu đồ mạng lưới");
+  assert.equal(card.dataset.label, "Bản đồ Line");
+  assert.equal(card.title, "Bản đồ Line · MapLibre");
+  assert.equal(card.children[1], "Bản đồ Line");
 });
 
 test("upload displays independent Metro layers, changes departure, and clears all sources", async () => {

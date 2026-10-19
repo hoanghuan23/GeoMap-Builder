@@ -3,22 +3,23 @@ import { comparableFilterValue } from "./ai-data-analysis.js";
 import { filterTimeRange, timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "./time-values.js";
 import { roadAreaField, roadNetworkForArea, roadRefField } from "./road-map-data.js";
 import { normalizeRoadText } from "./congestion-data.js";
+import { isCoordinateLine, pointIdentity, pointTitleField } from "./coordinate-data.js";
 
 export function mapDisplaySuggestions(suggestions = [], selectedSuggestionId = null) {
-  const selected = suggestions.find(item => item.id === selectedSuggestionId);
-  // Polygon and road maps own their popup charts. Point/H3 and standalone
-  // charts retain their existing choices and initial selection.
-  if (selected && !["choropleth", "map_line"].includes(selected.chartType)) return suggestions;
-  if (!selected && suggestions.some(item => item.available && ["point", "hex_h3"].includes(item.chartType))) return suggestions;
-  return suggestions.some(item => ["choropleth", "map_line"].includes(item.chartType) && (item.available || item.repairable))
-    ? suggestions.filter(item => !["bar", "line"].includes(item.chartType)) : suggestions;
+  return suggestions.filter(item => ["choropleth", "map_line", "point"].includes(item.chartType));
 }
 
 export function popupTimeColumn(columns = []) {
   return columns.find(column => column.role === "time") || null;
 }
 
-export function createPopupChartSelection(records, columns, metricField, kind) {
+export function popupChartColumns(columns, bindings = {}) {
+  const dimensions = new Set([bindings.lat, bindings.lng, bindings.x]);
+  return columns.map(column => column.role === "measure" && dimensions.has(column.name) ? { ...column, role: "ignore" } : column);
+}
+
+export function createPopupChartSelection(records, columns, metricField, kind, bindings = {}) {
+  columns = popupChartColumns(columns, bindings);
   const time = popupTimeColumn(columns);
   const times = time ? uniqueTimeValues(records, time) : [];
   const metric = columns.find(column => column.name === metricField && column.role === "measure")?.name
@@ -46,21 +47,26 @@ function roadIdentity(properties, regionField, columns) {
   ]);
 }
 
-export function popupFeaturesMatch(feature, other, regionField, { chartType = "choropleth", columns = [] } = {}) {
+export function popupFeaturesMatch(feature, other, regionField, { chartType = "choropleth", columns = [], bindings = {} } = {}) {
+  if (chartType === "point") return pointIdentity(feature?.properties, columns, bindings) === pointIdentity(other?.properties, columns, bindings);
+  if (isCoordinateLine({ chartType, bindings })) return !bindings.region || String(feature?.properties?.[bindings.region] ?? "").trim() === String(other?.properties?.[bindings.region] ?? "").trim();
   if (chartType === "map_line") return roadIdentity(feature?.properties, regionField, columns) === roadIdentity(other?.properties, regionField, columns);
   return regionKey(popupRegionValue(feature, regionField)) === regionKey(popupRegionValue(other, regionField));
 }
 
 export function popupRegionRecords(records, feature, regionField, options = {}) {
   const value = popupRegionValue(feature, regionField);
-  return regionKey(value) ? records.filter(record => popupFeaturesMatch({ properties: record }, feature, regionField, options)) : [];
+  return regionKey(value) || options.chartType === "point" || isCoordinateLine({ chartType: options.chartType, bindings: options.bindings })
+    ? records.filter(record => popupFeaturesMatch({ properties: record }, feature, regionField, options)) : [];
 }
 
-export function buildPopupChart({ records, columns, feature, regionField, kind, selection, chartType = "choropleth" }) {
+export function buildPopupChart({ records, columns, feature, regionField, kind, selection, chartType = "choropleth", bindings = {} }) {
+  columns = popupChartColumns(columns, bindings);
   const empty = message => ({ config: null, message });
-  const region = popupRegionValue(feature, regionField);
-  let selected = popupRegionRecords(records, feature, regionField, { chartType, columns });
-  if (!selected.length) return empty(chartType === "map_line" ? "Không có dữ liệu cho tuyến vừa chọn." : "Không có dữ liệu cho vùng vừa chọn.");
+  const region = chartType === "point" ? feature?.properties?.[pointTitleField(columns)] || "Điểm dữ liệu"
+    : popupRegionValue(feature, regionField) || feature?.properties?.__path_key || "Chuỗi tọa độ";
+  let selected = popupRegionRecords(records, feature, regionField, { chartType, columns, bindings });
+  if (!selected.length) return empty(chartType === "map_line" ? "Không có dữ liệu cho tuyến vừa chọn." : chartType === "point" ? "Không có dữ liệu cho điểm vừa chọn." : "Không có dữ liệu cho vùng vừa chọn.");
   const time = popupTimeColumn(columns);
   if (kind === "line" && !time) return empty("Biểu đồ đường cần cột thời gian.");
   if (time) {
@@ -74,7 +80,8 @@ export function buildPopupChart({ records, columns, feature, regionField, kind, 
   const choices = new Set(columns.filter(column => column.role === "measure").map(column => column.name));
   if (kind === "bar") choices.add("count");
   if (!metrics?.length || metrics.some(metric => !choices.has(metric))) return empty("Chưa có chỉ số hợp lệ để vẽ biểu đồ.");
-  const x = time?.name || regionField;
+  const x = time?.name || regionField || "__popup_object";
+  if (x === "__popup_object") selected = selected.map(record => ({ ...record, [x]: region }));
   const suggestion = { id: "map-popup", chartType: kind, title: `Dữ liệu của ${region}`, reason: "", agg: null, bindings: { x, y: kind === "line" ? metrics : metrics[0] } };
   // Multiple observations need an explicit, meaningful aggregation. Do not turn
   // an unknown aggregation into a silent average or a missing chart point.

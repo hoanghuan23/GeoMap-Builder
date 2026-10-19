@@ -326,7 +326,7 @@ test("chỉ bổ sung biểu đồ vùng khi có số liệu hợp lệ ở ít 
   assert.deepEqual(analysis.suggestions, []);
 });
 
-test("cặp tọa độ luôn tạo đề xuất Point và loại đề xuất H3", () => {
+test("chuỗi tọa độ hỗ trợ Line và Point, loại H3 và biểu đồ độc lập trong luồng input", () => {
   const analysis = {
     columns: [
       { name: "Vĩ độ", role: "geo", geoLevel: "point_lat" },
@@ -353,9 +353,9 @@ test("cặp tọa độ luôn tạo đề xuất Point và loại đề xuất H
   const suggestions = prepareSuggestions(analysis, [
     { "Vĩ độ": 21.02, "Kinh độ": 105.83, "Doanh thu": 10 },
     { "Vĩ độ": 21.05, "Kinh độ": 105.79, "Doanh thu": 20 }
-  ], { "Vĩ độ": 1, "Kinh độ": 1, "Doanh thu": 1 });
+  ], { "Vĩ độ": 1, "Kinh độ": 1, "Doanh thu": 1 }, { mapOnly: true });
 
-  assert.deepEqual(suggestions.map(item => item.chartType), ["point", "bar"]);
+  assert.deepEqual(suggestions.map(item => item.chartType), ["map_line", "point"]);
   assert.equal(suggestions[0].available, true);
 });
 

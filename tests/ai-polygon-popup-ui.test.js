@@ -11,6 +11,9 @@ import { createAiPopupContent } from "../src/ai-popup.js";
 import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
 import { analyzeSpatialData } from "../src/data-capabilities.js";
 import * as roadMap from "../src/road-map-data.js";
+import * as coordinates from "../src/coordinate-data.js";
+import * as pointStyle from "../src/renderers/point-style.js";
+import { storeColumns, storeRecords, storeSuggestions } from "./fixtures/store-points-fixture.js";
 import { normalizeTabularRecords } from "../src/tabular-data.js";
 import { trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED } from "./fixtures/road-traffic-fixture.js";
 
@@ -22,7 +25,7 @@ class Element {
     this.classList = { toggle() {}, add() {}, remove() {} };
   }
   replaceChildren(...children) { this.children = []; this.append(...children); }
-  append(...children) { for (const child of children) { child.parent = this; this.children.push(child); } }
+  append(...children) { for (const child of children) { child.parent = this; child.parentElement = this; this.children.push(child); } }
   setAttribute(key, value) { this.attributes[key] = value; }
   addEventListener(type, callback) { this.events[type] = callback; }
   matches(selector) {
@@ -37,7 +40,7 @@ class Element {
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
-function harness({ road = false } = {}) {
+function harness({ road = false, point = false, path = false, storeNameRole = "category", pointRecords = storeRecords } = {}) {
   const elements = new Map(); const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   const rendered = []; const cleared = []; const popups = [];
   class Popup {
@@ -53,7 +56,7 @@ function harness({ road = false } = {}) {
     render(container, config) { assert.ok(popups.at(-1).added, "chart must mount after popup.addTo"); rendered.push({ kind, config }); },
     clear(container) { cleared.push(container); }
   });
-  const sources = new Map(["polygon-data", "vietnam-boundary", "h3-grid", "line-data"].map(id => [id, { setData(data) { this.data = data; } }]));
+  const sources = new Map(["polygon-data", "vietnam-boundary", "h3-grid", "line-data", "point-data"].map(id => [id, { setData(data) { this.data = data; } }]));
   const map = { getContainer: () => get("map"), getSource: id => sources.get(id), getLayer: () => null, resize() {},
     project: () => ({ x: 400, y: 300 }), unproject: point => point };
   const dataset = {
@@ -84,9 +87,25 @@ function harness({ road = false } = {}) {
       { type: "Feature", properties: { name: "Đường Ngọc Hồi", ref: "QL1" }, geometry: { type: "LineString", coordinates: [[105.8,20.9],[105.9,20.9]] } }
     ] } };
   }
+  if (point) {
+    dataset.analysis = { source: "ai", datasetTitle: "Cửa hàng", grain: "một cửa hàng/tháng",
+      columns: storeColumns.map(column => column.name === "ten_cua_hang" ? { ...column, role: storeNameRole } : column) };
+    dataset.records = pointRecords;
+    dataset.suggestions = storeSuggestions.map(item => ({ ...item, available: true, effectiveConfidence: item.confidence }));
+    dataset.selectedSuggestionId = "stores";
+  }
+  if (path) {
+    dataset.analysis = { source: "ai", datasetTitle: "Tuyến", grain: "tọa độ trong tuyến", columns: [
+      { name: "lat", role: "geo", geoLevel: "point_lat" }, { name: "lng", role: "geo", geoLevel: "point_lng" },
+      { name: "speed", role: "measure", aggDefault: "mean" }
+    ] };
+    dataset.records = [{ lat: 21.03, lng: 105.03, speed: 30 }, { lat: 21.01, lng: 105.01, speed: 10 }, { lat: 21.02, lng: 105.02, speed: 20 }];
+    dataset.suggestions = [{ id: "path", chartType: "map_line", available: true, bindings: { lat: "lat", lng: "lng" } }];
+    dataset.selectedSuggestionId = "path";
+  }
   const context = vm.createContext({
-    ...popupChart, ...pipeline, ...times, ...roadMap, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, analyzeSpatialData,
-    CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
+    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, analyzeSpatialData,
+    CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
     humanizeField: field => field, renderMapIcon() {}, renderChartIcon() {}, keepSelectOpenAfterMouseClick: value => value,
     document: { getElementById: get, createElement: () => new Element(), querySelector: () => new Element(), addEventListener() {},
@@ -99,6 +118,8 @@ function harness({ road = false } = {}) {
   const run = code => vm.runInContext(code, context);
   run("map = testMap; state.aiDataset = dataset; state.mapType = 'polygon'; state.boundary = {features: testFeatures}; bindUI(); populateAiFilters(dataset);");
   if (road) run("state.mapType = 'line'; state.boundary = null; dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]); populateAiFilters(dataset); refreshAiRoadMap();");
+  if (point) run("state.mapType = 'point'; dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]); refreshPointView(dataset.suggestions[0], {rebuildControls: true});");
+  if (path) run("state.mapType = 'line'; state.boundary = null; dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]); populateAiFilters(dataset); refreshAiRoadMap();");
   const all = selector => get("ai-filter-controls").querySelectorAll(selector);
   const click = element => get("ai-filter-controls").events.click({ target: element });
   const change = element => get("ai-filter-controls").events.change({ target: element });
@@ -247,4 +268,122 @@ test("new traffic data selects Bản đồ Line even when chart confidence is hi
   await h.run("replaceAiPipelineData({records: dataset.records, analysis: dataset.analysis}, 'traffic.csv')");
   assert.equal(h.run("selectedId"), "traffic-map-line");
   assert.equal(h.run("Object.keys(state.aiDataset.popupSelections).length"), 0);
+});
+
+test("Point defaults to information and switches chart-only popups for the clicked store", () => {
+  const h = harness({ point: true });
+  assert.equal(h.all(".ai-popup-type").length, 3);
+  assert.equal(h.all(".ai-popup-settings").length, 0);
+  assert.equal(h.all(".ai-point-time").length, 1);
+  assert.equal(h.all(".ai-point-range").length, 0);
+  assert.equal(h.all(".ai-point-time")[0].value, "2026-03-01T00:00:00.000Z");
+  assert.equal(h.sources.get("point-data").data.features.length, 2);
+  h.run("renderAiSuggestionGrid(); openMapPopup(state.pointData.features[0], [105.85,21.02], 'point-marker')");
+  assert.match(h.get("map-type-summary").textContent, /2 đề xuất/);
+  assert.equal(h.popups[0].card.children.length, 2);
+  h.mode("bar");
+  assert.equal(h.run("state.mapType"), "point");
+  assert.equal(h.popups[0].card.children.length, 1);
+  assert.deepEqual(h.rendered.at(-1).config.data.map(row => row.doanh_thu_vnd), [0, null, 200]);
+  h.mode("line");
+  assert.equal(h.rendered.at(-1).kind, "line");
+  h.run("openMapPopup(state.pointData.features.find(feature => feature.properties.ma_cua_hang === 'CH02'), [105.83,21.04], 'point-marker')");
+  assert.equal(h.popups[0].removed, true);
+  assert.match(h.rendered.at(-1).config.title, /CH02/);
+  assert.deepEqual(h.rendered.at(-1).config.data.map(row => row.doanh_thu_vnd), [1000, null, 1200]);
+  h.mode("info");
+  assert.equal(h.all(".ai-popup-settings").length, 0);
+  assert.equal(h.popups.at(-1).card.children.length, 2);
+  assert.ok(h.cleared.length >= 3);
+});
+
+test("Point map time/metric filters preserve chart range and close popups for hidden objects", async () => {
+  const h = harness({ point: true }); h.mode("line");
+  h.run("openMapPopup(state.pointData.features[0], [105.85,21.02], 'point-marker')");
+  const before = JSON.stringify(h.rendered.at(-1).config.data);
+  const time = h.all(".ai-point-time")[0];
+  time.value = "2026-01-01T00:00:00.000Z"; await h.change(time);
+  assert.equal(h.run("mapPopupView.feature.properties.doanh_thu_vnd"), 0);
+  assert.equal(h.sources.get("point-data").data.features.length, 2);
+  assert.equal(JSON.stringify(h.rendered.at(-1).config.data), before);
+  const metric = h.all(".ai-point-metric")[0]; metric.value = "chi_phi_vnd"; await h.change(metric);
+  assert.equal(h.run("state.aiDataset.activePointView.selection.metricField"), "chi_phi_vnd");
+  assert.equal(h.rendered.at(-1).config.series[0].key, "doanh_thu_vnd");
+  const group = h.all(".ai-point-value").find(control => control.value === "Cửa hàng CH01");
+  group.checked = false; await h.change(group);
+  assert.equal(h.run("mapPopupView"), null);
+  assert.equal(h.popups[0].removed, true);
+});
+
+test("Point display selector includes text store names and a city with a single value", () => {
+  const h = harness({ point: true, storeNameRole: "text" });
+  const group = h.all(".ai-point-group")[0];
+  assert.equal(group.parentElement.children[0].textContent, "Hiển thị theo");
+  assert.deepEqual(group.children.map(option => option.value), ["ten_cua_hang", "thanh_pho"]);
+  group.value = "thanh_pho"; h.change(group);
+  assert.deepEqual(h.all(".ai-point-value").map(input => input.value), ["Hà Nội"]);
+  assert.equal(h.sources.get("point-data").data.features.length, 2);
+});
+
+test("Point city selection filters stores, preserves one map time and keeps each store's chart separate", async () => {
+  const pointRecords = [...storeRecords, ...storeRecords.filter(record => record.ma_cua_hang === "CH02").map(record => ({
+    ...record, ma_cua_hang: "CH03", ten_cua_hang: "Cửa hàng CH03", thanh_pho: "Đà Nẵng", vi_do: 16.06, kinh_do: 108.2
+  }))];
+  const h = harness({ point: true, pointRecords });
+  const time = h.all(".ai-point-time")[0]; time.value = "2026-01-01T00:00:00.000Z"; await h.change(time);
+  const group = h.all(".ai-point-group")[0]; group.value = "thanh_pho"; await h.change(group);
+  const city = h.all(".ai-point-value").find(control => control.value === "Đà Nẵng");
+  city.checked = false; await h.change(city);
+  assert.deepEqual(h.sources.get("point-data").data.features.map(feature => feature.properties.ma_cua_hang), ["CH01", "CH02"]);
+  assert.equal(h.all(".ai-point-time")[0].value, "2026-01-01T00:00:00.000Z");
+  h.mode("line");
+  h.run("openMapPopup(state.pointData.features.find(feature => feature.properties.ma_cua_hang === 'CH02'), [105.83,21.04], 'point-marker')");
+  assert.deepEqual(h.rendered.at(-1).config.data.map(row => row.doanh_thu_vnd), [1000, null, 1200]);
+  assert.equal(h.all(".ai-popup-range").length, 2);
+  const mode = h.all(".ai-point-mode")[0]; mode.value = "all"; await h.change(mode);
+  assert.equal(h.sources.get("point-data").data.features.length, 3);
+  assert.equal(h.all(".ai-point-time").length, 1);
+});
+
+test("new store data prefers Point to polygon and resets popup settings", async () => {
+  const h = harness({ point: true }); h.mode("bar");
+  h.run("showChartStyleControls = () => {}; selectAiSuggestion = async id => { globalThis.selectedId = id; return true; };");
+  await h.run("replaceAiPipelineData({records: dataset.records, analysis: {...dataset.analysis, suggestions: dataset.suggestions}}, 'stores.csv')");
+  assert.equal(h.run("selectedId"), "stores");
+  assert.equal(h.run("Object.keys(state.aiDataset.popupSelections).length"), 0);
+});
+
+test("coordinate Line uses source row order without road network loading and retains popup behavior", async () => {
+  const h = harness({ path: true });
+  h.run("fitGeoJSON = () => {}; showChartStyleControls = () => {}; fetch = () => { throw new Error('must not fetch roads'); };");
+  await h.run("activateAiRoadMap(dataset.suggestions[0])");
+  assert.equal(h.run("dataset.recommendation.geometry.provider"), "coordinates");
+  assert.equal(h.run("state.lineData.features[0].geometry.type"), "LineString");
+  assert.equal(JSON.stringify(h.run("state.lineData.features[0].geometry.coordinates")), JSON.stringify([[105.03,21.03],[105.01,21.01],[105.02,21.02]]));
+  assert.equal(h.all(".ai-popup-type").find(control => control.dataset.popupMode === "line").disabled, true);
+  h.mode("bar");
+  h.run("openMapPopup(state.lineData.features[0], [105.02,21.02], 'data-lines')");
+  assert.equal(h.rendered.at(-1).config.data[0].speed, 20);
+  assert.equal(h.popups[0].card.children.length, 1);
+});
+
+test("coordinate Line keeps coordinate/order fields out of metric controls and applies map colors independently", () => {
+  const h = harness({ path: true });
+  h.run(`
+    dataset.analysis.columns = dataset.analysis.columns.map(column => column.role === 'geo' ? {...column, role:'measure'} : column);
+    dataset.analysis.columns.push({name:'stt', role:'measure'});
+    dataset.records = dataset.records.map((record, index) => ({...record, stt:index+1}));
+    dataset.suggestions[0].bindings.x='stt';
+    dataset.recommendation=recommendationForSuggestion(dataset.suggestions[0]);
+    populateAiFilters(dataset); refreshAiRoadMap();
+  `);
+  assert.deepEqual(h.all(".ai-metric-selector")[0].children.map(option => option.value), ["speed"]);
+  h.mode("bar");
+  assert.deepEqual(h.all(".ai-popup-metric")[0].children.map(option => option.value), ["count", "speed"]);
+  h.run("openMapPopup(state.lineData.features[0], [105.02,21.02], 'data-lines')");
+  const before = h.rendered.length;
+  const control = h.get("road-style-colors").querySelector(".road-style-color");
+  control.value = "#123456"; h.get("road-style-controls").events.change({ target: control });
+  assert.equal(h.run("dataset.roadStyle.color"), "#123456");
+  assert.equal(h.rendered.length, before, "changing map color does not rebuild popup charts");
 });
