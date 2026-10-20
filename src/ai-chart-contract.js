@@ -304,9 +304,11 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     });
     if (suggestion) {
       const target = { ...polygonLegendTarget(column, suggestion.agg || measureAggregation(column)), role: column.role };
-      suggestion.legend = normalizePolygonLegendRecommendation(suggestion.legend, target, {
+      const suggestionLegend = normalizePolygonLegendRecommendation(suggestion.legend, target, {
         onFallback: reason => errors.push(`Legend ${suggestion.id}: ${reason}`)
-      }) || normalizePolygonLegendRecommendation(column.legend, target);
+      });
+      // The column is authoritative for its default aggregation; suggestions can override other aggregations.
+      suggestion.legend = normalizePolygonLegendRecommendation(column.legend, target) || suggestionLegend;
       // Only seed a column default when the suggestion uses that same aggregation.
       if (!column.legend) column.legend = normalizePolygonLegendRecommendation(suggestion.legend, defaultTarget);
     }

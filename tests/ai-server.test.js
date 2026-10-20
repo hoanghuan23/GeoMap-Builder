@@ -22,14 +22,20 @@ async function call(middleware, body, path = "/api/ai/analyze-map-data") {
 test("middleware forwards per-column temperature semantics and legends without changing the input contract", async () => {
   const originalFetch = globalThis.fetch;
   const legend = legendFixture();
+  let calls = 0;
   const profile = { rowCount: 2, columns: [
     { name: "province", inferredType: "text", uniqueCount: 2 },
     { name: "temperature", inferredType: "number", uniqueCount: 2 }
   ] };
   globalThis.fetch = async (_url, options) => {
+    calls += 1;
     const payload = JSON.parse(options.body);
     assert.deepEqual(Object.keys(JSON.parse(payload.input)), ["profile", "supportedCharts"]);
     assert.match(payload.instructions, /Nhiệt độ cơ thể\/máy móc/);
+    assert.match(payload.instructions, /TỪNG cột measure/);
+    assert.match(payload.instructions, /domain \[0, 1\]/);
+    assert.match(payload.instructions, /Không coi max mẫu/);
+    assert.doesNotMatch(payload.instructions, /request riêng|trả columns\[\]\.legend và suggestions\[\]\.legend null/);
     assert.match(payload.instructions, /Không suy đoán đơn vị từ khoảng giá trị/);
     const columnSchema = payload.text.format.schema.properties.columns.items;
     assert.ok(columnSchema.required.includes("semanticType"));
@@ -42,13 +48,14 @@ test("middleware forwards per-column temperature semantics and legends without c
   try {
     const response = await call(middlewareFor({ OPENAI_API_KEY: "test" }), { profile });
     assert.equal(response.status, 200);
+    assert.equal(calls, 1);
     assert.deepEqual(response.body.columns[1].legend, legend);
     assert.deepEqual(response.body.suggestions[0].legend, legend);
     assert.equal(response.body.columns[1].semanticType, "air_temperature");
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test("metadata keeps generic data units and uses null legends until render statistics are available", async () => {
+test("metadata keeps generic data units and supplies auto legends in the analysis response", async () => {
   const originalFetch = globalThis.fetch;
   const expected = [
     ["Nhiệt độ trung bình", "°C"], ["Nhiệt độ thấp nhất", "°C"], ["Nhiệt độ cao nhất", "°C"],
@@ -68,14 +75,15 @@ test("metadata keeps generic data units and uses null legends until render stati
     assert.ok(schema.columns.items.required.includes("unitSource"));
     return { ok: true, json: async () => ({ output_text: JSON.stringify({
       columns: expected.map(([name, unit]) => ({ name, role: "measure", unit,
-        legend: { mode: "auto", referenceId: null, unit: null, reason: "Theo dữ liệu." } })), suggestions: []
+        aggDefault: "mean", legend: legendFixture({ field: name, unit, mode: "auto", domain: [0, 1],
+          stops: [{ value: 0, color: "#000000" }, { value: 1, color: "#ffffff" }] }) })), suggestions: []
     }) }) };
   };
   try {
     const response = await call(middlewareFor({ OPENAI_API_KEY: "test" }), { profile });
     assert.equal(response.status, 200);
     assert.deepEqual(response.body.columns.map(column => [column.name, column.unit]), expected);
-    assert.ok(response.body.columns.every(column => column.legend === null));
+    assert.ok(response.body.columns.every(column => column.legend?.mode === "auto"));
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -148,46 +156,38 @@ test("middleware giữ quyết định không đề xuất và vẫn gửi schem
   }
 });
 
-const legendRequestBody = () => ({
-  targets: [
-    { field: "temperature", aggregation: "mean", unit: "°C", labelVi: "Nhiệt độ", unitSource: "explicit", semanticType: "air_temperature",
-      renderStatistics: { min: 25, max: 34, mean: 29.5, p10: 25.9, p50: 29.5, p90: 33.1, validCount: 2, missingCount: 0 } },
-    { field: "revenue", aggregation: "sum", unit: null, labelVi: "Doanh thu", unitSource: "unknown", semanticType: "revenue",
-      renderStatistics: { min: 10, max: 100, mean: 55, p10: 19, p50: 55, p90: 91, validCount: 2, missingCount: 0 } }
-  ], context: { regionField: "province", filters: { month: "2026-01" }, matchedRegionCount: 2, timeRange: null }
+test("removed legend endpoint passes through without calling upstream", async () => {
+  const middleware = middlewareFor({ OPENAI_API_KEY: "test" });
+  let nextCalls = 0;
+  await middleware({ url: "/api/ai/recommend-polygon-legends", method: "POST" }, {}, () => { nextCalls += 1; });
+  assert.equal(nextCalls, 1);
 });
 
-test("legend endpoint sends only aggregate summaries and validates each AI target independently", async () => {
-  const originalFetch = globalThis.fetch; let calls = 0;
-  globalThis.fetch = async (_url, options) => {
-    calls += 1;
-    const payload = JSON.parse(options.body); const input = JSON.parse(payload.input);
-    assert.equal(payload.text.format.name, "polygon_legends"); assert.equal(payload.text.format.strict, true);
-    assert.match(payload.instructions, /SAU lọc/); assert.match(payload.instructions, /Không coi max mẫu/);
-    assert.equal(payload.instructions.includes("air_temperature_c"), false);
-    assert.equal(JSON.stringify(input).includes("private"), false);
-    assert.equal(input.targets.length, 2); assert.equal(input.targets[1].unit, null);
-    assert.ok(options.signal instanceof AbortSignal);
-    return { ok: true, json: async () => ({ output_text: JSON.stringify({ legends: [legendFixture(), legendFixture({ field: "revenue", aggregation: "sum", unit: "đồng" })] }) }) };
-  };
-  try {
-    const body = legendRequestBody(); body.records = ["private"]; body.context.geometry = "private";
-    const response = await call(middlewareFor({ OPENAI_API_KEY: "test" }), body, "/api/ai/recommend-polygon-legends");
-    assert.equal(response.status, 200); assert.equal(calls, 1);
-    assert.deepEqual(response.body.legends, [legendFixture()]);
-    assert.ok(response.body.validationErrors.some(error => error.includes("revenue")));
-  } finally { globalThis.fetch = originalFetch; }
-});
-
-test("invalid legend summaries never call upstream and malformed AI JSON safely returns an error", async () => {
+test("malformed analysis JSON returns an error after one upstream request", async () => {
   const originalFetch = globalThis.fetch; let calls = 0;
   globalThis.fetch = async () => { calls += 1; return { ok: true, json: async () => ({ output_text: "invalid JSON" }) }; };
   try {
-    const middleware = middlewareFor({ OPENAI_API_KEY: "test" });
-    const invalid = legendRequestBody(); invalid.targets[0].renderStatistics.validCount = 0;
-    assert.equal((await call(middleware, invalid, "/api/ai/recommend-polygon-legends")).status, 400);
-    assert.equal(calls, 0);
-    assert.equal((await call(middleware, legendRequestBody(), "/api/ai/recommend-polygon-legends")).status, 502);
-    assert.equal(calls, 1);
+    const response = await call(middlewareFor({ OPENAI_API_KEY: "test" }), {
+      profile: { rowCount: 2, columns: [{ name: "temperature", inferredType: "number" }] }
+    });
+    assert.equal(response.status, 502); assert.equal(calls, 1);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test("debug output preserves valid raw and normalized legends from the same analysis", async () => {
+  const originalFetch = globalThis.fetch; const originalDebug = console.debug; let debug;
+  const legend = legendFixture();
+  const raw = { columns: [{ name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", legend }],
+    suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend: null }] };
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ output_text: JSON.stringify(raw) }) });
+  console.debug = (_label, value) => { debug = JSON.parse(value); };
+  try {
+    const response = await call(middlewareFor({ OPENAI_API_KEY: "test", AI_DEBUG: "true" }), {
+      profile: { rowCount: 2, columns: [{ name: "province", inferredType: "text" }, { name: "temperature", inferredType: "number" }] }
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(debug.rawOutput.columns[0].legend, legend);
+    assert.deepEqual(debug.normalizedOutput.columns[1].legend, legend);
+    assert.deepEqual(debug.normalizedOutput.suggestions[0].legend, legend);
+  } finally { globalThis.fetch = originalFetch; console.debug = originalDebug; }
 });

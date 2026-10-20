@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizePolygonLegendRecommendation, normalizeLegendUnit, normalizePolygonLegendBatch, normalizePolygonLegendRequest, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "../src/polygon-legend-contract.js";
+import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "../src/polygon-legend-contract.js";
 import { legendFixture, legendColumn } from "./fixtures/polygon-legend-fixture.js";
 
 const target = polygonLegendTarget(legendColumn);
@@ -45,30 +45,7 @@ test("diverging requires a semantic scale with a stop at its meaningful center",
   }
 });
 
-test("batch validation rejects missing, unknown, duplicate and invalid targets without losing valid peers", () => {
-  const first = legendFixture(); const second = legendFixture({ field: "revenue", aggregation: "sum", unit: "đồng", mode: "auto" });
-  const targets = [target, { field: "revenue", aggregation: "sum", unit: "đồng" }];
-  for (const legends of [[first, { ...second, domain: [0, 0] }], [first, second, second], [first, { ...second, field: "unknown" }]]) {
-    const result = normalizePolygonLegendBatch({ legends }, targets);
-    assert.deepEqual(result.legends, [first]);
-    assert.ok(result.validationErrors.length);
-    assert.deepEqual(normalizePolygonLegendBatch(JSON.parse(JSON.stringify(result)), targets), result);
-  }
-  const countTarget = polygonLegendTarget(legendColumn, "count");
-  assert.equal(countTarget.unit, "bản ghi");
-});
-
-test("summary payload excludes source records and geometry and validates render statistics", () => {
-  const body = {
-    targets: [{ ...target, labelVi: "Nhiệt độ", unitSource: "explicit", semanticType: "air_temperature",
-      renderStatistics: { min: 25, max: 34, mean: 29.5, p10: 25.9, p50: 29.5, p90: 33.1, validCount: 2, missingCount: 0, records: ["private"] }, samples: ["private"] }],
-    context: { regionField: "region", matchedRegionCount: 2, filters: { date: "2026-01-01", injected: { private: true } }, geometry: "private" }, records: ["private"]
-  };
-  const payload = normalizePolygonLegendRequest(body);
-  assert.equal(JSON.stringify(payload).includes("private"), false);
-  assert.equal(payload.targets[0].unitSource, "explicit");
-  assert.deepEqual(payload.context.filters, { date: "2026-01-01" });
-  for (const patch of [{ min: 40 }, { p50: 100 }, { validCount: 0 }, { max: Infinity }]) {
-    assert.throws(() => normalizePolygonLegendRequest({ ...body, targets: [{ ...body.targets[0], renderStatistics: { ...body.targets[0].renderStatistics, ...patch } }] }));
-  }
+test("count targets use record units without changing the column unit", () => {
+  assert.equal(polygonLegendTarget(legendColumn, "count").unit, "bản ghi");
+  assert.equal(legendColumn.unit, "°C");
 });

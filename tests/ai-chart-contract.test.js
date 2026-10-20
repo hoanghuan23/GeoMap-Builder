@@ -295,3 +295,35 @@ test("validator chấp nhận đề xuất Point với binding kinh độ, vĩ �
   assert.equal(result.suggestions[0].chartType, "point");
   assert.deepEqual(result.suggestions[0].bindings, { lat: "lat", lng: "lng" });
 });
+
+test("column defaults resolve duplicate legend output while distinct suggestion aggregations stay independent", () => {
+  const columnLegend = legendFixture({ title: "Mặc định cột" });
+  for (const agg of ["mean", "sum"]) {
+    const suggestionLegend = legendFixture({ title: "Riêng suggestion", aggregation: agg });
+    const raw = {
+      columns: [{ name: "temperature", role: "measure", aggDefault: "mean", unit: "°C", legend: columnLegend }],
+      suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg, legend: suggestionLegend }]
+    };
+    const normalized = validateAndNormalizeAnalysis(raw, profile);
+    assert.deepEqual(normalized.columns[2].legend, columnLegend);
+    assert.deepEqual(normalized.suggestions[0].legend, agg === "mean" ? columnLegend : suggestionLegend);
+    assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(normalized)), profile), normalized);
+    assert.equal(normalized.columns[2].aggDefault, "mean");
+  }
+});
+
+test("relative auto stops and units survive server/client normalization for every measure", () => {
+  const columns = ["temperature", "revenue"].map((name, index) => ({ name, role: "measure",
+    aggDefault: index ? "sum" : "mean", unit: index ? "đồng" : "°C" }));
+  const dataProfile = { rowCount: 2, columns: [{ name: "province", inferredType: "text" },
+    ...columns.map(({ name }) => ({ name, inferredType: "number" }))] };
+  const raw = { columns: columns.map(column => ({ ...column,
+    legend: legendFixture({ field: column.name, aggregation: column.aggDefault, unit: column.unit, mode: "auto",
+      domain: [0, 1], stops: [{ value: 0, color: "#000000" }, { value: .2, color: "#808080" }, { value: 1, color: "#ffffff" }] }) })),
+    suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend: null }] };
+  const server = validateAndNormalizeAnalysis(raw, dataProfile);
+  const client = validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), dataProfile);
+  assert.deepEqual(client, server);
+  assert.deepEqual(client.columns.slice(1).map(column => column.legend), raw.columns.map(column => column.legend));
+  assert.deepEqual(client.suggestions[0].legend, client.columns[1].legend);
+});

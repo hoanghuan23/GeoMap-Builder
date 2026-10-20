@@ -1,9 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPolygonLegendTargets, polygonLegendLabels, POLYGON_NO_DATA_COLOR, resolvePolygonLegendConfig, samplePolygonLegendColor, summarizePolygonLegendValues } from "../src/polygon-legend.js";
+import { polygonLegendLabels, POLYGON_NO_DATA_COLOR, resolvePolygonLegendConfig, samplePolygonLegendColor, summarizePolygonLegendValues } from "../src/polygon-legend.js";
 import { polygonFillExpression, polygonLegendScale } from "../src/renderers/polygon-style.js";
-import { withSuggestionMetric, resolveAggregation } from "../src/ai-chart-pipeline.js";
-import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { withSuggestionMetric } from "../src/ai-chart-pipeline.js";
 import { legendFixture, legendColumn, legendSuggestion, legendData } from "./fixtures/polygon-legend-fixture.js";
 
 const resolve = (values, legend = legendFixture(), options = {}) => resolvePolygonLegendConfig({
@@ -61,9 +60,9 @@ test("constants, empty/invalid values, tiny ranges and legacy output always prod
 });
 
 test("source precedence only accepts legends bound to the active field, unit and aggregation", () => {
-  const columnLegend = legendFixture({ title: "Cột" }); const cachedLegend = legendFixture({ title: "Cache" });
-  assert.equal(resolve([25, 34], legendFixture({ title: "Suggestion" }), { columnMetadata: [{ ...legendColumn, legend: columnLegend }], legendRecommendations: [cachedLegend] }).title, "Suggestion");
-  assert.equal(resolve([25, 34], legendFixture({ field: "other" }), { columnMetadata: [{ ...legendColumn, legend: columnLegend }], legendRecommendations: [cachedLegend] }).title, "Cache");
+  const columnLegend = legendFixture({ title: "Cột" });
+  assert.equal(resolve([25, 34], legendFixture({ title: "Suggestion" }), { columnMetadata: [{ ...legendColumn, legend: columnLegend }] }).title, "Suggestion");
+  assert.equal(resolve([25, 34], legendFixture({ field: "other" }), { columnMetadata: [{ ...legendColumn, legend: columnLegend }] }).title, "Cột");
   assert.equal(resolve([25, 34], null, { columnMetadata: [{ ...legendColumn, legend: columnLegend }] }).title, "Cột");
   const changed = withSuggestionMetric(legendSuggestion, "revenue", [legendColumn, { name: "revenue", role: "measure", unit: "đồng", aggDefault: "sum", legend: columnLegend }]);
   assert.equal(changed.legend, null);
@@ -74,24 +73,6 @@ test("statistics use finite numeric feature values and exact interpolated quanti
   assert.deepEqual(summarizePolygonLegendValues(legendData([10, 20, 30, null, "40"]), "temperature"), {
     min: 10, max: 30, mean: 20, p10: 12, p50: 20, p90: 28, validCount: 3, missingCount: 2
   });
-});
-
-test("batch metric statistics match rendering after filters, grouping, unmatched regions and metric switches", () => {
-  const columns = [{ name: "region", role: "geo" }, legendColumn, { name: "revenue", role: "measure", unit: "đồng" }];
-  const records = [
-    { region: "A", date: "one", temperature: 10, revenue: 100 }, { region: "A", date: "one", temperature: 30, revenue: 200 },
-    { region: "B", date: "one", temperature: 40, revenue: 400 }, { region: "unmatched", date: "one", temperature: 999, revenue: 999 },
-    { region: "B", date: "two", temperature: 100, revenue: 1000 }
-  ];
-  const boundaries = { features: ["A", "B"].map(region => ({ properties: { __data_location: region }, geometry: { type: "Polygon", coordinates: [] } })) };
-  const filters = { date: "one" };
-  const targets = buildPolygonLegendTargets({ suggestion: legendSuggestion, records, boundaries, columns, filters });
-  assert.deepEqual(targets.map(target => [target.field, target.aggregation, target.renderStatistics.min, target.renderStatistics.max]), [["temperature", "mean", 20, 40], ["revenue", "sum", 300, 400]]);
-  for (const target of targets) {
-    const changed = withSuggestionMetric(legendSuggestion, target.field, columns);
-    const data = joinRecordsToMapTilerBoundaries(records, boundaries, { geometry: { field: "region" }, metricField: target.field, aggregation: resolveAggregation(changed, columns) }, { filters, columns });
-    assert.deepEqual(target.renderStatistics, summarizePolygonLegendValues(data, target.field));
-  }
 });
 
 test("sRGB color samples clamp at endpoints and interpolate linearly within uneven segments", () => {

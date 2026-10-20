@@ -24,7 +24,7 @@ import { PointRenderer } from "./renderers/point-renderer.js";
 import { buildPointView, createPointModel, DEFAULT_POINT_STYLE, mergePointStyle, normalizePointSelection, pointPaint, POINT_DEFAULT_GROUPS, POINT_GROUP_LIMIT } from "./renderers/point-style.js";
 import { PolygonRenderer } from "./renderers/polygon-renderer.js";
 import { polygonColorField, polygonFillExpression, polygonLegendScale } from "./renderers/polygon-style.js";
-import { buildPolygonLegendTargets, polygonLegendLabels, resolvePolygonLegendConfig } from "./polygon-legend.js";
+import { polygonLegendLabels, resolvePolygonLegendConfig } from "./polygon-legend.js";
 import { polygonLegendKey, polygonLegendTarget } from "./polygon-legend-contract.js";
 import { createMapSearch, focusMapOnFeature, landOnlyBoundary } from "./map-search.js";
 import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "./administrative-boundaries.js";
@@ -32,7 +32,7 @@ import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColo
 import { fetchCurrentWeather, formatVisibility, readCachedWeather, WEATHER_CACHE_TTL_MS, windDirectionLabel, writeCachedWeather } from "./openweather.js";
 import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient } from "./renderers/weather-style.js";
 import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } from "./geojson-layers.js";
-import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis, requestAiPolygonLegends } from "./ai-data-analysis.js";
+import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
 import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
 import { applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
@@ -384,98 +384,27 @@ function fillExpression() {
   return $("fixed-color").value;
 }
 
-let polygonLegendDatasetRevision = 0;
-
-function polygonLegendContextKey(dataset, suggestion) {
-  return JSON.stringify([suggestion?.bindings?.region, dataset.geoAliases || {},
-    Object.entries(dataset.geoSelections || {}).map(([name, feature]) => [name, feature.id, feature.text, feature.bbox])]);
-}
-
-function cancelPolygonLegendRecommendations(dataset = state.aiDataset) {
-  dataset?.polygonLegends?.controller?.abort();
-}
-
-function polygonLegendSession(dataset, suggestion) {
-  const contextKey = polygonLegendContextKey(dataset, suggestion);
-  if (dataset.polygonLegends?.contextKey !== contextKey) {
-    const previous = dataset.polygonLegends;
-    cancelPolygonLegendRecommendations(dataset);
-    // Remove only configurations installed by the previous boundary context.
-    for (const item of [...dataset.analysis.columns, ...dataset.suggestions]) {
-      if (previous && [...previous.recommendations.values()].includes(item.legend)) item.legend = null;
-    }
-    dataset.polygonLegends = { revision: ++polygonLegendDatasetRevision, contextKey, status: "idle", version: 0,
-      recommendations: new Map(), logged: new Set(), controller: null, promise: null, resolved: null, designContext: null };
-  }
-  return dataset.polygonLegends;
-}
-
 function activePolygonLegendScale() {
   const suggestion = activePolygonSuggestion();
   if (!suggestion || state.mapType !== "polygon" || state.metroData) return null;
   const dataset = state.aiDataset; const columns = dataset.analysis.columns;
-  const session = polygonLegendSession(dataset, suggestion);
+  const cache = dataset.polygonLegendScaleCache ||= { resolved: null, logged: new Set() };
   const column = columns.find(item => item.name === suggestion.bindings.value);
   const aggregation = resolveAggregation(suggestion, columns);
   const key = polygonLegendKey(polygonLegendTarget(column, aggregation));
-  const cached = session.resolved;
-  if (cached && cached.data === state.boundary && cached.key === key && cached.version === session.version
+  const cached = cache.resolved;
+  if (cached && cached.data === state.boundary && cached.key === key
     && cached.columnLegend === column?.legend && cached.suggestionLegend === suggestion.legend && cached.title === column?.labelVi) return cached.scale;
   const scale = resolvePolygonLegendConfig({ suggestion, columnMetadata: columns, aggregatedFeatures: state.boundary,
-    aggregation, legendRecommendations: session.recommendations, status: session.status,
+    aggregation,
     onFallback: ({ code, reason }) => {
       const logKey = `${key}:${code}`;
-      if (session.logged.has(logKey)) return;
-      session.logged.add(logKey); console.debug("Polygon legend fallback", { code, field: suggestion.bindings.value, aggregation, reason });
+      if (cache.logged.has(logKey)) return;
+      cache.logged.add(logKey); console.debug("Polygon legend fallback", { code, field: suggestion.bindings.value, aggregation, reason });
     } });
-  session.resolved = { data: state.boundary, key, version: session.version, columnLegend: column?.legend,
+  cache.resolved = { data: state.boundary, key, columnLegend: column?.legend,
     suggestionLegend: suggestion.legend, title: column?.labelVi, scale };
   return scale;
-}
-
-async function ensurePolygonLegendRecommendations(suggestion, dataset = state.aiDataset) {
-  if (!dataset || suggestion?.chartType !== "choropleth") return;
-  const session = polygonLegendSession(dataset, suggestion);
-  if (session.status !== "idle") return session.promise;
-  session.status = "pending"; session.version += 1;
-  const isCurrent = () => state.aiDataset === dataset && dataset.polygonLegends === session
-    && session.contextKey === polygonLegendContextKey(dataset, suggestion) && !session.controller?.signal?.aborted;
-  session.promise = (async () => {
-    try {
-      const filters = Object.fromEntries(Object.entries(dataset.filters || {}).map(([field, value]) => [field, Array.isArray(value) ? [...value] : value]));
-      const targets = buildPolygonLegendTargets({ suggestion, records: dataset.records, boundaries: dataset.boundaries,
-        columns: dataset.analysis.columns, filters });
-      if (!targets.length) { session.status = "fallback"; return; }
-      const time = dataset.analysis.columns.find(column => column.role === "time");
-      const times = time ? applyPipelineFilters(dataset.records, filters).map(record => record[time.name]).filter(value => value != null)
-        .sort((a, b) => compareTimeValues(a, b, time)) : [];
-      session.designContext = { regionField: suggestion.bindings.region, filters,
-        matchedRegionCount: dataset.boundaries.features.length,
-        timeRange: times.length ? [comparableFilterValue(times[0]), comparableFilterValue(times.at(-1))] : null };
-      session.controller = createAbortController();
-      if (isCurrent() && activePolygonSuggestion()) applyStyle();
-      const result = await requestAiPolygonLegends({ targets, context: session.designContext }, { signal: session.controller.signal });
-      if (!isCurrent()) return;
-      session.recommendations = new Map(result.legends.map(legend => [polygonLegendKey(legend), legend]));
-      session.validationErrors = result.validationErrors;
-      for (const legend of result.legends) {
-        const column = dataset.analysis.columns.find(item => item.name === legend.field);
-        if (column && polygonLegendKey(polygonLegendTarget(column)) === polygonLegendKey(legend)) column.legend = legend;
-        const selected = dataset.suggestions.find(item => item.id === suggestion.id);
-        if (selected?.bindings.value === legend.field && resolveAggregation(selected, dataset.analysis.columns) === legend.aggregation) selected.legend = legend;
-      }
-      session.status = result.legends.length ? "ready" : "fallback";
-    } catch (error) {
-      if (!isCurrent()) return;
-      session.status = "fallback";
-      session.validationErrors = [error.message || "Không thể thiết kế chú giải bằng AI."];
-      console.debug("Polygon legend request fallback", { code: "LEGEND_REQUEST_FAILED", revision: session.revision });
-    } finally {
-      session.version += 1;
-      if (isCurrent() && activePolygonSuggestion()) applyStyle();
-    }
-  })();
-  return session.promise;
 }
 
 function syncPolygonPaletteControls(resolvedScale = activePolygonLegendScale()) {
@@ -490,7 +419,7 @@ function syncPolygonPaletteControls(resolvedScale = activePolygonLegendScale()) 
   const summary = $("polygon-legend-summary");
   summary.hidden = !managed;
   if (managed) {
-    const status = resolvedScale.status === "pending" ? "AI đang thiết kế chú giải…" : !resolvedScale.hasData ? "Không có dữ liệu"
+    const status = !resolvedScale.hasData ? "Không có dữ liệu"
       : resolvedScale.source === "ai" ? "Chú giải do AI đề xuất" : "Chú giải dự phòng";
     summary.textContent = `${resolvedScale.title}${resolvedScale.unit ? ` (${resolvedScale.unit})` : ""} · ${status}`;
     summary.style.setProperty("--legend-gradient", resolvedScale.gradient || resolvedScale.noDataColor);
@@ -529,7 +458,7 @@ function renderWeatherLegend(resolvedScale = activePolygonLegendScale()) {
   const unit = resolvedScale ? scale.unit : column?.unit || "";
   const title = resolvedScale ? scale.title : column?.labelVi || metric;
   $("weather-legend-title").textContent = `${title}${unit && !title.includes(unit) ? ` (${unit})` : ""}`;
-  mode.textContent = scale.source === "technical-fallback" ? scale.status === "pending" ? "Đang chuẩn bị chú giải" : "Chú giải dự phòng"
+  mode.textContent = scale.source === "technical-fallback" ? "Chú giải dự phòng"
     : scale.mode === "semantic" ? "Theo ngữ nghĩa" : "Theo dữ liệu";
   mode.title = scale.reason || "";
   $("weather-legend-scale").style.background = scale.gradient;
@@ -1460,7 +1389,6 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 
 function clearUploadedData({ preserveUploads = false } = {}) {
   closeMapPopup();
-  cancelPolygonLegendRecommendations();
   regionHexBuildRevision += 1;
   state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
   $("region-hex-note").textContent = "";
@@ -1750,7 +1678,6 @@ function renderRoadStyleControls() {
 
 function clearAiMapState() {
   closeMapPopup();
-  cancelPolygonLegendRecommendations();
   cancelAiBoundaryLoad();
   pointPopup?.remove(); pointPopup = null;
   state.aiDataset = null;
@@ -2964,7 +2891,6 @@ async function activateAiChoropleth(suggestion) {
   suggestion.repairable = false; suggestion.geoUnmatched = [];
   state.dataOrigin = "ai"; state.mapType = "polygon"; state.polygonPalette = "diverging";
   await filteredAiBoundary();
-  void ensurePolygonLegendRecommendations(suggestion, dataset);
   renderAiSuggestionGrid();
   setStatus(`Đã tạo bản đồ ${recommendation.title}.`, true);
   return true;

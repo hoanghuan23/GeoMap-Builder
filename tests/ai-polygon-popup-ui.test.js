@@ -5,8 +5,8 @@ import vm from "node:vm";
 import * as popupChart from "../src/ai-popup-chart.js";
 import * as pipeline from "../src/ai-chart-pipeline.js";
 import * as times from "../src/time-values.js";
-import { AI_CHART_REGISTRY } from "../src/ai-chart-contract.js";
-import { comparableFilterValue, displayFilterValue } from "../src/ai-data-analysis.js";
+import { AI_CHART_REGISTRY, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "../src/ai-data-analysis.js";
 import { createAiPopupContent } from "../src/ai-popup.js";
 import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
 import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
@@ -20,7 +20,7 @@ import * as polygonLegend from "../src/polygon-legend.js";
 import * as legendContract from "../src/polygon-legend-contract.js";
 import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 import { storeColumns, storeRecords, storeSuggestions } from "./fixtures/store-points-fixture.js";
-import { normalizeTabularRecords } from "../src/tabular-data.js";
+import { normalizeTabularRecords, profileTabularData } from "../src/tabular-data.js";
 import { trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED } from "./fixtures/road-traffic-fixture.js";
 import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 
@@ -48,7 +48,7 @@ class Element {
 }
 
 function harness({ road = false, point = false, path = false, thematic = false, storeNameRole = "category", pointRecords = storeRecords,
-  legendRequest = async () => ({ legends: [], validationErrors: [] }) } = {}) {
+  fetchImpl = () => assert.fail("map interactions must not call AI"), boundaryLoader = loadAdministrativeBoundaries } = {}) {
   const elements = new Map(); const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   const rendered = []; const cleared = []; const popups = [];
   class Popup {
@@ -118,7 +118,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   }
   const context = vm.createContext({
     ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract,
-    requestAiPolygonLegends: legendRequest, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
+    fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: async boundary => boundary, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
     humanizeField: field => field, renderMapIcon() {}, renderChartIcon() {}, keepSelectOpenAfterMouseClick: value => value,
@@ -150,7 +150,7 @@ test("AI semantic/auto legends lock palette controls, follow metrics and filters
     }
     dataset.records.forEach(record => { record.temperature += 24; record.minimum += 20; record.revenue = record.temperature * 10; });
     dataset.analysis.columns.push({name:'revenue',role:'measure',unit:'triệu',aggDefault:'sum',
-      legend:legendFixture({field:'revenue',aggregation:'sum',unit:'triệu',mode:'auto',title:'Doanh thu'})});
+      legend:legendFixture({field:'revenue',aggregation:'sum',unit:'triệu',mode:'auto',title:'Doanh thu',domain:[0,1],stops:[{value:0,color:'#000000'},{value:0.25,color:'#888888'},{value:1,color:'#ffffff'}]})});
     dataset.recommendation.numericFields.push('revenue');
     dataset.suggestions[1].legend=dataset.analysis.columns.find(column=>column.name==='temperature').legend;
     state.polygonPalette='blue';
@@ -199,54 +199,77 @@ test("AI semantic/auto legends lock palette controls, follow metrics and filters
   assert.equal(h.get("weather-legend").hidden, true);
 });
 
-test("legend batch is requested once and cached across metric, filter, style and hex changes", async () => {
-  const requests = []; let finish;
-  const h = harness({ thematic: true, legendRequest: (payload, options) => {
-    requests.push({ payload, options }); return new Promise(resolve => { finish = resolve; });
-  } });
+test("one upload analysis supplies legends before polygon activation and subsequent interactions make no AI requests", async () => {
+  const originalFetch = globalThis.fetch; const requests = [];
+  const h = harness({ thematic: true, boundaryLoader: async () => ({
+    features: h.dataset.boundaries.features, matched: ["A", "B"], unmatched: [], matchRate: 1, candidates: {}
+  }) });
+  const profile = profileTabularData(h.dataset.records);
+  const raw = {
+    columns: h.dataset.analysis.columns.map(column => ({ ...column,
+      geoLevel: column.role === "geo" ? "admin1" : null,
+      legend: column.role === "measure" ? legendFixture({ field: column.name, aggregation: column.aggDefault }) : null })),
+    suggestions: [{ ...h.dataset.suggestions[1], agg: "mean", legend: null }]
+  };
+  globalThis.fetch = async (url, options) => {
+    requests.push(url); assert.equal(url, "/api/ai/analyze-map-data");
+    const body = JSON.parse(options.body);
+    assert.deepEqual(body.profile, profile);
+    assert.equal(body.profile.samplesIncluded, false);
+    // The server validates once; requestAiDataAnalysis validates this response again.
+    return { ok: true, json: async () => validateAndNormalizeAnalysis(raw, body.profile) };
+  };
+  try {
+    h.get("ai-include-samples").checked = false;
+    await h.run(`(async () => {
+      const result = await analyzeTabularRecords(dataset.records, profileTabularData(dataset.records));
+      dataset.records = result.pipeline.records; dataset.analysis = result.pipeline.analysis;
+      dataset.suggestions = result.pipeline.analysis.suggestions.map(item => ({...item, available:true, feasibilityScore:1}));
+      dataset.selectedSuggestionId = dataset.suggestions[0].id;
+      replaceBoundary = async data => { state.boundary = data; state.dataProfile = analyzeSpatialData(data); };
+      await activateAiChoropleth(dataset.suggestions[0]);
+    })()`);
+    assert.equal(h.run("activePolygonLegendScale().source"), "ai");
+    assert.equal(h.run("activePolygonLegendScale().max"), 40);
+    assert.equal(h.run("activePolygonLegendScale() === activePolygonLegendScale()"), true);
+    const metric = h.all(".ai-metric-selector")[0]; metric.value = "minimum"; await h.change(metric);
+    const time = h.all(".ai-generated-filter")[0]; time.value = "2026-09-01T00:00:00.000Z"; await h.change(time);
+    h.run("state.regionHexEnabled=true; applyStyle(); applyMapLayerVisibility();");
+    assert.equal(h.run("activePolygonLegendScale().field"), "minimum");
+    assert.equal(h.run("activePolygonLegendScale().source"), "ai");
+    assert.deepEqual(h.layers.get("h3-fill").paint["fill-color"], h.layers.get("polygon-fill").paint["fill-color"]);
+    h.run("state.regionHexEnabled=false; dataset.geoAliases={A:'A'}; applyStyle();");
+    await h.run("activateAiChoropleth(dataset.suggestions[0])");
+    assert.equal(h.run("activePolygonLegendScale().source"), "ai");
+    assert.deepEqual(requests, ["/api/ai/analyze-map-data"]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("a replacement dataset cannot reuse the previous dataset's resolved legend", async () => {
+  const h = harness({ thematic: true });
+  h.run("dataset.analysis.columns[2].legend=legendFixture();");
   await h.run("filteredAiBoundary()");
-  const pending = h.run("ensurePolygonLegendRecommendations(dataset.suggestions[1])");
-  assert.equal(requests.length, 1); assert.equal(requests[0].payload.targets.length, 2);
-  assert.equal(h.get("weather-legend-mode").textContent, "Đang chuẩn bị chú giải");
-  const snapshot = JSON.stringify(requests[0].payload.context);
-  const metric = h.all(".ai-metric-selector")[0]; metric.value = "minimum"; await h.change(metric);
-  const time = h.all(".ai-generated-filter")[0]; time.value = "2026-09-01T00:00:00.000Z"; await h.change(time);
-  h.run("state.regionHexEnabled=true; applyStyle(); ensurePolygonLegendRecommendations(dataset.suggestions[1]);");
-  finish({ legends: requests[0].payload.targets.map(target => legendFixture({ field: target.field, aggregation: target.aggregation, unit: target.unit })), validationErrors: [] });
-  await pending;
-  assert.equal(h.run("activePolygonLegendScale().field"), "minimum");
   assert.equal(h.run("activePolygonLegendScale().source"), "ai");
-  assert.equal(requests.length, 1); assert.equal(JSON.stringify(requests[0].payload.context), snapshot);
-  assert.deepEqual(h.layers.get("h3-fill").paint["fill-color"], h.layers.get("polygon-fill").paint["fill-color"]);
-  assert.equal(h.run("activePolygonLegendScale() === activePolygonLegendScale()"), true);
-  h.run("applyStyle(); applyMapLayerVisibility();"); assert.equal(requests.length, 1);
+  h.run(`state.aiDataset = {...dataset, polygonLegendScaleCache: undefined,
+    analysis: {...dataset.analysis, columns: dataset.analysis.columns.map(column=>({...column, legend:null}))},
+    suggestions: dataset.suggestions.map(suggestion=>({...suggestion, legend:null}))};`);
+  await h.run("filteredAiBoundary()");
+  assert.equal(h.run("activePolygonLegendScale().source"), "technical-fallback");
+  assert.equal(h.dataset.analysis.columns[2].legend.mode, "semantic");
 });
 
-test("late legend responses cannot update a replacement dataset and cancellation aborts the request", async () => {
-  let finish; let signal;
-  const h = harness({ thematic: true, legendRequest: (_payload, options) => { signal = options.signal; return new Promise(resolve => { finish = resolve; }); } });
-  const pending = h.run("ensurePolygonLegendRecommendations(dataset.suggestions[1])");
-  h.run("cancelPolygonLegendRecommendations(); state.aiDataset = {analysis:{columns:[]},suggestions:[]};");
-  assert.equal(signal.aborted, true);
-  finish({ legends: [legendFixture()], validationErrors: [] }); await pending;
-  assert.equal(h.dataset.polygonLegends.recommendations.size, 0);
-  assert.equal(h.dataset.analysis.columns.find(column => column.name === "temperature").legend, undefined);
-  assert.equal(h.run("state.aiDataset.polygonLegends"), undefined);
-});
-
-test("failed or partial legend requests use per-field fallback without retrying on filters", async () => {
-  let calls = 0;
-  const h = harness({ thematic: true, legendRequest: async () => { calls += 1; throw new Error("AI unavailable"); } });
-  await h.run("ensurePolygonLegendRecommendations(dataset.suggestions[1])");
+test("missing or invalid per-field legends fall back immediately without requesting AI", async () => {
+  const h = harness({ thematic: true });
+  await h.run("filteredAiBoundary()");
   assert.equal(h.run("activePolygonLegendScale().source"), "technical-fallback");
   assert.equal(h.get("weather-legend-mode").textContent, "Chú giải dự phòng");
-  await h.run("filteredAiBoundary(); ensurePolygonLegendRecommendations(dataset.suggestions[1])");
-  assert.equal(calls, 1);
-  const partial = harness({ thematic: true, legendRequest: async () => ({ legends: [legendFixture()], validationErrors: ["minimum missing"] }) });
-  await partial.run("ensurePolygonLegendRecommendations(dataset.suggestions[1])");
-  assert.equal(partial.run("activePolygonLegendScale().source"), "ai");
-  const metric = partial.all(".ai-metric-selector")[0]; metric.value = "minimum"; await partial.change(metric);
-  assert.equal(partial.run("activePolygonLegendScale().source"), "technical-fallback");
+  h.run("dataset.analysis.columns[2].legend=legendFixture(); dataset.analysis.columns[3].legend=legendFixture({field:'minimum',aggregation:'min',stops:[]});");
+  await h.run("filteredAiBoundary()");
+  assert.equal(h.run("activePolygonLegendScale().source"), "ai");
+  const metric = h.all(".ai-metric-selector")[0]; metric.value = "minimum"; await h.change(metric);
+  assert.equal(h.run("activePolygonLegendScale().source"), "technical-fallback");
+  await h.run("filteredAiBoundary()");
+  assert.equal(h.run("activePolygonLegendScale().source"), "technical-fallback");
 });
 
 test("polygon defaults to information with map controls and accurate map-only suggestions", () => {

@@ -1,6 +1,5 @@
-import { normalizePolygonLegendRecommendation, polygonLegendKey, polygonLegendTarget } from "./polygon-legend-contract.js";
-import { resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
-import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
+import { normalizePolygonLegendRecommendation, polygonLegendTarget } from "./polygon-legend-contract.js";
+import { resolveAggregation } from "./ai-chart-pipeline.js";
 
 export const POLYGON_NO_DATA_COLOR = "#cbd5e1";
 const FALLBACK_COLORS = ["#e2e8f0", "#94a3b8", "#475569"];
@@ -20,23 +19,6 @@ export function summarizePolygonLegendValues(data, field) {
     mean: values.length ? values.reduce((sum, value) => sum + value / values.length, 0) : null,
     p10: quantile(.1), p50: quantile(.5), p90: quantile(.9), validCount: values.length, missingCount: features.length - values.length
   };
-}
-
-/** Project each metric with exactly the aggregation used when that metric is selected. */
-export function buildPolygonLegendTargets({ suggestion, records, boundaries, columns, filters = {} }) {
-  return columns.filter(column => column.role === "measure").flatMap(column => {
-    const metricSuggestion = column.name === suggestion.bindings.value ? suggestion : withSuggestionMetric(suggestion, column.name, columns);
-    const aggregation = resolveAggregation(metricSuggestion, columns);
-    const data = joinRecordsToMapTilerBoundaries(records, boundaries, {
-      geometry: { field: suggestion.bindings.region }, metricField: column.name, aggregation
-    }, { filters, columns });
-    const renderStatistics = summarizePolygonLegendValues(data, column.name);
-    return renderStatistics.validCount ? [{
-      ...polygonLegendTarget(column, aggregation), labelVi: column.labelVi || column.name,
-      unitSource: aggregation === "count" ? "explicit" : column.unitSource || (column.unit ? "inferred" : "unknown"),
-      semanticType: column.semanticType || null, renderStatistics
-    }] : [];
-  });
 }
 
 /** MapLibre interpolate(linear) and the CSS srgb gradient interpolate these same channels. */
@@ -67,7 +49,7 @@ export function polygonLegendLabels(scale, width = 280) {
 }
 
 /** One immutable-by-convention result supplies polygon, regional H3, controls and legend. */
-export function resolvePolygonLegendConfig({ suggestion, columnMetadata, aggregatedFeatures, aggregation, legendRecommendations = [], status = "ready", onFallback }) {
+export function resolvePolygonLegendConfig({ suggestion, columnMetadata, aggregatedFeatures, aggregation, onFallback }) {
   const field = suggestion?.bindings?.value;
   const columns = Array.isArray(columnMetadata) ? columnMetadata : columnMetadata?.columns || [];
   const column = columns.find(item => item.name === field);
@@ -75,11 +57,8 @@ export function resolvePolygonLegendConfig({ suggestion, columnMetadata, aggrega
   const target = polygonLegendTarget(column, effectiveAggregation);
   const stats = summarizePolygonLegendValues(aggregatedFeatures, column?.role === "measure" ? field : undefined);
   const failures = [];
-  const key = polygonLegendKey(target);
-  const cached = typeof legendRecommendations?.get === "function" ? legendRecommendations.get(key)
-    : legendRecommendations.find(item => polygonLegendKey(item) === key);
   let recommendation = null;
-  for (const raw of [suggestion?.legend, cached, column?.legend]) {
+  for (const raw of [suggestion?.legend, column?.legend]) {
     recommendation = normalizePolygonLegendRecommendation(raw, { ...target, role: column?.role || "unknown" }, {
       onFallback: (reason, code) => failures.push({ code, reason })
     });
@@ -87,13 +66,13 @@ export function resolvePolygonLegendConfig({ suggestion, columnMetadata, aggrega
   }
   const scale = {
     field, aggregation: effectiveAggregation ?? null, type: recommendation?.type || "continuous", mode: recommendation?.mode || "auto",
-    source: recommendation ? "ai" : "technical-fallback", status: recommendation ? "ready" : status === "pending" ? "pending" : "fallback",
+    source: recommendation ? "ai" : "technical-fallback", status: recommendation ? "ready" : "fallback",
     title: recommendation?.title || (effectiveAggregation === "count" ? "Số bản ghi" : column?.labelVi || field || "Chú giải"), unit: target.unit,
     reason: recommendation?.reason || failures[0]?.reason || "Chưa có cấu hình AI hợp lệ; dùng thang màu dự phòng theo dữ liệu.",
     dataMin: stats.min, dataMax: stats.max, min: null, max: null, center: recommendation?.center ?? null,
     stops: [], ticks: [], colors: [], positions: [], gradient: "", hasData: stats.validCount > 0, noDataColor: POLYGON_NO_DATA_COLOR
   };
-  if (!recommendation && status !== "pending") onFallback?.(failures[0] || { code: "MISSING_LEGEND", reason: scale.reason });
+  if (!recommendation) onFallback?.(failures[0] || { code: "MISSING_LEGEND", reason: scale.reason });
   if (!scale.hasData) { scale.status = "no-data"; return scale; }
   const aiStops = recommendation?.stops.map(stop => [stop.value, stop.color]);
   if (recommendation?.mode === "semantic") scale.stops = aiStops;

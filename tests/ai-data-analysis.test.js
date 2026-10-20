@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { displayFilterValue, fallbackMapRecommendation, requestAiDataAnalysis, requestAiPolygonLegends, summarizeTabularData } from "../src/ai-data-analysis.js";
-import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
+import { displayFilterValue, fallbackMapRecommendation, requestAiDataAnalysis, summarizeTabularData } from "../src/ai-data-analysis.js";
 
 const records = [
   { "Tỉnh/thành phố": "Hà Nội", "Ngày": new Date("2026-09-01T00:00:00Z"), "Nhiệt độ trung bình": 29.4, "Độ ẩm": 70 },
@@ -57,44 +56,4 @@ test("client không tự tạo đề xuất dự phòng khi AI trả danh sách 
   } finally {
     globalThis.fetch = originalFetch;
   }
-});
-
-const summaryPayload = () => ({
-  targets: [{ field: "temperature", aggregation: "mean", unit: "°C", unitSource: "explicit",
-    renderStatistics: { min: 25, max: 34, mean: 29.5, p10: 25.9, p50: 29.5, p90: 33.1, validCount: 2, missingCount: 0 } }],
-  context: { regionField: "province", matchedRegionCount: 2, filters: {}, timeRange: null }, records: ["private"]
-});
-
-test("legend client sends a summary-only batch and revalidates server output", async () => {
-  const originalFetch = globalThis.fetch; let calls = 0;
-  globalThis.fetch = async (url, options) => {
-    calls += 1; assert.equal(url, "/api/ai/recommend-polygon-legends");
-    assert.equal(options.body.includes("private"), false);
-    return { ok: true, json: async () => ({ legends: [legendFixture({ stops: [] })] }) };
-  };
-  try {
-    const result = await requestAiPolygonLegends(summaryPayload());
-    assert.deepEqual(result.legends, []); assert.ok(result.validationErrors.length); assert.equal(calls, 1);
-  } finally { globalThis.fetch = originalFetch; }
-});
-
-test("legend request has a deadline, supports cancellation and never retries failed requests", async () => {
-  const originalFetch = globalThis.fetch; let calls = 0;
-  globalThis.fetch = async (_url, options) => {
-    calls += 1;
-    return new Promise((_, reject) => {
-      const abort = () => { const error = new Error("Aborted"); error.name = "AbortError"; reject(error); };
-      if (options.signal.aborted) abort(); else options.signal.addEventListener("abort", abort, { once: true });
-    });
-  };
-  try {
-    await assert.rejects(requestAiPolygonLegends(summaryPayload(), { timeoutMs: 5 }), /quá thời gian/);
-    const controller = new AbortController();
-    const pending = requestAiPolygonLegends(summaryPayload(), { signal: controller.signal }); controller.abort();
-    await assert.rejects(pending, error => error.name === "AbortError");
-    assert.equal(calls, 2);
-    globalThis.fetch = async () => { calls += 1; return { ok: false, json: async () => ({ error: "No AI" }) }; };
-    await assert.rejects(requestAiPolygonLegends(summaryPayload()), /No AI/);
-    assert.equal(calls, 3);
-  } finally { globalThis.fetch = originalFetch; }
 });
