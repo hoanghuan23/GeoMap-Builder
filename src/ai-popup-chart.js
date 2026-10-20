@@ -80,13 +80,15 @@ export function buildPopupChart({ records, columns, feature, regionField, kind, 
   const choices = new Set(columns.filter(column => column.role === "measure").map(column => column.name));
   if (kind === "bar") choices.add("count");
   if (!metrics?.length || metrics.some(metric => !choices.has(metric))) return empty("Chưa có chỉ số hợp lệ để vẽ biểu đồ.");
-  const x = time?.name || regionField || "__popup_object";
+  // Explicit bar calculations summarize the whole filtered range, not each time bucket.
+  const summarizeRange = kind === "bar" && ["sum", "mean", "min", "max"].includes(selection.aggregation);
+  const x = summarizeRange ? "__popup_object" : time?.name || regionField || "__popup_object";
   if (x === "__popup_object") selected = selected.map(record => ({ ...record, [x]: region }));
   const suggestion = { id: "map-popup", chartType: kind, title: `Dữ liệu của ${region}`, reason: "", agg: null, bindings: { x, y: kind === "line" ? metrics : metrics[0] } };
   // Multiple observations need an explicit, meaningful aggregation. Do not turn
   // an unknown aggregation into a silent average or a missing chart point.
   for (const metric of metrics) {
-    const aggregation = metric === "count" ? "count" : kind === "bar" && ["sum", "mean", "min", "max"].includes(selection.aggregation)
+    const aggregation = metric === "count" ? "count" : summarizeRange
       ? selection.aggregation : resolveAggregation({ bindings: { y: metric } }, columns);
     if (aggregation) continue;
     const counts = new Map();
@@ -110,5 +112,5 @@ export function buildPopupChart({ records, columns, feature, regionField, kind, 
     return value instanceof Date && Boolean(value.getUTCHours() || value.getUTCMinutes() || value.getUTCSeconds());
   });
   return { config: { ...config, title: `${kind === "line" ? "Biểu đồ đường" : "Biểu đồ cột"} · ${region}`, subtitle: "", limit: "all", sort: "none",
-    preserveMissingValues: true, animate: false, timeColumn: hasTime ? { ...time, granularity: "datetime" } : time }, message: "" };
+    preserveMissingValues: true, animate: false, timeColumn: summarizeRange ? null : hasTime ? { ...time, granularity: "datetime" } : time }, message: "" };
 }

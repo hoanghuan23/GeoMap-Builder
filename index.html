@@ -108,14 +108,15 @@
           <div id="map-style-controls">
             <label class="field inline-field">Màu cố định<span class="color-control"><input id="fixed-color" type="color" value="#6c5ce7"><code id="fixed-color-value">#6C5CE7</code></span></label>
             <div id="polygon-color-ramp" class="field" hidden>
-              <div class="field-label"><span>Dải màu</span><small id="polygon-color-field"></small></div>
-              <div class="palette-row" role="group" aria-label="Chọn dải màu Polygon">
+              <div class="field-label"><span id="polygon-color-label">Dải màu</span><small id="polygon-color-field"></small></div>
+              <div id="polygon-palette-options" class="palette-row" role="group" aria-label="Chọn dải màu Polygon">
                 <button id="travel-palette" class="palette travel" type="button" data-palette="travel" aria-label="Dải màu tỷ lệ thời gian" title="Tỷ lệ thời gian xe buýt/xe máy" hidden></button>
                 <button class="palette" type="button" data-palette="diverging" aria-label="Dải màu phân kỳ" title="Dải màu phân kỳ"></button>
                 <button class="palette viridis" type="button" data-palette="viridis" aria-label="Dải màu Viridis" title="Dải màu Viridis"></button>
                 <button class="palette blue" type="button" data-palette="blue" aria-label="Dải màu xanh" title="Dải màu xanh"></button>
               </div>
-              <small class="palette-help">Chọn một dải màu hoặc đổi màu cố định để quay về màu đơn.</small>
+              <small id="polygon-legend-summary" class="polygon-legend-summary" hidden></small>
+              <small id="polygon-palette-help" class="palette-help">Chọn một dải màu hoặc đổi màu cố định để quay về màu đơn.</small>
             </div>
             <div class="field range-field compact"><div class="field-label"><label for="opacity">Opacity</label><output id="opacity-value">72%</output></div><input id="opacity" type="range" min="0" max="1" step=".01" value=".72"></div>
             <label id="show-border-field" class="toggle-row"><span>Hiển thị đường viền</span><input id="show-border" type="checkbox" checked><i></i></label>
@@ -151,9 +152,9 @@
           <div id="point-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ điểm" aria-live="polite"></div>
           <div id="transport-legend" class="transport-legend" hidden aria-live="polite"></div>
           <div id="weather-legend" class="weather-legend" hidden aria-live="polite">
-            <strong id="weather-legend-title">Nhiệt độ không khí (°C)</strong>
+            <div class="weather-legend-heading"><strong id="weather-legend-title"></strong><span id="weather-legend-mode" hidden></span></div>
             <div id="weather-legend-scale" class="weather-legend-scale"></div>
-            <div id="weather-legend-labels" class="weather-legend-labels"><span>10</span><span>20</span><span>25</span><span>30</span><span>38</span></div>
+            <div id="weather-legend-labels" class="weather-legend-labels"></div>
             <small id="weather-legend-note"></small>
           </div>
         </div>

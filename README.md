@@ -56,9 +56,9 @@ Trong luồng **Bản đồ Point**, bấm một điểm để xem biểu đồ 
 
 **Line từ chuỗi tọa độ** dùng `bindings.lat`/`lng`, `region` để tách nhóm tuyến nếu có và `x` làm cột thứ tự/thời gian nếu có. Thiếu `x` sẽ nối theo thứ tự dòng trong file. Mỗi nhóm được nối riêng; tọa độ thiếu hoặc sai làm ngắt đường. Dữ liệu cửa hàng cố định lặp theo tháng không tự trở thành tuyến. Nhánh này dùng tọa độ trực tiếp, không cần tải mạng đường hoặc ranh giới hành chính.
 
-Popup cột và đường dùng trục thời gian, giữ đầy đủ kỳ, giá trị 0 và khoảng thiếu số liệu. Khi không có cột thời gian, cột hiển thị giá trị tổng hợp của đối tượng và đường bị vô hiệu hóa kèm lý do. Đường cần ít nhất hai mốc có số liệu. Tọa độ và cột thứ tự không được dùng làm chỉ số biểu đồ.
+Popup cột ở chế độ “Theo dữ liệu” và popup đường dùng trục thời gian, giữ đầy đủ kỳ, giá trị 0 và khoảng thiếu số liệu. Khi không có cột thời gian, cột hiển thị giá trị tổng hợp của đối tượng và đường bị vô hiệu hóa kèm lý do. Đường cần ít nhất hai mốc có số liệu. Tọa độ và cột thứ tự không được dùng làm chỉ số biểu đồ.
 
-Phép tính mặc định của biểu đồ cột là “Theo từng chỉ số”, giữ `aggDefault` riêng của từng cột. Người dùng có thể chọn SUM, AVG, MIN hoặc MAX; số bản ghi luôn dùng count. Không tự lấy trung bình khi có nhiều dòng trong một nhóm nhưng chưa xác định được phép gộp. Lựa chọn nhiều chỉ số mặc định ưu tiên cùng đơn vị. Các nhãn thời gian ngoài định dạng được hỗ trợ hoặc chỉ số cần phép tính chuyên biệt (ví dụ tỷ lệ cần trọng số) cần metadata/chuẩn hóa bổ sung; không coi mọi cột số đều cộng được.
+Phép tính mặc định của popup cột là “Theo dữ liệu”, hiển thị theo từng mốc và dùng `aggDefault` riêng của từng cột khi nhiều bản ghi trùng mốc. Khi chọn SUM, AVG, MIN hoặc MAX, biểu đồ tính trực tiếp từ toàn bộ bản ghi của đối tượng trong khoảng thời gian đã chọn (gồm cả hai đầu khoảng), hiển thị một cột tổng hợp cho mỗi chỉ số thay vì chia cột theo ngày. AVG bỏ qua giá trị thiếu và vẫn tính giá trị 0; số bản ghi luôn dùng count. Không tự lấy trung bình khi có nhiều dòng trong một nhóm nhưng chưa xác định được phép gộp. Lựa chọn nhiều chỉ số mặc định ưu tiên cùng đơn vị. Các nhãn thời gian ngoài định dạng được hỗ trợ hoặc chỉ số cần phép tính chuyên biệt (ví dụ tỷ lệ cần trọng số) cần metadata/chuẩn hóa bổ sung; không coi mọi cột số đều cộng được.
 
 Response AI lỗi, không hợp lệ hoặc chỉ chứa suggestion sai contract sẽ chuyển ngay sang rule-based fallback với cùng contract; không retry. Biểu đồ cột/đường là lựa chọn popup, không xuất hiện như kiểu đầu vào riêng. Thay đổi filter, ngày, metric, palette hoặc độ phân giải lưới polygon chỉ dựng lại payload tại client và không gọi AI thêm lần nữa.
 
@@ -287,13 +287,19 @@ Luồng thực thi chính:
 
 ```text
 1. Parse và profile trong Web Worker
-2. Một request AI theo registry dùng chung
+2. Một request AI nhận diện metadata và bản đồ theo registry dùng chung
 3. Soft validation và rule-based fallback
 4. Chuẩn hóa kiểu dữ liệu
 5. Tính feasibility/effective confidence
 6. Aggregate hoặc pivot tại client
-7. Render trên canvas hiện có
+7. Với Polygon: gửi một request AI theo lô để thiết kế chú giải từ thống kê sau lọc/tổng hợp của từng chỉ số
+8. Kiểm tra cấu hình chú giải v2 rồi dùng cùng một scale cho Polygon, chú giải và lưới lục giác vùng
+9. Render trên canvas hiện có
 ```
+
+Chú giải Polygon nhận `continuous` với `auto/semantic` hoặc `diverging` với `semantic`. AI trả trực tiếp domain/stops/màu; ứng dụng không dùng registry ngưỡng nhiệt độ. Khi đổi bộ lọc, `auto` cập nhật miền và giữ màu/vị trí tương đối, còn `semantic` giữ nguyên mốc. Đổi chỉ số dùng cấu hình đã lưu, không gọi AI lại. Thiếu cấu hình hoặc AI lỗi thì dùng thang kỹ thuật trung tính; giao diện ghi rõ chú giải dự phòng.
+
+Lựa chọn dải màu thủ công được ẩn khi Polygon dùng chú giải do AI quản lý. Request thiết kế chỉ gửi metadata, bộ lọc và thống kê Polygon; không gửi geometry hay toàn bộ bản ghi nguồn.
 
 ## 16. Nguyên tắc kiến trúc
 

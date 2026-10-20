@@ -7,7 +7,7 @@ dist/
 geomap_test_samples/
 metro_test_samples/
 
-# dữ liệu ranh giới tỉnh/thành phố
+# dữ liệu ranh giới các nước trên thế giới theo cấp độ
 administrative_division/
 
 # dữ liệu đường

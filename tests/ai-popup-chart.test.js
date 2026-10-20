@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions } from "../src/ai-popup-chart.js";
 import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
+import { normalizeLineChartConfig } from "../src/charts/line-chart.js";
 import { buildRegionHexGrid } from "../src/region-hex-grid.js";
 import { storeColumns, storeRecords, storeBindings } from "./fixtures/store-points-fixture.js";
 
@@ -54,7 +55,83 @@ test("popup bar and line group repeated observations using the selected measure'
   assert.deepEqual(result.config.data.at(-1), { date: "2026-09-03", temperature: 25, rain: 10 });
   const normalized = normalizeBarChartConfig(result.config);
   assert.equal(normalized.data[1].temperature, null, "missing values are not converted into zero");
-  assert.equal(chart("bar", { records: duplicated, selection: { ...selection, aggregation: "sum" } }).config.data.at(-1).temperature, 50);
+  const summed = chart("bar", { records: duplicated, selection: { ...selection, aggregation: "sum" } }).config;
+  assert.deepEqual(summed.data, [{ [summed.xField]: "A", temperature: 50, rain: 15 }]);
+  const averaged = chart("bar", { records: duplicated, selection: { ...selection, aggregation: "mean" } }).config;
+  assert.equal(averaged.data[0].temperature, 50 / 3, "average the original observations, excluding missing values and retaining zero");
+  assert.equal(averaged.data[0].rain, 15 / 4);
+});
+
+for (const [aggregation, fullMonth, partialMonth] of [
+  ["sum", 465, 165], ["mean", 15.5, 15], ["min", 1, 10], ["max", 30, 20]
+]) {
+  test(`popup bar ${aggregation} summarizes the clicked region over the entire inclusive date range`, () => {
+    const month = ["A", "B"].flatMap(region => Array.from({ length: 32 }, (_, day) => ({
+      region, date: new Date(Date.UTC(2026, 8, day)),
+      temperature: region === "A" && day >= 1 && day <= 30 ? day : 1000
+    })));
+    const before = JSON.stringify(month);
+    for (const [from, to, expected] of [
+      ["2026-09-01", "2026-09-30", fullMonth],
+      ["2026-09-10", "2026-09-20", partialMonth],
+      ["2026-09-15", "2026-09-15", 15]
+    ]) {
+      const selection = { ...createPopupChartSelection(month, columns, "temperature", "bar"), aggregation, from, to };
+      const result = chart("bar", { records: month, selection });
+      assert.equal(result.message, "");
+      assert.deepEqual(result.config.data, [{ [result.config.xField]: "A", temperature: expected }]);
+      assert.equal(result.config.timeColumn, null, "the summarized region is not a time axis");
+      assert.equal(normalizeBarChartConfig(result.config).data[0].temperature, expected);
+    }
+    assert.equal(JSON.stringify(month), before);
+  });
+}
+
+test("popup bar range summaries retain missing measures and count only the selected observations", () => {
+  const selection = { ...createPopupChartSelection(records, columns, "temperature", "bar"),
+    variant: "grouped", metrics: ["temperature", "rain", "count"], aggregation: "sum", from: "2026-09-01", to: "2026-09-02" };
+  const result = chart("bar", { selection }).config;
+  assert.deepEqual(result.data, [{ [result.xField]: "A", temperature: 0, rain: 5, __count: 2 }]);
+  selection.from = "2026-09-02";
+  const missing = chart("bar", { selection }).config;
+  assert.deepEqual(normalizeBarChartConfig(missing).data,
+    [{ [missing.xField]: "A", temperature: null, rain: 3, __count: 1 }]);
+  assert.match(chart("bar", { selection: { ...selection, variant: "single", metrics: ["temperature"] } }).message, /Không có số liệu/);
+});
+
+test("popup rendering preserves spreadsheet field keys with surrounding whitespace when switching metrics", () => {
+  const average = "Nhiệt độ trung bình\u00a0";
+  const minimum = "Nhiệt độ thấp nhất";
+  const weatherColumns = [columns[0], columns[1],
+    { name: average, labelVi: "Nhiệt độ trung bình", role: "measure", aggDefault: "mean", unit: "°C" },
+    { name: minimum, role: "measure", aggDefault: "min", unit: "°C" }];
+  const weatherRecords = [24.4, 23.7, 24.7, 23.2, 24.3, 23, 24.9].map((value, index) => ({
+    region: "Lào Cai", date: new Date(Date.UTC(2026, 8, index + 1)), [average]: value, [minimum]: value - 3
+  }));
+  for (const kind of ["bar", "line"]) {
+    for (const metric of [average, minimum, average]) {
+      const chart = buildPopupChart({ records: weatherRecords, columns: weatherColumns, feature: { properties: { region: "Lào Cai" } },
+        regionField: "region", kind, selection: createPopupChartSelection(weatherRecords, weatherColumns, metric, kind) });
+      assert.equal(chart.message, "");
+      const rendered = kind === "bar" ? normalizeBarChartConfig(chart.config) : normalizeLineChartConfig(chart.config);
+      assert.equal(rendered.series[0].key, metric);
+      assert.deepEqual(rendered.data.map(row => row[rendered.series[0].key]), weatherRecords.map(row => row[metric]));
+    }
+  }
+});
+
+test("chart normalization preserves exact category keys and distinguishes metrics that differ by whitespace", () => {
+  const config = { xField: " Ngày ", preserveMissingValues: true,
+    series: [{ key: "value", label: "Chỉ số A" }, { key: " value ", label: "Chỉ số B" }],
+    data: [{ " Ngày ": "01/09/2026", value: 0, " value ": 24.4 }, { " Ngày ": "02/09/2026", value: null, " value ": 23.7 }] };
+  for (const normalize of [normalizeBarChartConfig, normalizeLineChartConfig]) {
+    const normalized = normalize(config);
+    assert.equal(normalized.xField, config.xField);
+    assert.deepEqual(normalized.series.map(item => item.key), ["value", " value "]);
+    assert.deepEqual(normalized.data, config.data);
+    assert.throws(() => normalize({ ...config, xField: " \t " }), /chuỗi không rỗng/);
+    assert.throws(() => normalize({ ...config, series: [{ key: " \t " }] }), /chuỗi không rỗng/);
+  }
 });
 
 test("polygon and inherited hex cells produce the same regional chart", () => {

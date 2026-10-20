@@ -33,7 +33,16 @@ export function polygonColorField(data, profile = {}) {
   return category ? { ...category, type: "category" } : null;
 }
 
-export function polygonFillExpression(data, profile, rampName, fallbackColor) {
+export function polygonFillExpression(data, profile, rampName, fallbackColor, resolvedScale = null) {
+  if (resolvedScale) {
+    const noDataColor = resolvedScale.noDataColor || fallbackColor;
+    if (!resolvedScale.hasData || !resolvedScale.stops.length) return noDataColor;
+    const value = ["get", resolvedScale.field];
+    // GeoJSON from this pipeline stores numbers. Missing values must not become zero.
+    const paint = resolvedScale.stops.length === 1 ? resolvedScale.colors[0]
+      : ["interpolate", ["linear"], ["to-number", value, resolvedScale.min], ...resolvedScale.stops.flat()];
+    return ["case", ["==", ["typeof", value], "number"], paint, noDataColor];
+  }
   const colors = POLYGON_COLOR_RAMPS[rampName];
   const colorField = colors && polygonColorField(data, profile);
   if (!colors || !colorField) return fallbackColor;
@@ -49,7 +58,8 @@ export function polygonFillExpression(data, profile, rampName, fallbackColor) {
   return ["match", ["get", colorField.field], ...matches, fallbackColor];
 }
 
-export function polygonLegendScale(data, profile, rampName) {
+export function polygonLegendScale(data, profile, rampName, resolvedScale = null) {
+  if (resolvedScale) return resolvedScale.hasData && resolvedScale.stops.length ? resolvedScale : null;
   const colors = POLYGON_COLOR_RAMPS[rampName];
   const colorField = colors && polygonColorField(data, profile);
   if (!colors || colorField?.type !== "number") return null;

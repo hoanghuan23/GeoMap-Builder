@@ -3,6 +3,7 @@ import { formatLineX, LINE_COLORS } from "./charts/line-chart.js";
 import { serializeTabularValue } from "./tabular-data.js";
 import { chartTimeValue, compareTimeValues, timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "./time-values.js";
 import { AGGREGATION_VALUES, measureAggregation, measureUnit } from "./measure-semantics.js";
+import { normalizePolygonLegendRecommendation, polygonLegendTarget } from "./polygon-legend-contract.js";
 import { latLngToCell } from "h3-js";
 import { roadAreaField, roadNameField, roadValueColumns } from "./road-map-data.js";
 import { normalizeRoadText } from "./congestion-data.js";
@@ -35,6 +36,9 @@ export function withSuggestionMetric(suggestion, metric, columns) {
   const dimension = suggestion.chartType === "bar" ? suggestion.bindings.x : suggestion.bindings.region;
   updated.agg = suggestion.chartType === "map_line" && byName.get(metric)?.role !== "measure" ? null
     : metric === "count" ? "count" : resolveAggregation(updated, columns);
+  if (suggestion.chartType === "choropleth") updated.legend = normalizePolygonLegendRecommendation(
+    byName.get(metric)?.legend, { ...polygonLegendTarget(byName.get(metric), updated.agg), role: byName.get(metric)?.role }
+  );
   updated.title = dimension ? `${metricLabel} theo ${label(dimension)}` : `${metricLabel} theo ô H3`;
   return updated;
 }

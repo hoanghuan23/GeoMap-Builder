@@ -2820,11 +2820,23 @@ th:last-child {
 .metro-legend-scale span { flex: 1; text-align: center; white-space: nowrap; }
 .metro-legend-scale i { display: block; height: 8px; margin-bottom: 7px; }
 .weather-legend { width: 330px; }
+.weather-legend-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.weather-legend-heading strong { flex: 1 1 150px; min-width: 0; overflow-wrap: anywhere; }
+#weather-legend-mode { color: #a5b4c8; font-size: 10px; }
+.polygon-legend-summary { display: block; color: #475569; line-height: 1.5; }
+#polygon-palette-options[hidden] { display: none; }
+.polygon-legend-summary[hidden] { display: none; }
+.polygon-legend-summary::before { content: ""; display: block; height: 8px; margin: 4px 0 7px; border-radius: 6px; background: var(--legend-gradient); }
+.polygon-legend-summary:not([hidden]) + .palette-help { display: none; }
 .weather-legend-scale { height: 10px; margin-top: 11px; border-radius: 6px; }
 .weather-legend-scale.diverging { background: linear-gradient(90deg, #313695, #74add1, #ffffbf, #f46d43, #a50026); }
 .weather-legend-scale.viridis { background: linear-gradient(90deg, #440154, #31688e, #35b779, #90d743, #fde725); }
 .weather-legend-scale.blue { background: linear-gradient(90deg, #eff6ff, #bfdbfe, #60a5fa, #2563eb, #1e3a8a); }
 .weather-legend-labels { display: flex; justify-content: space-between; margin-top: 5px; color: #cbd5e1; font-size: 10px; }
+.weather-legend-labels.positioned { display: block; position: relative; height: 29px; font-variant-numeric: tabular-nums; }
+.weather-legend-labels.positioned span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.weather-legend-labels.positioned span:first-child:not(:only-child) { transform: none; }
+.weather-legend-labels.positioned span:last-child:not(:only-child) { transform: translateX(-100%); }
 .resolution-control { margin: 10px 0 0; }
 .region-hex-controls { padding-top: 14px; border-top: 1px solid var(--border, #e5e7eb); }
 .region-hex-controls[hidden] { display: none; }

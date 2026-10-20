@@ -14,9 +14,15 @@ import { analyzeSpatialData } from "../src/data-capabilities.js";
 import * as roadMap from "../src/road-map-data.js";
 import * as coordinates from "../src/coordinate-data.js";
 import * as pointStyle from "../src/renderers/point-style.js";
+import * as polygonStyle from "../src/renderers/polygon-style.js";
+import * as weatherStyle from "../src/renderers/weather-style.js";
+import * as polygonLegend from "../src/polygon-legend.js";
+import * as legendContract from "../src/polygon-legend-contract.js";
+import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 import { storeColumns, storeRecords, storeSuggestions } from "./fixtures/store-points-fixture.js";
 import { normalizeTabularRecords } from "../src/tabular-data.js";
 import { trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED } from "./fixtures/road-traffic-fixture.js";
+import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 
 class Element {
   constructor() {
@@ -41,7 +47,8 @@ class Element {
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
-function harness({ road = false, point = false, path = false, storeNameRole = "category", pointRecords = storeRecords } = {}) {
+function harness({ road = false, point = false, path = false, thematic = false, storeNameRole = "category", pointRecords = storeRecords,
+  legendRequest = async () => ({ legends: [], validationErrors: [] }) } = {}) {
   const elements = new Map(); const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   const rendered = []; const cleared = []; const popups = [];
   class Popup {
@@ -54,11 +61,16 @@ function harness({ road = false, point = false, path = false, storeNameRole = "c
     remove() { if (!this.removed) { this.removed = true; this.callbacks.forEach(callback => callback()); } }
   }
   const renderer = kind => ({
-    render(container, config) { assert.ok(popups.at(-1).added, "chart must mount after popup.addTo"); rendered.push({ kind, config }); },
+    render(container, config) { assert.ok(popups.at(-1).added, "chart must mount after popup.addTo");
+      rendered.push({ kind, config: kind === "bar" ? normalizeBarChartConfig(config) : config }); },
     clear(container) { cleared.push(container); }
   });
   const sources = new Map(["polygon-data", "vietnam-boundary", "h3-grid", "line-data", "point-data"].map(id => [id, { setData(data) { this.data = data; } }]));
-  const map = { getContainer: () => get("map"), getSource: id => sources.get(id), getLayer: () => null, resize() {},
+  const layers = new Map((thematic ? ["polygon-fill", "polygon-border", "h3-fill", "h3-border"] : []).map(id => [id, { paint: {}, layout: {} }]));
+  const palettes = ["diverging", "viridis", "blue"].map(palette => { const button = new Element(); button.className = "palette"; button.dataset.palette = palette; return button; });
+  const map = { getContainer: () => get("map"), getSource: id => sources.get(id), getLayer: id => layers.get(id), resize() {},
+    setPaintProperty(id, key, value) { layers.get(id).paint[key] = value; },
+    setLayoutProperty(id, key, value) { layers.get(id).layout[key] = value; },
     project: () => ({ x: 400, y: 300 }), unproject: point => point };
   const dataset = {
     records: ["A", "B"].flatMap((region, index) => [1, 2, 3].map(day => ({ region, date: new Date(`2026-09-0${day}`), temperature: day + index * 10, minimum: day - 1 }))),
@@ -105,14 +117,15 @@ function harness({ road = false, point = false, path = false, storeNameRole = "c
     dataset.selectedSuggestionId = "path";
   }
   const context = vm.createContext({
-    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
+    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract,
+    requestAiPolygonLegends: legendRequest, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
     humanizeField: field => field, renderMapIcon() {}, renderChartIcon() {}, keepSelectOpenAfterMouseClick: value => value,
     document: { getElementById: get, createElement: () => new Element(), querySelector: () => new Element(), addEventListener() {},
-      querySelectorAll: selector => selector.startsWith("#ai-filter-controls ") ? get("ai-filter-controls").querySelectorAll(selector.slice(20))
+      querySelectorAll: selector => selector === "#polygon-color-ramp .palette" ? palettes : selector.startsWith("#ai-filter-controls ") ? get("ai-filter-controls").querySelectorAll(selector.slice(20))
         : selector.startsWith(".geo-") ? get("ai-filter-controls").querySelectorAll(selector) : [] },
-    maplibregl: { Popup }, Date, console, setTimeout() {}, clearTimeout() {}, dataset, testMap: map, testFeatures: features
+    maplibregl: { Popup }, AbortController, Date, console, setTimeout() {}, clearTimeout() {}, dataset, testMap: map, testFeatures: features
   });
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
     .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/\binit\(\);\s*$/, "");
@@ -126,8 +139,115 @@ function harness({ road = false, point = false, path = false, storeNameRole = "c
   const click = element => get("ai-filter-controls").events.click({ target: element });
   const change = element => get("ai-filter-controls").events.change({ target: element });
   const mode = name => click(all(".ai-popup-type").find(button => button.dataset.popupMode === name));
-  return { dataset, get, run, all, click, change, mode, popups, rendered, cleared, sources, features };
+  return { dataset, get, run, all, click, change, mode, popups, rendered, cleared, sources, features, layers, palettes };
 }
+
+test("AI semantic/auto legends lock palette controls, follow metrics and filters, and match regional hex fill", async () => {
+  const h = harness({ thematic: true });
+  h.run(`
+    for (const column of dataset.analysis.columns.filter(column => column.role === 'measure')) {
+      column.semanticType='air_temperature'; column.legend=legendFixture({field:column.name,aggregation:column.aggDefault});
+    }
+    dataset.records.forEach(record => { record.temperature += 24; record.minimum += 20; record.revenue = record.temperature * 10; });
+    dataset.analysis.columns.push({name:'revenue',role:'measure',unit:'triệu',aggDefault:'sum',
+      legend:legendFixture({field:'revenue',aggregation:'sum',unit:'triệu',mode:'auto',title:'Doanh thu'})});
+    dataset.recommendation.numericFields.push('revenue');
+    dataset.suggestions[1].legend=dataset.analysis.columns.find(column=>column.name==='temperature').legend;
+    state.polygonPalette='blue';
+  `);
+  await h.run("filteredAiBoundary()");
+  const labels = () => h.get("weather-legend-labels").children.map(child => child.textContent);
+  assert.deepEqual(labels(), ["-20", "-10", "0", "10", "20", "40"]);
+  assert.equal(h.get("weather-legend-title").textContent, "Nhiệt độ quan sát (°C)");
+  assert.equal(h.get("weather-legend-mode").textContent, "Theo ngữ nghĩa");
+  assert.equal(h.get("weather-legend-mode").title, legendFixture().reason);
+  assert.equal(h.get("polygon-palette-options").hidden, true);
+  assert.equal(h.get("polygon-palette-help").hidden, true);
+  assert.equal(h.get("polygon-color-label").textContent, "Chú giải màu");
+  assert.equal(h.get("fixed-color").disabled, true);
+  assert.ok(h.palettes.every(button => button.disabled));
+  const original = JSON.stringify(h.layers.get("polygon-fill").paint["fill-color"]);
+  h.get("polygon-color-ramp").events.click({ target: h.palettes[0] });
+  h.get("fixed-color").events.input({ target: { value: "#ffffff" } });
+  assert.equal(h.run("state.polygonPalette"), "blue");
+  assert.equal(JSON.stringify(h.layers.get("polygon-fill").paint["fill-color"]), original);
+  const time = h.all(".ai-generated-filter")[0]; time.value = "2026-09-01T00:00:00.000Z";
+  await h.change(time);
+  assert.deepEqual(labels(), ["-20", "-10", "0", "10", "20", "40"]);
+  assert.equal(JSON.stringify(h.layers.get("polygon-fill").paint["fill-color"]), original);
+  h.run("state.regionHexEnabled=true; applyStyle()");
+  assert.deepEqual(h.layers.get("h3-fill").paint["fill-color"], h.layers.get("polygon-fill").paint["fill-color"]);
+  assert.equal(h.layers.get("h3-fill").layout.visibility, "visible");
+  h.run("state.regionHexEnabled=false;");
+  const metric = h.all(".ai-metric-selector")[0]; metric.value = "minimum";
+  await h.change(metric);
+  assert.equal(h.get("weather-legend-mode").textContent, "Theo ngữ nghĩa");
+  assert.equal(h.run("activePolygonLegendScale().field"), "minimum");
+  metric.value = "revenue"; await h.change(metric);
+  assert.equal(h.get("weather-legend-mode").textContent, "Theo dữ liệu");
+  assert.equal(h.get("weather-legend-title").textContent, "Doanh thu (triệu)");
+  assert.equal(h.get("fixed-color").disabled, true);
+  assert.ok(h.palettes.every(button => button.disabled));
+  assert.equal(h.run("state.polygonPalette"), "blue");
+  const firstMin = h.run("activePolygonLegendScale().min");
+  time.value = "2026-09-02T00:00:00.000Z"; await h.change(time);
+  assert.notEqual(h.run("activePolygonLegendScale().min"), firstMin);
+  metric.value = "temperature"; await h.change(metric);
+  assert.equal(h.get("weather-legend-mode").textContent, "Theo ngữ nghĩa");
+  assert.deepEqual(labels(), ["-20", "-10", "0", "10", "20", "40"]);
+  h.get("show-map-layers").checked = false; h.run("applyMapLayerVisibility()");
+  assert.equal(h.get("weather-legend").hidden, true);
+});
+
+test("legend batch is requested once and cached across metric, filter, style and hex changes", async () => {
+  const requests = []; let finish;
+  const h = harness({ thematic: true, legendRequest: (payload, options) => {
+    requests.push({ payload, options }); return new Promise(resolve => { finish = resolve; });
+  } });
+  await h.run("filteredAiBoundary()");
+  const pending = h.run("ensurePolygonLegendRecommendations(dataset.suggestions[1])");
+  assert.equal(requests.length, 1); assert.equal(requests[0].payload.targets.length, 2);
+  assert.equal(h.get("weather-legend-mode").textContent, "Đang chuẩn bị chú giải");
+  const snapshot = JSON.stringify(requests[0].payload.context);
+  const metric = h.all(".ai-metric-selector")[0]; metric.value = "minimum"; await h.change(metric);
+  const time = h.all(".ai-generated-filter")[0]; time.value = "2026-09-01T00:00:00.000Z"; await h.change(time);
+  h.run("state.regionHexEnabled=true; applyStyle(); ensurePolygonLegendRecommendations(dataset.suggestions[1]);");
+  finish({ legends: requests[0].payload.targets.map(target => legendFixture({ field: target.field, aggregation: target.aggregation, unit: target.unit })), validationErrors: [] });
+  await pending;
+  assert.equal(h.run("activePolygonLegendScale().field"), "minimum");
+  assert.equal(h.run("activePolygonLegendScale().source"), "ai");
+  assert.equal(requests.length, 1); assert.equal(JSON.stringify(requests[0].payload.context), snapshot);
+  assert.deepEqual(h.layers.get("h3-fill").paint["fill-color"], h.layers.get("polygon-fill").paint["fill-color"]);
+  assert.equal(h.run("activePolygonLegendScale() === activePolygonLegendScale()"), true);
+  h.run("applyStyle(); applyMapLayerVisibility();"); assert.equal(requests.length, 1);
+});
+
+test("late legend responses cannot update a replacement dataset and cancellation aborts the request", async () => {
+  let finish; let signal;
+  const h = harness({ thematic: true, legendRequest: (_payload, options) => { signal = options.signal; return new Promise(resolve => { finish = resolve; }); } });
+  const pending = h.run("ensurePolygonLegendRecommendations(dataset.suggestions[1])");
+  h.run("cancelPolygonLegendRecommendations(); state.aiDataset = {analysis:{columns:[]},suggestions:[]};");
+  assert.equal(signal.aborted, true);
+  finish({ legends: [legendFixture()], validationErrors: [] }); await pending;
+  assert.equal(h.dataset.polygonLegends.recommendations.size, 0);
+  assert.equal(h.dataset.analysis.columns.find(column => column.name === "temperature").legend, undefined);
+  assert.equal(h.run("state.aiDataset.polygonLegends"), undefined);
+});
+
+test("failed or partial legend requests use per-field fallback without retrying on filters", async () => {
+  let calls = 0;
+  const h = harness({ thematic: true, legendRequest: async () => { calls += 1; throw new Error("AI unavailable"); } });
+  await h.run("ensurePolygonLegendRecommendations(dataset.suggestions[1])");
+  assert.equal(h.run("activePolygonLegendScale().source"), "technical-fallback");
+  assert.equal(h.get("weather-legend-mode").textContent, "Chú giải dự phòng");
+  await h.run("filteredAiBoundary(); ensurePolygonLegendRecommendations(dataset.suggestions[1])");
+  assert.equal(calls, 1);
+  const partial = harness({ thematic: true, legendRequest: async () => ({ legends: [legendFixture()], validationErrors: ["minimum missing"] }) });
+  await partial.run("ensurePolygonLegendRecommendations(dataset.suggestions[1])");
+  assert.equal(partial.run("activePolygonLegendScale().source"), "ai");
+  const metric = partial.all(".ai-metric-selector")[0]; metric.value = "minimum"; await partial.change(metric);
+  assert.equal(partial.run("activePolygonLegendScale().source"), "technical-fallback");
+});
 
 test("polygon defaults to information with map controls and accurate map-only suggestions", () => {
   const h = harness();
@@ -139,6 +259,40 @@ test("polygon defaults to information with map controls and accurate map-only su
   h.run("renderAiSuggestionGrid()");
   assert.match(h.get("map-type-summary").textContent, /1 đề xuất/);
   assert.equal(h.get("map-type-grid").children[1].children[1].textContent, AI_CHART_REGISTRY.choropleth.label);
+});
+
+test("default bar metric with spreadsheet whitespace keeps visible values after switching away and back", async () => {
+  const h = harness();
+  h.run(`
+    const metricName='Nhiệt độ trung bình ';
+    dataset.records.forEach(record=>{record[metricName]=record.temperature;delete record.temperature;});
+    const column=dataset.analysis.columns.find(column=>column.name==='temperature');
+    column.name=metricName;column.labelVi='Nhiệt độ trung bình';
+    dataset.suggestions[1].bindings.value=metricName;
+    dataset.recommendation.metricField=metricName;
+    dataset.recommendation.numericFields=[metricName,'minimum'];
+    populateAiFilters(dataset);
+  `);
+  h.mode("bar"); h.run("openMapPopup(testFeatures[0], {lng:105,lat:21})");
+  const values = () => {
+    const config = h.rendered.at(-1).config;
+    return config.data.map(row => row[config.series[0].key]);
+  };
+  assert.deepEqual(values(), [1, 2, 3]);
+  let metric = h.all(".ai-popup-metric")[0]; metric.value = "minimum"; await h.change(metric);
+  assert.deepEqual(values(), [0, 1, 2]);
+  metric = h.all(".ai-popup-metric")[0]; metric.value = "Nhiệt độ trung bình "; await h.change(metric);
+  assert.deepEqual(values(), [1, 2, 3]);
+});
+
+test("count coloring and popup values use record units rather than the source measure unit", async () => {
+  const h = harness({ thematic: true });
+  h.run("dataset.suggestions[1].agg='count'; dataset.recommendation=recommendationForSuggestion(dataset.suggestions[1]);");
+  await h.run("filteredAiBoundary()");
+  assert.equal(h.run("activePolygonLegendScale().unit"), "bản ghi");
+  assert.equal(h.get("weather-legend-title").textContent, "Số bản ghi");
+  const rows = JSON.parse(h.run("JSON.stringify(aiWeatherPopupContent(state.boundary.features[0]).children[1].children.map(row=>row.children.map(cell=>cell.textContent)))"));
+  assert.ok(rows.some(([label, value]) => label === "Số bản ghi" && value === "1"));
 });
 
 test("ambiguous geographic names show provinces and retries join exactly the chosen geometry", async () => {
@@ -215,6 +369,30 @@ test("map date and map metric changes update open popup information without chan
   h.run("clearAiMapState()"); assert.equal(h.popups.at(-1).removed, true);
 });
 
+test("popup bar calculations summarize the selected range and switching back restores time observations", async () => {
+  const h = harness(); h.mode("bar"); h.run("openMapPopup(testFeatures[0], [105,21])");
+  const mapFilters = JSON.stringify(h.dataset.filters);
+  const calculate = async value => {
+    const control = h.all(".ai-popup-aggregation")[0]; control.value = value; await h.change(control);
+    return h.rendered.at(-1).config;
+  };
+  let config = await calculate("sum");
+  assert.deepEqual(config.data, [{ [config.xField]: "A", temperature: 6 }]);
+  assert.equal(config.timeColumn, null);
+  const from = h.all(".ai-popup-range").find(control => control.dataset.edge === "from");
+  from.value = "2026-09-02T00:00:00.000Z"; await h.change(from);
+  assert.equal(h.rendered.at(-1).config.data[0].temperature, 5);
+  config = await calculate("mean");
+  assert.deepEqual(config.data, [{ [config.xField]: "A", temperature: 2.5 }]);
+  config = await calculate("auto");
+  assert.deepEqual(config.data.map(row => row.temperature), [2, 3]);
+  assert.equal(config.xField, "date");
+  assert.ok(config.timeColumn);
+  assert.equal(h.all(".ai-popup-aggregation")[0].children[0].textContent, "Theo dữ liệu");
+  assert.equal(JSON.stringify(h.dataset.filters), mapFilters);
+  assert.equal(h.popups.length, 1, "changing calculations refreshes the existing popup");
+});
+
 test("date ranges remain ordered and grouped bar controls apply selected aggregation", async () => {
   const h = harness(); h.mode("bar");
   h.click(h.all(".ai-bar-chart-type").find(button => button.dataset.popupBarVariant === "grouped"));
@@ -226,6 +404,8 @@ test("date ranges remain ordered and grouped bar controls apply selected aggrega
   h.run("openMapPopup(testFeatures[0], [105,21])");
   assert.equal(h.rendered.at(-1).config.variant, "grouped");
   assert.equal(h.rendered.at(-1).config.aggregation, "sum");
+  const config = h.rendered.at(-1).config;
+  assert.deepEqual(config.data, [{ [config.xField]: "A", temperature: 1, minimum: 0 }]);
 });
 
 test("a new upload resets popup settings and prioritizes polygon over higher-scored line", async () => {

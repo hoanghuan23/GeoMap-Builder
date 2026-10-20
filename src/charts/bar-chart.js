@@ -24,7 +24,9 @@ function requireString(value, field) {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`Trường "${field}" phải là một chuỗi không rỗng.`);
   }
-  return value.trim();
+  // Field keys must match the spreadsheet record exactly, including whitespace.
+  // Trimming a key silently turns valid popup values into missing observations.
+  return value;
 }
 
 export function analyzeBarData(input) {

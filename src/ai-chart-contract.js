@@ -1,5 +1,6 @@
 import { inferTimeGranularity, TIME_GRANULARITIES } from "./time-values.js";
-import { inferMeasureAggregation } from "./measure-semantics.js";
+import { inferMeasureAggregation, measureAggregation } from "./measure-semantics.js";
+import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "./polygon-legend-contract.js";
 
 const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "text", "ignore"]);
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
@@ -64,6 +65,8 @@ function nullable(schema) {
   return { anyOf: [schema, { type: "null" }] };
 }
 
+const LEGEND_SCHEMA = { anyOf: [...POLYGON_LEGEND_SCHEMA.anyOf, { type: "null" }] };
+
 export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
@@ -76,7 +79,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["name", "role", "labelVi", "geoLevel", "country", "timeParse", "granularity", "unit", "aggDefault"],
+        required: ["name", "role", "labelVi", "geoLevel", "country", "timeParse", "granularity", "unit", "unitSource", "aggDefault", "semanticType", "legend"],
         properties: {
           name: { type: "string" },
           role: { type: "string", enum: ROLE_VALUES },
@@ -85,8 +88,11 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
           country: nullable({ type: "string" }),
           timeParse: nullable({ type: "string", enum: ["iso", "excel_serial", "unix_s", "unix_ms", "text"] }),
           granularity: nullable({ type: "string", enum: TIME_GRANULARITIES }),
-          unit: nullable({ type: "string" }),
-          aggDefault: nullable({ type: "string", enum: AGG_VALUES })
+          unit: { ...nullable({ type: "string" }), description: "Đơn vị đo của dữ liệu, được xác định từ tên cột và ngữ cảnh toàn bảng, ví dụ °C, °F, mm, %, triệu đồng. Giữ đơn vị kể cả khi legend.mode là auto; chỉ null khi không xác định được." },
+          unitSource: { type: "string", enum: ["explicit", "inferred", "unknown"] },
+          aggDefault: nullable({ type: "string", enum: AGG_VALUES }),
+          semanticType: nullable({ type: "string" }),
+          legend: LEGEND_SCHEMA
         }
       }
     },
@@ -96,7 +102,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason"],
+        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend"],
         properties: {
           id: { type: "string" },
           chartType: { type: "string", enum: Object.keys(AI_MAP_REGISTRY) },
@@ -117,7 +123,8 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
           },
           agg: nullable({ type: "string", enum: AGG_VALUES }),
           confidence: { type: "number", minimum: 0, maximum: 1 },
-          reason: { type: "string" }
+          reason: { type: "string" },
+          legend: LEGEND_SCHEMA
         }
       }
     }
@@ -155,7 +162,10 @@ export function inferColumnInfo(column) {
     timeParse: inferred.timeParse || null,
     granularity: inferred.granularity || null,
     unit: null,
+    unitSource: "unknown",
     aggDefault: inferred.aggDefault || null,
+    semanticType: null,
+    legend: null,
     source: "rule"
   };
 }
@@ -177,9 +187,12 @@ function normalizeColumn(raw, fallback) {
     country: !isRoadName && typeof raw.country === "string" && raw.country.trim() ? raw.country.trim().toUpperCase() : null,
     timeParse: cleanOptional(raw.timeParse, ["iso", "excel_serial", "unix_s", "unix_ms", "text"]) || (raw.role === "time" ? fallback.timeParse : null),
     granularity: cleanOptional(raw.granularity, TIME_GRANULARITIES) || (raw.role === "time" ? fallback.granularity : null),
-    unit: typeof raw.unit === "string" && raw.unit.trim() ? raw.unit.trim() : null,
+    unit: normalizeLegendUnit(raw.unit),
+    unitSource: !normalizeLegendUnit(raw.unit) ? "unknown" : ["explicit", "inferred", "unknown"].includes(raw.unitSource) ? raw.unitSource : "inferred",
     aggDefault: cleanOptional(raw.aggDefault, AGG_VALUES),
-    source: "ai"
+    semanticType: raw.role === "measure" && typeof raw.semanticType === "string" && raw.semanticType.trim() ? raw.semanticType.trim().slice(0, 120) : null,
+    legend: raw.role === "measure" ? raw.legend ?? null : null,
+    source: raw.source === "rule" ? "rule" : "ai"
   };
 }
 
@@ -226,6 +239,7 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds) {
     agg: AGG_VALUES.includes(raw.agg) ? raw.agg : null,
     confidence: Math.min(1, Math.max(0, Number(raw.confidence) || 0)),
     reason: typeof raw.reason === "string" ? raw.reason.trim() : "",
+    legend: raw.chartType === "choropleth" ? raw.legend ?? null : null,
     source: "ai"
   };
 }
@@ -282,6 +296,21 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     if (!existing || suggestion.confidence > existing.confidence) suggestionsByType.set(suggestion.chartType, suggestion);
   }
   const suggestions = [...suggestionsByType.values()].sort((a, b) => b.confidence - a.confidence);
+  for (const column of columns) {
+    const suggestion = suggestions.find(item => item.chartType === "choropleth" && item.bindings.value === column.name);
+    const defaultTarget = { ...polygonLegendTarget(column), role: column.role };
+    column.legend = normalizePolygonLegendRecommendation(column.legend, defaultTarget, {
+      onFallback: reason => errors.push(`Legend ${column.name}: ${reason}`)
+    });
+    if (suggestion) {
+      const target = { ...polygonLegendTarget(column, suggestion.agg || measureAggregation(column)), role: column.role };
+      suggestion.legend = normalizePolygonLegendRecommendation(suggestion.legend, target, {
+        onFallback: reason => errors.push(`Legend ${suggestion.id}: ${reason}`)
+      }) || normalizePolygonLegendRecommendation(column.legend, target);
+      // Only seed a column default when the suggestion uses that same aggregation.
+      if (!column.legend) column.legend = normalizePolygonLegendRecommendation(suggestion.legend, defaultTarget);
+    }
+  }
   // An explicit empty list is the AI's suitability decision, not a failed response.
   if (!suggestions.length && rawSuggestions?.length !== 0) return { ...fallback, validationErrors: errors.length ? errors : ["AI không có suggestion hợp lệ."] };
   const source = raw.source === "rule" ? "rule" : "ai";
@@ -291,7 +320,7 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     columns,
     suggestions: suggestions.map(suggestion => ({ ...suggestion, source })),
     source,
-    validationErrors: errors
+    validationErrors: [...new Set(errors)]
   };
 }
 

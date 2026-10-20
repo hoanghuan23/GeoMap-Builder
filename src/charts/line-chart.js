@@ -19,7 +19,8 @@ export const LINE_COLORS = Object.freeze(["#ff8354", "#57c785", "#ffd05b", "#5b8
 
 function requireString(value, field) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`Trường "${field}" phải là một chuỗi không rỗng.`);
-  return value.trim();
+  // Validate nonblank keys without changing their identity in source records.
+  return value;
 }
 
 function compactNumber(value) {

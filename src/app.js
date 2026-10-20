@@ -24,13 +24,15 @@ import { PointRenderer } from "./renderers/point-renderer.js";
 import { buildPointView, createPointModel, DEFAULT_POINT_STYLE, mergePointStyle, normalizePointSelection, pointPaint, POINT_DEFAULT_GROUPS, POINT_GROUP_LIMIT } from "./renderers/point-style.js";
 import { PolygonRenderer } from "./renderers/polygon-renderer.js";
 import { polygonColorField, polygonFillExpression, polygonLegendScale } from "./renderers/polygon-style.js";
+import { buildPolygonLegendTargets, polygonLegendLabels, resolvePolygonLegendConfig } from "./polygon-legend.js";
+import { polygonLegendKey, polygonLegendTarget } from "./polygon-legend-contract.js";
 import { createMapSearch, focusMapOnFeature, landOnlyBoundary } from "./map-search.js";
 import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "./administrative-boundaries.js";
 import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColors } from "./metro-data.js";
 import { fetchCurrentWeather, formatVisibility, readCachedWeather, WEATHER_CACHE_TTL_MS, windDirectionLabel, writeCachedWeather } from "./openweather.js";
 import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient } from "./renderers/weather-style.js";
 import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } from "./geojson-layers.js";
-import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
+import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis, requestAiPolygonLegends } from "./ai-data-analysis.js";
 import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
 import { applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
@@ -382,24 +384,135 @@ function fillExpression() {
   return $("fixed-color").value;
 }
 
-function syncPolygonPaletteControls() {
+let polygonLegendDatasetRevision = 0;
+
+function polygonLegendContextKey(dataset, suggestion) {
+  return JSON.stringify([suggestion?.bindings?.region, dataset.geoAliases || {},
+    Object.entries(dataset.geoSelections || {}).map(([name, feature]) => [name, feature.id, feature.text, feature.bbox])]);
+}
+
+function cancelPolygonLegendRecommendations(dataset = state.aiDataset) {
+  dataset?.polygonLegends?.controller?.abort();
+}
+
+function polygonLegendSession(dataset, suggestion) {
+  const contextKey = polygonLegendContextKey(dataset, suggestion);
+  if (dataset.polygonLegends?.contextKey !== contextKey) {
+    const previous = dataset.polygonLegends;
+    cancelPolygonLegendRecommendations(dataset);
+    // Remove only configurations installed by the previous boundary context.
+    for (const item of [...dataset.analysis.columns, ...dataset.suggestions]) {
+      if (previous && [...previous.recommendations.values()].includes(item.legend)) item.legend = null;
+    }
+    dataset.polygonLegends = { revision: ++polygonLegendDatasetRevision, contextKey, status: "idle", version: 0,
+      recommendations: new Map(), logged: new Set(), controller: null, promise: null, resolved: null, designContext: null };
+  }
+  return dataset.polygonLegends;
+}
+
+function activePolygonLegendScale() {
+  const suggestion = activePolygonSuggestion();
+  if (!suggestion || state.mapType !== "polygon" || state.metroData) return null;
+  const dataset = state.aiDataset; const columns = dataset.analysis.columns;
+  const session = polygonLegendSession(dataset, suggestion);
+  const column = columns.find(item => item.name === suggestion.bindings.value);
+  const aggregation = resolveAggregation(suggestion, columns);
+  const key = polygonLegendKey(polygonLegendTarget(column, aggregation));
+  const cached = session.resolved;
+  if (cached && cached.data === state.boundary && cached.key === key && cached.version === session.version
+    && cached.columnLegend === column?.legend && cached.suggestionLegend === suggestion.legend && cached.title === column?.labelVi) return cached.scale;
+  const scale = resolvePolygonLegendConfig({ suggestion, columnMetadata: columns, aggregatedFeatures: state.boundary,
+    aggregation, legendRecommendations: session.recommendations, status: session.status,
+    onFallback: ({ code, reason }) => {
+      const logKey = `${key}:${code}`;
+      if (session.logged.has(logKey)) return;
+      session.logged.add(logKey); console.debug("Polygon legend fallback", { code, field: suggestion.bindings.value, aggregation, reason });
+    } });
+  session.resolved = { data: state.boundary, key, version: session.version, columnLegend: column?.legend,
+    suggestionLegend: suggestion.legend, title: column?.labelVi, scale };
+  return scale;
+}
+
+async function ensurePolygonLegendRecommendations(suggestion, dataset = state.aiDataset) {
+  if (!dataset || suggestion?.chartType !== "choropleth") return;
+  const session = polygonLegendSession(dataset, suggestion);
+  if (session.status !== "idle") return session.promise;
+  session.status = "pending"; session.version += 1;
+  const isCurrent = () => state.aiDataset === dataset && dataset.polygonLegends === session
+    && session.contextKey === polygonLegendContextKey(dataset, suggestion) && !session.controller?.signal?.aborted;
+  session.promise = (async () => {
+    try {
+      const filters = Object.fromEntries(Object.entries(dataset.filters || {}).map(([field, value]) => [field, Array.isArray(value) ? [...value] : value]));
+      const targets = buildPolygonLegendTargets({ suggestion, records: dataset.records, boundaries: dataset.boundaries,
+        columns: dataset.analysis.columns, filters });
+      if (!targets.length) { session.status = "fallback"; return; }
+      const time = dataset.analysis.columns.find(column => column.role === "time");
+      const times = time ? applyPipelineFilters(dataset.records, filters).map(record => record[time.name]).filter(value => value != null)
+        .sort((a, b) => compareTimeValues(a, b, time)) : [];
+      session.designContext = { regionField: suggestion.bindings.region, filters,
+        matchedRegionCount: dataset.boundaries.features.length,
+        timeRange: times.length ? [comparableFilterValue(times[0]), comparableFilterValue(times.at(-1))] : null };
+      session.controller = createAbortController();
+      if (isCurrent() && activePolygonSuggestion()) applyStyle();
+      const result = await requestAiPolygonLegends({ targets, context: session.designContext }, { signal: session.controller.signal });
+      if (!isCurrent()) return;
+      session.recommendations = new Map(result.legends.map(legend => [polygonLegendKey(legend), legend]));
+      session.validationErrors = result.validationErrors;
+      for (const legend of result.legends) {
+        const column = dataset.analysis.columns.find(item => item.name === legend.field);
+        if (column && polygonLegendKey(polygonLegendTarget(column)) === polygonLegendKey(legend)) column.legend = legend;
+        const selected = dataset.suggestions.find(item => item.id === suggestion.id);
+        if (selected?.bindings.value === legend.field && resolveAggregation(selected, dataset.analysis.columns) === legend.aggregation) selected.legend = legend;
+      }
+      session.status = result.legends.length ? "ready" : "fallback";
+    } catch (error) {
+      if (!isCurrent()) return;
+      session.status = "fallback";
+      session.validationErrors = [error.message || "Không thể thiết kế chú giải bằng AI."];
+      console.debug("Polygon legend request fallback", { code: "LEGEND_REQUEST_FAILED", revision: session.revision });
+    } finally {
+      session.version += 1;
+      if (isCurrent() && activePolygonSuggestion()) applyStyle();
+    }
+  })();
+  return session.promise;
+}
+
+function syncPolygonPaletteControls(resolvedScale = activePolygonLegendScale()) {
   const isWeather = state.dataOrigin === "search" && state.mapType === "h3";
   const thematicData = state.mapType === "h3" ? state.h3Data : state.boundary;
-  const colorField = isWeather ? { field: "temperature" } : state.metroData ? { field: "ratio" } : polygonColorField(thematicData, state.dataProfile);
+  const colorField = resolvedScale ? { field: resolvedScale.field } : isWeather ? { field: "temperature" } : state.metroData ? { field: "ratio" } : polygonColorField(thematicData, state.dataProfile);
+  const managed = Boolean(resolvedScale);
+  $("fixed-color").disabled = managed;
+  $("polygon-color-label").textContent = managed ? "Chú giải màu" : "Dải màu";
+  $("polygon-palette-options").hidden = managed;
+  $("polygon-palette-help").hidden = managed;
+  const summary = $("polygon-legend-summary");
+  summary.hidden = !managed;
+  if (managed) {
+    const status = resolvedScale.status === "pending" ? "AI đang thiết kế chú giải…" : !resolvedScale.hasData ? "Không có dữ liệu"
+      : resolvedScale.source === "ai" ? "Chú giải do AI đề xuất" : "Chú giải dự phòng";
+    summary.textContent = `${resolvedScale.title}${resolvedScale.unit ? ` (${resolvedScale.unit})` : ""} · ${status}`;
+    summary.style.setProperty("--legend-gradient", resolvedScale.gradient || resolvedScale.noDataColor);
+    summary.title = resolvedScale.reason;
+  }
   $("polygon-color-field").textContent = isWeather ? "Theo nhiệt độ (°C)" : state.metroData ? "Xe buýt / xe máy" : colorField ? `Theo ${humanizeField(colorField.field)}` : "Cần thuộc tính dữ liệu";
   document.querySelectorAll("#polygon-color-ramp .palette").forEach(button => {
-    button.disabled = !colorField || (isWeather && button.dataset.palette === "travel");
-    button.classList.toggle("active", button.dataset.palette === state.polygonPalette);
+    button.disabled = managed || !colorField || (isWeather && button.dataset.palette === "travel");
+    button.classList.toggle("active", !managed && button.dataset.palette === state.polygonPalette);
   });
 }
 
-function renderWeatherLegend() {
+function renderWeatherLegend(resolvedScale = activePolygonLegendScale()) {
   const legend = $("weather-legend");
   const isWeatherMap = state.dataOrigin === "search" && state.mapType === "h3";
   const isAiMap = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
   const show = $("show-map-layers").checked && ((isWeatherMap && $("show-weather").checked) || isAiMap);
   legend.hidden = !show;
   if (!show) return;
+  const mode = $("weather-legend-mode");
+  mode.hidden = !resolvedScale;
+  $("weather-legend-labels").classList.toggle("positioned", Boolean(resolvedScale));
   const palette = TEMPERATURE_STOPS[state.polygonPalette] ? state.polygonPalette : "diverging";
   if (isWeatherMap) {
     $("weather-legend-title").textContent = "Nhiệt độ không khí (°C)";
@@ -409,18 +522,36 @@ function renderWeatherLegend() {
     return;
   }
   const data = state.mapType === "h3" ? state.h3Data : state.boundary;
-  const scale = polygonLegendScale(data, state.dataProfile, state.polygonPalette);
+  const scale = polygonLegendScale(data, state.dataProfile, state.polygonPalette, resolvedScale);
   if (!scale) { legend.hidden = true; return; }
   const metric = state.aiDataset.recommendation.metricField;
-  const hasTemperatureUnit = /nhi[eệ]t|temperature|temp/i.test(metric);
-  $("weather-legend-title").textContent = `${metric}${hasTemperatureUnit ? " (°C)" : ""}`;
+  const column = state.aiDataset.analysis.columns.find(item => item.name === metric);
+  const unit = resolvedScale ? scale.unit : column?.unit || "";
+  const title = resolvedScale ? scale.title : column?.labelVi || metric;
+  $("weather-legend-title").textContent = `${title}${unit && !title.includes(unit) ? ` (${unit})` : ""}`;
+  mode.textContent = scale.source === "technical-fallback" ? scale.status === "pending" ? "Đang chuẩn bị chú giải" : "Chú giải dự phòng"
+    : scale.mode === "semantic" ? "Theo ngữ nghĩa" : "Theo dữ liệu";
+  mode.title = scale.reason || "";
   $("weather-legend-scale").style.background = scale.gradient;
-  $("weather-legend-labels").replaceChildren(...scale.values.map(value => Object.assign(document.createElement("span"), { textContent: Number(value.toFixed(1)).toLocaleString("vi-VN") })));
+  const labels = resolvedScale ? polygonLegendLabels(scale, Math.max(100, (legend.clientWidth || 330) - 40))
+    : scale.values.map(value => ({ value, text: Number(value.toFixed(1)).toLocaleString("vi-VN") }));
+  $("weather-legend-labels").replaceChildren(...labels.map(item => {
+    const label = document.createElement("span");
+    label.textContent = item.text;
+    if (item.position != null) { label.style.left = `${item.position}%`; label.style.top = `${item.row * 14}px`; }
+    return label;
+  }));
   $("weather-legend-note").textContent = isRegionHexMode() ? `Dữ liệu tải lên · H3 res ${state.regionHexResolution}` : state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon";
 }
 
 function applyStyle() {
   if (!map) return;
+  const resolvedScale = activePolygonLegendScale();
+  if (resolvedScale) syncPolygonPaletteControls(resolvedScale);
+  else {
+    $("fixed-color").disabled = false;
+    $("polygon-legend-summary").hidden = true;
+  }
   const color = fillExpression();
   const opacity = Number($("opacity").value);
   const borderColor = $("border-color").value;
@@ -429,7 +560,7 @@ function applyStyle() {
     const weatherColor = state.dataOrigin === "search" && state.mapType === "h3" && $("show-weather").checked
       ? temperatureFillExpression(state.polygonPalette, color)
       : state.aiDataset || isRegionHexMode()
-      ? polygonFillExpression(isRegionHexMode() ? state.boundary : state.h3Data, state.dataProfile, state.polygonPalette, color)
+      ? polygonFillExpression(isRegionHexMode() ? state.boundary : state.h3Data, state.dataProfile, state.polygonPalette, color, resolvedScale)
       : color;
     map.setPaintProperty("h3-fill", "fill-color", weatherColor);
     map.setPaintProperty("h3-fill", "fill-opacity", opacity);
@@ -437,7 +568,7 @@ function applyStyle() {
     map.setPaintProperty("h3-border", "line-width", borderWidth);
   }
   if (map.getLayer("polygon-fill")) {
-    map.setPaintProperty("polygon-fill", "fill-color", state.metroData ? travelFillExpression(state.polygonPalette, color) : polygonFillExpression(state.boundary, state.dataProfile, state.polygonPalette, color));
+    map.setPaintProperty("polygon-fill", "fill-color", state.metroData ? travelFillExpression(state.polygonPalette, color) : polygonFillExpression(state.boundary, state.dataProfile, state.polygonPalette, color, resolvedScale));
     map.setPaintProperty("polygon-fill", "fill-opacity", opacity);
     map.setPaintProperty("polygon-border", "line-color", borderColor);
     map.setPaintProperty("polygon-border", "line-width", borderWidth);
@@ -451,12 +582,11 @@ function applyStyle() {
     const view = activePointSuggestion() ? state.aiDataset.activePointView : null;
     for (const [property, value] of Object.entries(view?.paint || pointPaint(state.pointStyle))) map.setPaintProperty("point-marker", property, value);
   }
-  applyMapLayerVisibility();
+  applyMapLayerVisibility(resolvedScale);
   renderMetroLegend();
-  renderWeatherLegend();
 }
 
-function applyMapLayerVisibility() {
+function applyMapLayerVisibility(resolvedScale = activePolygonLegendScale()) {
   if (!map) return;
   const showLayers = $("show-map-layers")?.checked ?? false;
   if (!showLayers) closeMapPopup();
@@ -483,7 +613,7 @@ function applyMapLayerVisibility() {
   renderTransportLegend();
   if (!showPolygon) { state.metroPopup?.remove(); state.metroPopup = null; }
   if (!showH3 && !showPolygon) cellPopup?.remove();
-  renderWeatherLegend();
+  renderWeatherLegend(resolvedScale);
   renderPointLegend();
   renderRoadLegend();
   if (state.mapType !== "point" || !showLayers) { pointPopup?.remove(); pointPopup = null; }
@@ -985,9 +1115,15 @@ function showMetroComparison(event) {
 function aiWeatherPopupContent(feature) {
   const { recommendation } = state.aiDataset;
   const columns = state.aiDataset.analysis?.columns || [];
-  return createAiPopupContent(document, feature, columns.map(column => column.role === "time"
-    && recommendation.filters?.some(filter => filter.field === column.name && filter.control === "datetime-select")
-    ? { ...column, granularity: "datetime" } : column), activeMapPopupSuggestion()?.chartType === "point" ? pointTitleField(columns) : recommendation.geometry?.field);
+  const scale = activePolygonLegendScale();
+  const displayedColumns = columns.map(column => {
+    if (column.name === scale?.field) return { ...column, unit: scale.unit,
+      labelVi: scale.aggregation === "count" ? "Số bản ghi" : column.labelVi };
+    return column.role === "time" && recommendation.filters?.some(filter => filter.field === column.name && filter.control === "datetime-select")
+      ? { ...column, granularity: "datetime" } : column;
+  });
+  return createAiPopupContent(document, feature, displayedColumns,
+    activeMapPopupSuggestion()?.chartType === "point" ? pointTitleField(columns) : recommendation.geometry?.field);
 }
 
 function showAiPolygonDetails(event) {
@@ -1324,6 +1460,7 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 
 function clearUploadedData({ preserveUploads = false } = {}) {
   closeMapPopup();
+  cancelPolygonLegendRecommendations();
   regionHexBuildRevision += 1;
   state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
   $("region-hex-note").textContent = "";
@@ -1613,6 +1750,7 @@ function renderRoadStyleControls() {
 
 function clearAiMapState() {
   closeMapPopup();
+  cancelPolygonLegendRecommendations();
   cancelAiBoundaryLoad();
   pointPopup?.remove(); pointPopup = null;
   state.aiDataset = null;
@@ -2055,7 +2193,7 @@ function buildMapPopupSettings(dataset, selection) {
   } else settings.append(aiField("Chỉ số biểu đồ", aiSelect("ai-popup-metric", metrics.map(item => [item.key, item.label]),
     selection.mode === "bar" ? config.metrics[0] : config.measure)));
   if (selection.mode === "bar") {
-    const aggregation = aiSelect("ai-popup-aggregation", [["auto", "Theo từng chỉ số"], ["sum", "Tổng (SUM)"],
+    const aggregation = aiSelect("ai-popup-aggregation", [["auto", "Theo dữ liệu"], ["sum", "Tổng (SUM)"],
       ["mean", "Trung bình (AVG)"], ["min", "Nhỏ nhất (MIN)"], ["max", "Lớn nhất (MAX)"]], config.aggregation);
     aggregation.disabled = config.metrics.every(metric => metric === "count");
     settings.append(aiField("Cách tính giá trị", aggregation));
@@ -2826,6 +2964,7 @@ async function activateAiChoropleth(suggestion) {
   suggestion.repairable = false; suggestion.geoUnmatched = [];
   state.dataOrigin = "ai"; state.mapType = "polygon"; state.polygonPalette = "diverging";
   await filteredAiBoundary();
+  void ensurePolygonLegendRecommendations(suggestion, dataset);
   renderAiSuggestionGrid();
   setStatus(`Đã tạo bản đồ ${recommendation.title}.`, true);
   return true;
@@ -3583,10 +3722,15 @@ function bindUI() {
   });
   $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
   $("opacity").addEventListener("input", e => { $("opacity-value").value = `${Math.round(e.target.value * 100)}%`; applyStyle(); }); $("line-width").addEventListener("input", e => { $("line-width-value").value = `${e.target.value} px`; applyStyle(); });
-  for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => { $(`${id}-value`).textContent = e.target.value.toUpperCase(); if (id === "fixed-color" && (state.mapType === "polygon" || state.dataOrigin === "search" || state.aiDataset)) { state.polygonPalette = null; syncPolygonPaletteControls(); } applyStyle(); }); }
+  for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => {
+    if (id === "fixed-color" && activePolygonLegendScale()) return;
+    $(`${id}-value`).textContent = e.target.value.toUpperCase();
+    if (id === "fixed-color" && (state.mapType === "polygon" || state.dataOrigin === "search" || state.aiDataset)) { state.polygonPalette = null; syncPolygonPaletteControls(); }
+    applyStyle();
+  }); }
   $("polygon-color-ramp").addEventListener("click", event => {
     const button = event.target.closest(".palette");
-    if (!button || button.disabled) return;
+    if (!button || button.disabled || activePolygonLegendScale()) return;
     state.polygonPalette = button.dataset.palette;
     syncPolygonPaletteControls();
     applyStyle();

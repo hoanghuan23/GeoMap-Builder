@@ -5,6 +5,9 @@ import vm from "node:vm";
 import { getResolution, latLngToCell } from "h3-js";
 import { buildRegionHexGrid } from "../src/region-hex-grid.js";
 import { polygonFillExpression } from "../src/renderers/polygon-style.js";
+import { resolvePolygonLegendConfig } from "../src/polygon-legend.js";
+import { polygonLegendKey, polygonLegendTarget } from "../src/polygon-legend-contract.js";
+import { resolveAggregation } from "../src/ai-chart-pipeline.js";
 
 const polygon = (west, south, east, north, properties = {}) => ({
   type: "Feature", properties,
@@ -66,7 +69,7 @@ function harness() {
   };
   get("opacity").value = .72; get("fixed-color").value = "#6c5ce7";
   const context = vm.createContext({
-    buildRegionHexGrid, polygonFillExpression, regions, testMap: map, setTimeout, console,
+    buildRegionHexGrid, polygonFillExpression, resolvePolygonLegendConfig, resolveAggregation, polygonLegendKey, polygonLegendTarget, regions, testMap: map, setTimeout, console,
     CONFIG: { DEFAULT_RESOLUTION: 6, MAX_RENDER_CELLS: 1000 },
     DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
     document: { getElementById: get, querySelectorAll: () => [] },
@@ -116,7 +119,7 @@ test("AI regional filters regenerate the grid and show the actual limited resolu
   const { run, get, sources } = harness();
   run(`state.regionHexEnabled = true; state.regionHexResolution = 15;
     selectedAiFilters = () => ({});
-    state.aiDataset = { selectedSuggestionId: "regions", suggestions: [{ id: "regions", chartType: "choropleth" }],
+    state.aiDataset = { selectedSuggestionId: "regions", suggestions: [{ id: "regions", chartType: "choropleth", bindings: {region:"region",value:"value"} }],
       records: [], boundaries: regions, analysis: { columns: [] },
       recommendation: { metricField: "value", numericFields: ["value"] } };
   `);

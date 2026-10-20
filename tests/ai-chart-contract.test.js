@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { ANALYSIS_RESPONSE_SCHEMA, fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 
 const profile = {
   rowCount: 2,
@@ -11,6 +12,73 @@ const profile = {
     { name: "note", inferredType: "text", uniqueCount: 2 }
   ]
 };
+
+test("strict schema requires nullable semantic and legend fields on every AI column/suggestion", () => {
+  const columns = ANALYSIS_RESPONSE_SCHEMA.properties.columns.items;
+  const suggestions = ANALYSIS_RESPONSE_SCHEMA.properties.suggestions.items;
+  for (const [schema, keys] of [[columns, ["semanticType", "legend"]], [suggestions, ["legend"]]]) {
+    for (const key of keys) {
+      assert.ok(schema.required.includes(key));
+      assert.ok(schema.properties[key].anyOf.some(option => option.type === "null"));
+    }
+  }
+});
+
+test("data units and provenance survive legacy legend fallback through server/client normalization", () => {
+  const specs = [
+    { name: "Nhiệt độ", unit: "°C", unitSource: "inferred" },
+    { name: "Độ ẩm", unit: "%", unitSource: "explicit" },
+    { name: "Lượng mưa", unit: "mm", unitSource: "explicit" },
+    { name: "Unknown", unit: null, unitSource: "unknown" }
+  ];
+  const dataProfile = { rowCount: 2, columns: specs.map(({ name }) => ({ name, inferredType: "number" })) };
+  const server = validateAndNormalizeAnalysis({ columns: specs.map(spec => ({ ...spec, role: "measure", legend: { mode: "reference", referenceId: "old" } })), suggestions: [] }, dataProfile);
+  const client = validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), dataProfile);
+  assert.deepEqual(client, server);
+  assert.deepEqual(client.columns.map(column => column.unit), specs.map(spec => spec.unit));
+  assert.deepEqual(client.columns.map(column => column.unitSource), specs.map(spec => spec.unitSource));
+  assert.ok(client.columns.every(column => column.legend === null));
+});
+
+test("v2 suggestion legends seed only their own matching column default and survive two normalizations", () => {
+  const legend = legendFixture({ unit: "Celsius" });
+  const raw = {
+    columns: [{ name: "temperature", role: "measure", semanticType: "custom_measure", unit: "℃", aggDefault: "mean" },
+      { name: "note", role: "category", semanticType: "air_temperature", legend }],
+    suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend }]
+  };
+  const server = validateAndNormalizeAnalysis(raw, profile);
+  assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), profile), server);
+  assert.equal(server.columns[2].semanticType, "custom_measure");
+  assert.equal(server.columns[2].legend.legendSchemaVersion, 2);
+  assert.equal(server.columns[2].unit, "°C");
+  assert.deepEqual(server.suggestions[0].legend, server.columns[2].legend);
+  assert.equal(server.columns[3].legend, null); assert.equal(server.columns[3].semanticType, null);
+});
+
+test("invalid v2 legend falls back independently without removing a valid choropleth", () => {
+  for (const patch of [{ unit: null }, { legend: legendFixture({ field: "other" }) }, { legend: legendFixture({ stops: [] }) }]) {
+    const column = { name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", legend: legendFixture(), ...patch };
+    const result = validateAndNormalizeAnalysis({ columns: [column],
+      suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend: column.legend }]
+    }, profile);
+    assert.equal(result.source, "ai"); assert.equal(result.suggestions.length, 1);
+    assert.equal(result.suggestions[0].legend, null); assert.ok(result.validationErrors.length);
+    assert.deepEqual(validateAndNormalizeAnalysis(result, profile), result);
+  }
+});
+
+test("aggregation changes cannot reuse a semantic legend for a different aggregation", () => {
+  for (const agg of ["sum", "count"]) {
+    const result = validateAndNormalizeAnalysis({
+      columns: [{ name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", legend: legendFixture() }],
+      suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg, legend: legendFixture() }]
+    }, profile);
+    assert.equal(result.columns[2].legend.mode, "semantic");
+    assert.equal(result.suggestions[0].legend, null);
+    assert.deepEqual(validateAndNormalizeAnalysis(result, profile), result);
+  }
+});
 
 test("validator loại cột lạ/trùng, bù cột thiếu và chỉ loại suggestion lỗi", () => {
   const result = validateAndNormalizeAnalysis({

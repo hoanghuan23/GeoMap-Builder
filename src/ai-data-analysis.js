@@ -1,5 +1,6 @@
 import { AI_MAP_REGISTRY, fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
 import { normalizeTabularRecords, profileTabularData } from "./tabular-data.js";
+import { LEGEND_REQUEST_TIMEOUT_MS, normalizePolygonLegendBatch, normalizePolygonLegendRequest } from "./polygon-legend-contract.js";
 
 const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area)/i;
 const TIME_HINT = /(ngày|date|time|tháng|month|năm|year)/i;
@@ -64,6 +65,29 @@ export async function requestAiDataAnalysis(records, { signal, includeSamples = 
   analysis.suggestions = analysis.suggestions.filter(item => Object.hasOwn(AI_MAP_REGISTRY, item.chartType));
   const normalized = normalizeTabularRecords(records, analysis.columns);
   return { analysis, profile, records: normalized.records, validRowRate: normalized.validRowRate, fallbackReason };
+}
+
+/** A separate summary-only request after the map's filters and aggregations are known. */
+export async function requestAiPolygonLegends(payload, { signal, timeoutMs = LEGEND_REQUEST_TIMEOUT_MS } = {}) {
+  const body = normalizePolygonLegendRequest(payload);
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abort();
+  else signal?.addEventListener("abort", abort, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    const response = await fetch("/api/ai/recommend-polygon-legends", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: controller.signal
+    });
+    if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || `Legend HTTP ${response.status}`);
+    return normalizePolygonLegendBatch(await response.json(), body.targets);
+  } catch (error) {
+    if (timedOut) throw new Error("AI thiết kế chú giải quá thời gian chờ.");
+    throw error;
+  } finally {
+    clearTimeout(timer); signal?.removeEventListener("abort", abort);
+  }
 }
 
 /** Compatibility adapter for the former map-only pipeline. */
