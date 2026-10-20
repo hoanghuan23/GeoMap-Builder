@@ -323,7 +323,7 @@ function requiredCoverage(suggestion, validRowRate) {
   return fields.length ? Math.min(...fields.map(field => Number(validRowRate?.[field] || 0))) : 0;
 }
 
-export function evaluateSuggestion(suggestion, records, columns, validRowRate, { mapTilerAvailable = true, h3Resolution = 6 } = {}) {
+export function evaluateSuggestion(suggestion, records, columns, validRowRate, { h3Resolution = 6 } = {}) {
   let feasibilityScore = requiredCoverage(suggestion, validRowRate);
   let available = true;
   let unavailableReason = "";
@@ -360,8 +360,7 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
   } else if (suggestion.chartType === "choropleth") {
     const groups = groupRecords(records, suggestion.bindings.region).length;
     feasibilityScore = Math.min(feasibilityScore, Math.min(1, groups / 2));
-    if (!mapTilerAvailable) { available = false; unavailableReason = "Chưa cấu hình MAPTILER_API_KEY."; }
-    else if (groups < 2) { available = false; unavailableReason = "Cần ít nhất hai địa danh hợp lệ."; }
+    if (groups < 2) { available = false; unavailableReason = "Cần ít nhất hai địa danh hợp lệ."; }
   } else if (suggestion.chartType === "point") {
     const { lat, lng } = suggestion.bindings;
     const coordinateRows = records.filter(record => {

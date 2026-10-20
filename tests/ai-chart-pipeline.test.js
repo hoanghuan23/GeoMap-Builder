@@ -315,10 +315,9 @@ test("chỉ bổ sung biểu đồ vùng khi có số liệu hợp lệ ở ít 
     assert.deepEqual(prepareSuggestions(analysis, records, coverage), []);
   }
   const records = [{ province: "Hà Nội", temperature: 29 }, { province: "Huế", temperature: 30 }];
-  const [unavailable] = prepareSuggestions(analysis, records, coverage, { mapTilerAvailable: false });
-  assert.equal(unavailable.chartType, "choropleth");
-  assert.equal(unavailable.available, false);
-  assert.match(unavailable.unavailableReason, /MAPTILER_API_KEY/);
+  const [localAvailable] = prepareSuggestions(analysis, records, coverage, { mapTilerAvailable: false });
+  assert.equal(localAvailable.chartType, "choropleth");
+  assert.equal(localAvailable.available, true, "bundled GADM boundaries remain available without a MapTiler key");
   const [available] = prepareSuggestions(analysis, records, coverage);
   const preserved = prepareSuggestions({ ...analysis, suggestions: [available] }, records, coverage);
   assert.equal(preserved.length, 1);

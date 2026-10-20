@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, gadmLevelForFeature, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, loadMapTilerAdministrativeBoundaries, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchGadmBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
+import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, gadmLevelForFeature, getMapTilerAdministrativeBoundary, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, loadMapTilerAdministrativeBoundaries, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchGadmBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
 import { WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
 
 test("tolerant administrative loading trả match rate và giữ tên dữ liệu khi dùng alias", async () => {
@@ -96,6 +96,86 @@ test("administrative boundary URL follows the AI-selected place type", () => {
   const url = new URL(buildAdministrativeGeocodingUrl("Ba Đình", "key", "county"));
   assert.equal(url.searchParams.get("types"), "county");
   assert.equal(url.searchParams.get("autocomplete"), "false");
+});
+
+test("Quảng provinces match prefixed MapTiler names without losing input locations", async () => {
+  const names = ["Quảng Ninh", "Quảng Trị", "Quảng Ngãi"];
+  const result = await loadMapTilerProvinceBoundaries(names, {
+    apiKey: "key", strict: false,
+    fetchImpl: async rawUrl => {
+      const path = decodeURIComponent(new URL(rawUrl).pathname);
+      const name = names.find(value => path.includes(`${value}, Việt Nam`));
+      assert.ok(name);
+      return { ok: true, json: async () => ({ features: [{
+        id: `region.${name}`, text: `Tỉnh ${name}`, place_name: `Tỉnh ${name}, Việt Nam`,
+        place_type: ["region"], geometry: { type: "Polygon", coordinates: [] }
+      }] }) };
+    }
+  });
+  assert.deepEqual(result.matched, names);
+  assert.deepEqual(result.unmatched, []);
+  assert.equal(result.matchRate, 1);
+  assert.deepEqual(result.features.map(feature => feature.properties.__data_location), names);
+});
+
+test("administrative prefixes handle accents, abbreviations and town labels", async () => {
+  const cases = [
+    ["tỉnh thái bình", "Thái Bình", "region"],
+    ["thủ đô Hà Nội", "Hà Nội", "region"],
+    ["TP. Hà Nội", "Hà Nội", "region"],
+    ["hanoi city", "Hà Nội", "region"],
+    ["xã Tân Châu", "Tân Châu", "county"],
+    ["huyện An Phú", "An Phú", "county"],
+    ["quận Ba Đình", "Ba Đình", "county"],
+    ["thị xã Từ Sơn", "Từ Sơn", "county"],
+    ["thị trấn Mê", "Mê", "county"],
+    ["phường Ba Đình", "Ba Đình", "county"]
+  ];
+  for (const [name, text, placeType] of cases) {
+    const result = await getMapTilerAdministrativeBoundary(name, {
+      apiKey: "key", placeType,
+      fetchImpl: async () => ({ ok: true, json: async () => ({ features: [{
+        id: `${placeType}.1`, text, place_type: [placeType],
+        geometry: { type: "Polygon", coordinates: [] }
+      }] }) })
+    });
+    assert.ok(result, name);
+    assert.equal(result.properties.__data_location, name);
+  }
+});
+
+test("administrative prefixes require a word boundary before the place name", async () => {
+  const result = await getMapTilerAdministrativeBoundary("Quảng Trạch", {
+    apiKey: "key", placeType: "county",
+    fetchImpl: async () => ({ ok: true, json: async () => ({ features: [{
+      id: "county.quangtrach", text: "Huyện Quảng Trạch", place_type: ["county"],
+      geometry: { type: "Polygon", coordinates: [] }
+    }] }) })
+  });
+  assert.ok(result);
+
+  const unrelated = await getMapTilerProvinceBoundary("gninh", {
+    apiKey: "key",
+    fetchImpl: async () => ({ ok: true, json: async () => ({ features: [{
+      id: "region.quangninh", text: "Quảng Ninh", place_type: ["region"],
+      geometry: { type: "Polygon", coordinates: [] }
+    }] }) })
+  });
+  assert.equal(unrelated, null);
+});
+
+test("name normalization still requires the requested administrative level and a polygon", async () => {
+  const feature = {
+    id: "county.anphu", text: "An Phú", place_type: ["county"],
+    geometry: { type: "Polygon", coordinates: [] }
+  };
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ features: [feature] }) });
+  const wrongLevel = await getMapTilerProvinceBoundary("huyện An Phú", { apiKey: "key", fetchImpl });
+  assert.equal(wrongLevel, null);
+  feature.place_type = ["region"];
+  feature.geometry = { type: "Point", coordinates: [105, 20] };
+  const noPolygon = await getMapTilerProvinceBoundary("huyện An Phú", { apiKey: "key", fetchImpl });
+  assert.equal(noPolygon, null);
 });
 
 test("bulk province loader preserves input order", async () => {

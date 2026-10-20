@@ -9,6 +9,7 @@ import { AI_CHART_REGISTRY } from "../src/ai-chart-contract.js";
 import { comparableFilterValue, displayFilterValue } from "../src/ai-data-analysis.js";
 import { createAiPopupContent } from "../src/ai-popup.js";
 import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
 import { analyzeSpatialData } from "../src/data-capabilities.js";
 import * as roadMap from "../src/road-map-data.js";
 import * as coordinates from "../src/coordinate-data.js";
@@ -104,12 +105,13 @@ function harness({ road = false, point = false, path = false, storeNameRole = "c
     dataset.selectedSuggestionId = "path";
   }
   const context = vm.createContext({
-    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, analyzeSpatialData,
+    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
     humanizeField: field => field, renderMapIcon() {}, renderChartIcon() {}, keepSelectOpenAfterMouseClick: value => value,
     document: { getElementById: get, createElement: () => new Element(), querySelector: () => new Element(), addEventListener() {},
-      querySelectorAll: selector => selector.startsWith("#ai-filter-controls ") ? get("ai-filter-controls").querySelectorAll(selector.slice(20)) : [] },
+      querySelectorAll: selector => selector.startsWith("#ai-filter-controls ") ? get("ai-filter-controls").querySelectorAll(selector.slice(20))
+        : selector.startsWith(".geo-") ? get("ai-filter-controls").querySelectorAll(selector) : [] },
     maplibregl: { Popup }, Date, console, setTimeout() {}, clearTimeout() {}, dataset, testMap: map, testFeatures: features
   });
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
@@ -137,6 +139,44 @@ test("polygon defaults to information with map controls and accurate map-only su
   h.run("renderAiSuggestionGrid()");
   assert.match(h.get("map-type-summary").textContent, /1 đề xuất/);
   assert.equal(h.get("map-type-grid").children[1].children[1].textContent, AI_CHART_REGISTRY.choropleth.label);
+});
+
+test("ambiguous geographic names show provinces and retries join exactly the chosen geometry", async () => {
+  const h = harness();
+  h.dataset.geoAliases = { "Tên đã sửa": "Tên đúng" };
+  const first = { id: "municipality.first", place_name: "Xã Tân Châu, Việt Nam", center: [105, 20],
+    properties: { __province_name: "Tỉnh Tây Ninh" }, geometry: { type: "Polygon", coordinates: [[[105, 20], [106, 20], [105, 21], [105, 20]]] } };
+  const second = { id: "municipality.second", place_name: "Xã Tân Châu, Việt Nam", center: [106, 21],
+    properties: { __province_name: "An Giang" }, geometry: { type: "Polygon", coordinates: [[[106, 21], [107, 21], [106, 22], [106, 21]]] } };
+  h.dataset.geoMatch = { candidates: { "xã Tân Châu": [first, second] } };
+  h.run(`renderGeoRepair(['xã Tân Châu']); activateAiChoropleth = async () => { dataset.retried = true; };`);
+  const choice = h.all(".geo-boundary-choice")[0];
+  assert.equal(choice.value, "", "do not preselect the first same-name region");
+  assert.equal(choice.children.length, 3);
+  assert.equal(choice.children[1].textContent, "Xã Tân Châu — Tây Ninh");
+  assert.equal(choice.children[2].textContent, "Xã Tân Châu — An Giang");
+  for (const feature of [first, second]) {
+    choice.value = feature.id;
+    h.click(h.all(".apply-geo-aliases")[0]);
+    assert.equal(h.dataset.geoSelections["xã Tân Châu"], feature);
+    const boundaries = await loadAdministrativeBoundaries(["xã Tân Châu"], {
+      selections: h.dataset.geoSelections, fetchImpl: () => assert.fail("do not search again after a user chooses a polygon")
+    });
+    const joined = joinRecordsToMapTilerBoundaries([{ region: "xã Tân Châu", value: 30 }], boundaries, {
+      geometry: { field: "region" }, metricField: "value"
+    });
+    assert.equal(joined.features[0].geometry, feature.geometry);
+    assert.equal(joined.features[0].properties.value, 30);
+    assert.equal(joined.features[0].properties.__location, "xã Tân Châu");
+  }
+  assert.equal(h.dataset.geoAliases["Tên đã sửa"], "Tên đúng");
+  assert.equal(h.dataset.retried, true);
+
+  h.all(".geo-alias-input")[0].value = "xã Tân Châu, Hưng Yên";
+  h.click(h.all(".apply-geo-aliases")[0]);
+  assert.equal(h.dataset.geoSelections["xã Tân Châu"], undefined, "a new query invalidates the old polygon choice");
+  assert.equal(h.dataset.geoAliases["xã Tân Châu"], "xã Tân Châu, Hưng Yên");
+  assert.equal(h.dataset.geoAliases["Tên đã sửa"], "Tên đúng");
 });
 
 test("popup switches charts, preserves map and per-kind settings, and releases chart roots", () => {

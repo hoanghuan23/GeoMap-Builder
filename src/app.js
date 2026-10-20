@@ -24,7 +24,8 @@ import { PointRenderer } from "./renderers/point-renderer.js";
 import { buildPointView, createPointModel, DEFAULT_POINT_STYLE, mergePointStyle, normalizePointSelection, pointPaint, POINT_DEFAULT_GROUPS, POINT_GROUP_LIMIT } from "./renderers/point-style.js";
 import { PolygonRenderer } from "./renderers/polygon-renderer.js";
 import { polygonColorField, polygonFillExpression, polygonLegendScale } from "./renderers/polygon-style.js";
-import { createMapSearch, landOnlyBoundary, loadMapTilerAdministrativeBoundaries } from "./map-search.js";
+import { createMapSearch, focusMapOnFeature, landOnlyBoundary } from "./map-search.js";
+import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "./administrative-boundaries.js";
 import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColors } from "./metro-data.js";
 import { fetchCurrentWeather, formatVisibility, readCachedWeather, WEATHER_CACHE_TTL_MS, windDirectionLabel, writeCachedWeather } from "./openweather.js";
 import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient } from "./renderers/weather-style.js";
@@ -2293,7 +2294,29 @@ function renderGeoRepair(unmatched = []) {
   panel.append(title, ...unmatched.map(name => {
     const row = document.createElement("label"); const original = document.createElement("span"); const input = document.createElement("input");
     row.className = "geo-repair-row"; original.textContent = name; input.className = "geo-alias-input"; input.dataset.location = name;
-    input.value = state.aiDataset.geoAliases?.[name] || ""; input.placeholder = "Tên tìm trên MapTiler"; row.append(original, input); return row;
+    input.value = state.aiDataset.geoAliases?.[name] || ""; input.placeholder = "Tên địa danh, tỉnh/thành";
+    const fields = document.createElement("div"); fields.className = "geo-repair-fields";
+    const candidates = state.aiDataset.geoMatch?.candidates?.[name] || [];
+    if (candidates.length > 1) {
+      const choice = document.createElement("select"); choice.className = "geo-boundary-choice"; choice.dataset.location = name;
+      choice.setAttribute("aria-label", `Chọn ranh giới cho ${name}`);
+      const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = `Có ${candidates.length} kết quả — chọn vùng`; choice.append(placeholder);
+      const labels = candidates.map(administrativeBoundaryLabel);
+      for (const [index, feature] of candidates.entries()) {
+        const option = document.createElement("option"); option.value = feature.id;
+        const center = feature.center || (feature.bbox && [(feature.bbox[0] + feature.bbox[2]) / 2, (feature.bbox[1] + feature.bbox[3]) / 2]);
+        const duplicate = labels.indexOf(labels[index]) !== labels.lastIndexOf(labels[index]);
+        option.textContent = `${labels[index]}${duplicate && center ? ` (${center[1].toFixed(3)}, ${center[0].toFixed(3)})` : ""}`;
+        choice.append(option);
+      }
+      choice.value = state.aiDataset.geoSelections?.[name]?.id || "";
+      choice.addEventListener("change", () => {
+        const feature = candidates.find(candidate => candidate.id === choice.value);
+        if (feature) focusMapOnFeature(map, feature);
+      });
+      fields.append(choice);
+    }
+    fields.append(input); row.append(original, fields); return row;
   }));
   button.type = "button"; button.className = "secondary-button apply-geo-aliases"; button.textContent = "Thử ghép lại"; panel.append(button); controls.append(panel); $("ai-data-filters").hidden = false;
 }
@@ -2737,7 +2760,6 @@ async function filteredAiBoundary({ fit = false } = {}) {
 }
 
 async function activateAiChoropleth(suggestion) {
-  if (!CONFIG.MAPTILER_API_KEY) throw new Error("Cần cấu hình MAPTILER_API_KEY để tải ranh giới hành chính.");
   cancelAiBoundaryLoad();
   const controller = createAbortController();
   aiBoundaryAbortController = controller;
@@ -2749,22 +2771,23 @@ async function activateAiChoropleth(suggestion) {
   dataset.recommendation = recommendation;
   const locations = uniqueRecordValues(records, recommendation.geometry.field).map(([, value]) => value);
   const geometryLabel = recommendation.filters.find(filter => filter.field === recommendation.geometry.field)?.label || recommendation.geometry.field;
-  setStatus(`Đang tải ranh giới MapTiler cho ${locations.length} giá trị ${geometryLabel}…`);
-  let mapTilerBoundaries; let boundaries;
+  setStatus(`Đang ghép ranh giới cho ${locations.length} giá trị ${geometryLabel}…`);
+  let resolvedBoundaries; let boundaries;
   try {
-    mapTilerBoundaries = await loadMapTilerAdministrativeBoundaries(locations, {
+    resolvedBoundaries = await loadAdministrativeBoundaries(locations, {
       apiKey: CONFIG.MAPTILER_API_KEY,
       placeType: recommendation.geometry.placeType,
       strict: false,
       aliases: dataset.geoAliases || {},
+      selections: dataset.geoSelections || {},
       signal: controller.signal,
-      onProgress: ({ completed, total }) => setStatus(`Đang tải ranh giới MapTiler… ${completed}/${total}`)
+      onProgress: ({ completed, total }) => setStatus(`Đang ghép ranh giới… ${completed}/${total}`)
     });
     if (revision !== aiBoundaryRevision || dataset !== state.aiDataset || dataset.selectedSuggestionId !== suggestion.id) return null;
-    setStatus("Đang chuẩn hóa ranh giới tỉnh/thành…");
+    setStatus("Đang chuẩn hóa ranh giới hành chính…");
     boundaries = {
-      ...mapTilerBoundaries,
-      features: await Promise.all(mapTilerBoundaries.features.map(async boundary =>
+      ...resolvedBoundaries,
+      features: await Promise.all(resolvedBoundaries.features.map(async boundary =>
         await landOnlyBoundary(boundary, { forceVietnam: true, signal: controller.signal }) || boundary
       ))
     };
@@ -2776,16 +2799,17 @@ async function activateAiChoropleth(suggestion) {
     if (aiBoundaryAbortController === controller) aiBoundaryAbortController = null;
   }
   dataset.boundaries = boundaries;
-  dataset.geoMatch = { matched: mapTilerBoundaries.matched, unmatched: mapTilerBoundaries.unmatched, matchRate: mapTilerBoundaries.matchRate };
-  suggestion.feasibilityScore = Math.min(suggestion.feasibilityScore, mapTilerBoundaries.matchRate);
+  dataset.geoMatch = { matched: resolvedBoundaries.matched, unmatched: resolvedBoundaries.unmatched, matchRate: resolvedBoundaries.matchRate, candidates: resolvedBoundaries.candidates };
+  suggestion.boundaryBaseFeasibility ??= suggestion.feasibilityScore;
+  suggestion.feasibilityScore = Math.min(suggestion.boundaryBaseFeasibility, resolvedBoundaries.matchRate);
   suggestion.effectiveConfidence = .6 * suggestion.confidence + .4 * suggestion.feasibilityScore;
   const initialFilters = populateAiFilters(dataset);
-  renderGeoRepair(mapTilerBoundaries.unmatched);
-  if (boundaries.features.length < 2 || mapTilerBoundaries.matchRate < .7) {
+  renderGeoRepair(resolvedBoundaries.unmatched);
+  if (boundaries.features.length < 2 || resolvedBoundaries.matchRate < .7) {
     suggestion.available = false;
-    suggestion.repairable = mapTilerBoundaries.unmatched.length > 0;
-    suggestion.geoUnmatched = mapTilerBoundaries.unmatched;
-    suggestion.unavailableReason = `Chỉ khớp ${boundaries.features.length}/${locations.length} địa danh (${Math.round(mapTilerBoundaries.matchRate * 100)}%). Hãy sửa tên chưa khớp.`;
+    suggestion.repairable = resolvedBoundaries.unmatched.length > 0;
+    suggestion.geoUnmatched = resolvedBoundaries.unmatched;
+    suggestion.unavailableReason = `Chỉ khớp ${boundaries.features.length}/${locations.length} địa danh (${Math.round(resolvedBoundaries.matchRate * 100)}%). Hãy sửa tên hoặc chọn vùng chưa khớp.`;
     clearMapForAiChart(); clearChartCanvas(); state.chartConfig = null; state.mapType = null;
     $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
     updateModelSections(); renderAiSuggestionGrid();
@@ -2821,7 +2845,7 @@ async function replaceAiPipelineData(pipeline, name) {
   map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   state.chartAnalysis = null; state.chartOptions = [];
-  const suggestions = prepareSuggestions(pipeline.analysis, pipeline.records, pipeline.validRowRate, { mapTilerAvailable: Boolean(CONFIG.MAPTILER_API_KEY), mapOnly: true });
+  const suggestions = prepareSuggestions(pipeline.analysis, pipeline.records, pipeline.validRowRate, { mapOnly: true });
   state.aiDataset = {
     ...pipeline,
     fileName: name,
@@ -2830,6 +2854,7 @@ async function replaceAiPipelineData(pipeline, name) {
     suggestions,
     selectedSuggestionId: null,
     geoAliases: {},
+    geoSelections: {},
     lineSelections: {},
     barSelections: {},
     barLimits: {},
@@ -2914,7 +2939,8 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   state.dataOrigin = "upload";
   if (preservePolygons) state.mapType = "polygon";
   else geoJSONToCells(data, Math.min(state.resolution, 3));
-  state.sourceBoundary = data; state.boundary = data; setupProvinceFilter(data);
+  state.sourceBoundary = data; state.boundary = data;
+  setupProvinceFilter(preserveAi ? EMPTY_FEATURE_COLLECTION : data);
   renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));
   state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData); applyHeatmapWeight();
   const features = data.type === "FeatureCollection" ? data.features : data.type === "Feature" ? [data] : [{ type: "Feature", properties: {}, geometry: data }];
@@ -3500,8 +3526,21 @@ function bindUI() {
     if (applyAliases) {
       const dataset = state.aiDataset; const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
       if (!dataset || suggestion?.chartType !== "choropleth") return;
-      dataset.geoAliases = Object.fromEntries([...document.querySelectorAll(".geo-alias-input")]
-        .map(input => [input.dataset.location, input.value.trim()]).filter(([, value]) => value));
+      dataset.geoAliases ||= {}; dataset.geoSelections ||= {};
+      const changedAliases = new Set();
+      for (const input of document.querySelectorAll(".geo-alias-input")) {
+        const name = input.dataset.location; const value = input.value.trim();
+        if (value !== (dataset.geoAliases[name] || "")) { delete dataset.geoSelections[name]; changedAliases.add(name); }
+        if (value) dataset.geoAliases[name] = value;
+        else delete dataset.geoAliases[name];
+      }
+      for (const choice of document.querySelectorAll(".geo-boundary-choice")) {
+        const name = choice.dataset.location;
+        if (changedAliases.has(name)) continue;
+        const feature = dataset.geoMatch?.candidates?.[name]?.find(candidate => candidate.id === choice.value);
+        if (feature) dataset.geoSelections[name] = feature;
+        else delete dataset.geoSelections[name];
+      }
       suggestion.available = true; suggestion.unavailableReason = "";
       activateAiChoropleth(suggestion).catch(error => { console.error(error); showToast(error.message); });
       return;

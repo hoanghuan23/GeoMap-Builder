@@ -66,7 +66,7 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
       __location: locationName,
       __metric: Number(recordProperties[metricField]),
       __record_count: group.records.length,
-      boundary_source: "MapTiler"
+      boundary_source: boundary.properties?.boundary_source || "MapTiler"
     };
     for (const [field, value] of Object.entries(properties)) {
       if (value instanceof Date) properties[field] = value.toISOString();

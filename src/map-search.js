@@ -14,18 +14,24 @@ const SEARCH_BOUNDARY_SOURCE = "map-search-boundary";
 const SEARCH_BOUNDARY_LINE = "map-search-boundary-line";
 const vietnamLandPromises = new Map();
 const mapTilerBoundaryCache = new Map();
+const mapTilerRegionCache = new Map();
 
-function normalizePlaceName(value) {
+export function normalizePlaceWords(value) {
   return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/gi, "d")
-    .replace(/[^a-z0-9]/gi, "")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
     .toLowerCase();
 }
 
+export function normalizePlaceName(value) {
+  return normalizePlaceWords(value).replace(/ /g, "");
+}
+
 function displayGadmName(value) {
-  return String(value || "").replace(/([a-zà-ỹ])([A-ZÀ-Ỹ])/g, "$1 $2");
+  return String(value || "").replace(/([\p{Ll}])([\p{Lu}])/gu, "$1 $2");
 }
 
 export function buildGeocodingUrl(query, apiKey, center) {
@@ -71,6 +77,27 @@ export async function getMapTilerFeature(id, { apiKey, signal, fetchImpl = fetch
   return Array.isArray(data.features) ? data.features[0] || null : null;
 }
 
+export async function getMapTilerRegion(center, { apiKey, signal, fetchImpl = fetch } = {}) {
+  if (!Array.isArray(center) || center.length < 2 || !center.slice(0, 2).every(Number.isFinite)) return null;
+  if (!apiKey) throw new Error("MAPTILER_API_KEY_MISSING");
+  const coordinates = center.slice(0, 2).join(",");
+  if (fetchImpl === fetch && mapTilerRegionCache.has(coordinates)) return mapTilerRegionCache.get(coordinates);
+  const url = new URL(`${MAPTILER_GEOCODING_URL}/${coordinates}.json`);
+  url.searchParams.set("key", apiKey);
+  url.searchParams.set("language", "vi");
+  url.searchParams.set("types", "region");
+  const response = await fetchImpl(url, { signal });
+  if (!response.ok) {
+    const error = new Error(`MapTiler region lookup failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+  const data = await response.json();
+  const region = (data.features || []).find(feature => feature.place_type?.includes("region")) || null;
+  if (region && fetchImpl === fetch) mapTilerRegionCache.set(coordinates, region);
+  return region;
+}
+
 export function isBoundaryFeature(feature) {
   return ["Polygon", "MultiPolygon"].includes(feature?.geometry?.type);
 }
@@ -106,8 +133,11 @@ export function buildProvinceGeocodingUrl(name, apiKey) {
   return buildAdministrativeGeocodingUrl(name, apiKey, "region");
 }
 
-function normalizedAdministrativeName(value) {
-  return normalizePlaceName(value).replace(/^(tinh|thanhpho|tp)/, "");
+export function normalizedAdministrativeName(value) {
+  // Preserve word boundaries so "quan" does not consume the start of "Quảng".
+  const name = normalizePlaceWords(value)
+    .replace(/^(?:tinh|thanh pho|tp|thu do|thi xa|thi tran|phuong|xa|quan|huyen)\s+(?=\S)/, "");
+  return normalizePlaceName(name);
 }
 
 function provinceCandidateScore(feature, name) {
@@ -316,6 +346,7 @@ export async function searchGadmBoundaries(query, { signal, fetchImpl = fetch, l
 
 export async function landOnlyBoundary(feature, { fetchImpl = fetch, signal, forceVietnam = false } = {}) {
   if (!isBoundaryFeature(feature)) return null;
+  if (feature.properties?.local_gadm) return feature;
   if (!forceVietnam && !isVietnamFeature(feature)) return feature;
   const level = gadmLevelForFeature(feature);
   const landData = await loadVietnamLand(level, fetchImpl, signal);
