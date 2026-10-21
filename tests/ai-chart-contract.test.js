@@ -46,6 +46,61 @@ test("strict schema requires nullable semantic and legend fields on every AI col
   }
 });
 
+test("popup recommendations have a compact per-map schema and survive server/client normalization", () => {
+  const suggestionSchema = ANALYSIS_RESPONSE_SCHEMA.properties.suggestions.items;
+  assert.ok(suggestionSchema.required.includes("popupSuggestions"));
+  const schema = suggestionSchema.properties.popupSuggestions;
+  assert.equal(schema.minItems, 1); assert.equal(schema.maxItems, 3);
+  assert.deepEqual(schema.items.required, ["name", "confidence"]);
+  assert.equal(schema.items.additionalProperties, false);
+  assert.deepEqual(schema.items.properties.name.enum, ["info", "bar", "line"]);
+  assert.equal(schema.items.properties.confidence.minimum, 0);
+  assert.equal(schema.items.properties.confidence.maximum, 1);
+  const dataProfile = { ...profile, columns: [...profile.columns,
+    { name: "lat", inferredType: "number" }, { name: "lng", inferredType: "number" }] };
+  const specs = [
+    { id: "areas", chartType: "choropleth", bindings: { region: "province", value: "temperature" },
+      popupSuggestions: [{ name: "line", confidence: .96 }, { name: "info", confidence: .91 }] },
+    { id: "roads", chartType: "map_line", bindings: { region: "province", value: "temperature" },
+      popupSuggestions: [{ name: "bar", confidence: .78 }] },
+    { id: "points", chartType: "point", bindings: { lat: "lat", lng: "lng" },
+      popupSuggestions: [{ name: "info", confidence: .9 }] }
+  ];
+  const server = validateAndNormalizeAnalysis({ columns: [], suggestions: specs }, dataProfile);
+  assert.equal(server.source, "ai");
+  assert.deepEqual(server.suggestions.map(item => item.popupSuggestions), specs.map(item => item.popupSuggestions));
+  assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), dataProfile), server);
+});
+
+test("popup normalization drops invalid entries, keeps the best duplicate and preserves tie order", () => {
+  const raw = { columns: [], suggestions: [{ id: "map", chartType: "choropleth",
+    bindings: { region: "province", value: "temperature" }, popupSuggestions: [
+      { name: "line", confidence: .4 }, { name: "info", confidence: .8, reason: "discard extra keys" },
+      { name: "bar", confidence: .8 }, { name: "line", confidence: .8 }, { name: "bar", confidence: .6 },
+      { name: "pie", confidence: 1 }, { name: "info", confidence: "1" }, { name: "bar", confidence: -1 },
+      { name: "line", confidence: 1.1 }, { name: "info", confidence: NaN }, { name: "bar", confidence: Infinity },
+      { name: "line", confidence: true }, null, "info", {}
+    ] }] };
+  const result = validateAndNormalizeAnalysis(raw, profile);
+  assert.deepEqual(result.suggestions[0].popupSuggestions, [
+    { name: "line", confidence: .8 }, { name: "info", confidence: .8 }, { name: "bar", confidence: .8 }
+  ]);
+  raw.suggestions[0].popupSuggestions = [{ name: "bar", confidence: 0 }, { name: "info", confidence: 1 }];
+  assert.deepEqual(validateAndNormalizeAnalysis(raw, profile).suggestions[0].popupSuggestions,
+    [{ name: "info", confidence: 1 }, { name: "bar", confidence: 0 }]);
+});
+
+test("missing or invalid popup output keeps valid maps and normalizes to an empty fallback list", () => {
+  for (const popupSuggestions of [undefined, null, [], {}, "line", [{ name: "pie", confidence: .9 }]]) {
+    const result = validateAndNormalizeAnalysis({ columns: [], suggestions: [{ id: "map", chartType: "choropleth",
+      bindings: { region: "province", value: "temperature" }, popupSuggestions }] }, profile);
+    assert.equal(result.source, "ai"); assert.equal(result.suggestions[0].id, "map");
+    assert.deepEqual(result.suggestions[0].popupSuggestions, []);
+    assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(result)), profile), result);
+  }
+  assert.ok(fallbackAnalysis(profile).suggestions.every(item => item.popupSuggestions.length === 0));
+});
+
 test("data units and provenance survive legacy legend fallback through server/client normalization", () => {
   const specs = [
     { name: "Nhiệt độ", unit: "°C", unitSource: "inferred" },

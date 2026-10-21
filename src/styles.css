@@ -492,6 +492,7 @@ button {
 .ai-popup-type-icon svg { width: 20px; height: 20px; }
 .ai-popup-type:not(.active) .chart-type-icon { filter: grayscale(1); }
 .ai-popup-type.active .ai-popup-type-icon { color: #00b85a; }
+.ai-popup-type-score { flex: none; padding: 2px 5px; border-radius: 4px; background: #eef5ff; color: var(--blue); font-size: 10px; font-weight: 600; }
 .ai-popup-type-check { color: #00b85a; visibility: hidden; font-size: 15px; }
 .ai-popup-type.active .ai-popup-type-check { visibility: visible; }
 .ai-popup-map-controls, .ai-popup-settings { display: flex; flex-direction: column; gap: 12px; }

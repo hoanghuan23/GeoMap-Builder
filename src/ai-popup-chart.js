@@ -5,6 +5,7 @@ import { roadAreaField, roadNetworkForArea, roadRefField } from "./road-map-data
 import { normalizeRoadText } from "./congestion-data.js";
 import { isCoordinateLine, pointIdentity, pointTitleField } from "./coordinate-data.js";
 import { administrativeContextFields } from "./geographic-grain.js";
+import { normalizePopupSuggestions } from "./ai-chart-contract.js";
 
 export function mapDisplaySuggestions(suggestions = [], selectedSuggestionId = null) {
   return suggestions.filter(item => ["choropleth", "map_line", "point"].includes(item.chartType));
@@ -17,6 +18,19 @@ export function popupTimeColumn(columns = []) {
 export function popupChartColumns(columns, bindings = {}) {
   const dimensions = new Set([bindings.lat, bindings.lng, bindings.x]);
   return columns.map(column => column.role === "measure" && dimensions.has(column.name) ? { ...column, role: "ignore" } : column);
+}
+
+export function popupDisplayOptions(suggestion, columns = []) {
+  const chartColumns = popupChartColumns(columns, suggestion?.bindings);
+  const time = popupTimeColumn(chartColumns);
+  const hasMeasure = chartColumns.some(column => column.role === "measure");
+  const options = normalizePopupSuggestions(suggestion?.popupSuggestions).map(item => {
+    const unavailableReason = item.name !== "line" ? "" : !time ? "Cần cột thời gian để vẽ biểu đồ đường"
+      : !hasMeasure ? "Cần chỉ số đo hợp lệ để vẽ biểu đồ đường" : "";
+    return { ...item, available: !unavailableReason, unavailableReason, fallback: false };
+  });
+  return options.some(item => item.available) ? options
+    : [{ name: "info", confidence: null, available: true, unavailableReason: "", fallback: true }];
 }
 
 export function createPopupChartSelection(records, columns, metricField, kind, bindings = {}) {

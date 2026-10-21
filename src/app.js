@@ -36,7 +36,7 @@ import { createAiPopupContent } from "./ai-popup.js";
 import { administrativeContextFields, geographicLocationName, applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
 import { compareTimeValues, filterTimeRange, formatTimeValue, timeValueInfo, uniqueTimeValues } from "./time-values.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
-import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupChartColumns, popupFeaturesMatch, popupTimeColumn } from "./ai-popup-chart.js";
+import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupChartColumns, popupDisplayOptions, popupFeaturesMatch, popupTimeColumn } from "./ai-popup-chart.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-client.js";
 import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
 import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
@@ -925,7 +925,9 @@ function activeMapPopupSuggestion() {
 function popupSelectionFor(suggestion = activeMapPopupSuggestion()) {
   const dataset = state.aiDataset;
   dataset.popupSelections ||= {};
-  const selection = dataset.popupSelections[suggestion.id] ||= { mode: "info", bar: null, line: null };
+  const available = popupDisplayOptions(suggestion, dataset.analysis.columns).filter(item => item.available);
+  const selection = dataset.popupSelections[suggestion.id] ||= { mode: available[0].name, bar: null, line: null };
+  if (!available.some(item => item.name === selection.mode)) selection.mode = available[0].name;
   if (selection.mode !== "info" && !selection[selection.mode]) {
     const metric = suggestion.chartType === "point" ? pointSelectionFor(suggestion).metricField : dataset.recommendation.metricField;
     selection[selection.mode] = createPopupChartSelection(dataset.records, dataset.analysis.columns, metric, selection.mode, suggestion.bindings);
@@ -1888,26 +1890,36 @@ function buildMapPopupControls(dataset, suggestion) {
   const types = document.createElement("div");
   types.className = "ai-popup-types";
   types.setAttribute("role", "group"); types.setAttribute("aria-label", "Kiểu hiển thị popup");
-  const time = popupTimeColumn(columns);
   const subject = suggestion.chartType === "map_line" ? "tuyến" : suggestion.chartType === "point" ? "điểm" : "vùng";
-  for (const [mode, label, description, iconName] of [
-    ["info", "Chỉ hiển thị thông tin", "Hiển thị các chỉ số dưới dạng thẻ thông tin", null],
-    ["bar", "Biểu đồ cột", `Hiển thị biểu đồ cột của ${subject} được chọn`, "singleBar"],
-    ["line", "Biểu đồ đường", time ? `Hiển thị biểu đồ đường của ${subject} được chọn` : "Cần cột thời gian để vẽ biểu đồ đường", "line"]
-  ]) {
+  const labels = {
+    info: ["Chỉ hiển thị thông tin", "Hiển thị các chỉ số dưới dạng thẻ thông tin", null],
+    bar: ["Biểu đồ cột", `Hiển thị biểu đồ cột của ${subject} được chọn`, "singleBar"],
+    line: ["Biểu đồ đường", `Hiển thị biểu đồ đường của ${subject} được chọn`, "line"]
+  };
+  for (const option of popupDisplayOptions(suggestion, columns)) {
+    const mode = option.name;
+    const [label, description, iconName] = labels[mode];
     const button = document.createElement("button"); const icon = document.createElement("span");
     const copy = document.createElement("span"); const title = document.createElement("b");
     const detail = document.createElement("small"); const check = document.createElement("span");
     button.type = "button"; button.className = `ai-popup-type${selection.mode === mode ? " active" : ""}`;
     button.dataset.popupMode = mode; button.setAttribute("aria-pressed", String(selection.mode === mode));
-    button.disabled = mode === "line" && !time;
-    if (button.disabled) button.title = description;
+    button.disabled = !option.available;
+    if (button.disabled) button.title = option.unavailableReason;
     icon.className = "ai-popup-type-icon"; icon.setAttribute("aria-hidden", "true");
     if (iconName) { renderChartIcon(icon, iconName); icon.className = "chart-type-icon ai-popup-type-icon"; }
     else icon.textContent = "▦";
-    title.textContent = label; detail.textContent = description; copy.append(title, detail);
+    title.textContent = option.fallback ? "Hiển thị mặc định" : label;
+    detail.textContent = option.unavailableReason || description; copy.append(title, detail);
     check.className = "ai-popup-type-check"; check.textContent = "✓"; check.setAttribute("aria-hidden", "true");
-    button.append(icon, copy, check); types.append(button);
+    button.append(icon, copy);
+    if (Number.isFinite(option.confidence)) {
+      const score = document.createElement("span"); score.className = "ai-popup-type-score";
+      score.textContent = `${Math.round(option.confidence * 100)}%`;
+      score.setAttribute("aria-label", `Độ phù hợp do AI đề xuất: ${score.textContent}`);
+      button.append(score);
+    }
+    button.append(check); types.append(button);
   }
   group.append(caption, types);
   const nodes = [group];

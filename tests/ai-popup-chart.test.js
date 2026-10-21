@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions } from "../src/ai-popup-chart.js";
+import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupDisplayOptions } from "../src/ai-popup-chart.js";
 import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 import { normalizeLineChartConfig } from "../src/charts/line-chart.js";
 import { buildRegionHexGrid } from "../src/region-hex-grid.js";
@@ -22,6 +22,31 @@ const feature = { type: "Feature", properties: { region: "A", __location: "A", d
   geometry: { type: "Polygon", coordinates: [[[105.7, 20.9], [105.9, 20.9], [105.9, 21.1], [105.7, 21.1], [105.7, 20.9]]] } };
 const chart = (kind, overrides = {}) => buildPopupChart({ records, columns, feature, regionField: "region", kind,
   selection: createPopupChartSelection(records, columns, "temperature", kind), ...overrides });
+
+test("popup choices follow only the active map's AI ranking without a confidence cutoff", () => {
+  const options = popupDisplayOptions({ popupSuggestions: [{ name: "info", confidence: 0 }, { name: "line", confidence: .2 }] }, columns);
+  assert.deepEqual(options.map(item => item.name), ["line", "info"]);
+  assert.ok(options.every(item => item.available && !item.fallback));
+  const bar = popupDisplayOptions({ popupSuggestions: [{ name: "bar", confidence: 0 }] }, []);
+  assert.equal(bar[0].name, "bar"); assert.equal(bar[0].available, true, "bar supports counting records without measures");
+});
+
+test("structurally impossible line choices are disabled or yield information fallback", () => {
+  const popupSuggestions = [{ name: "line", confidence: .99 }, { name: "info", confidence: .9 }];
+  const noTime = popupDisplayOptions({ popupSuggestions }, columns.filter(column => column.role !== "time"));
+  assert.equal(noTime[0].available, false); assert.match(noTime[0].unavailableReason, /thời gian/);
+  assert.equal(noTime[1].available, true);
+  const noMeasures = popupDisplayOptions({ popupSuggestions, bindings: { lat: "lat", lng: "lng", x: "order" } }, [
+    { name: "date", role: "time" }, ...["lat", "lng", "order"].map(name => ({ name, role: "measure" }))
+  ]);
+  assert.equal(noMeasures[0].available, false); assert.match(noMeasures[0].unavailableReason, /chỉ số đo/);
+  for (const suggestion of [{}, { popupSuggestions: [] }, { popupSuggestions: "line" },
+    { popupSuggestions: [{ name: "pie", confidence: .99 }] }, { popupSuggestions: [popupSuggestions[0]] }]) {
+    assert.deepEqual(popupDisplayOptions(suggestion, []), [
+      { name: "info", confidence: null, available: true, unavailableReason: "", fallback: true }
+    ]);
+  }
+});
 
 test("input suggestions contain only Polygon, Line and Point, including unavailable maps", () => {
   const suggestions = ["line", "choropleth", "bar", "point", "hex_h3", "map_line"].map(chartType => ({ id: chartType, chartType, available: chartType !== "choropleth" }));

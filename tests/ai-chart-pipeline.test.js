@@ -13,6 +13,20 @@ const columns = [
   { name: "rain", role: "measure", aggDefault: "sum", unit: "mm" }
 ];
 
+test("map feasibility preserves its own popup recommendations through preparation", () => {
+  const popupSuggestions = [{ name: "line", confidence: .96 }, { name: "info", confidence: .91 }];
+  const records = ["A", "B"].map(province => ({ province, date: new Date("2026-09-01"), rain: 10 }));
+  const analysis = { columns, suggestions: [{ id: "map", chartType: "choropleth", confidence: .9,
+    bindings: { region: "province", value: "rain" }, popupSuggestions }] };
+  const result = prepareSuggestions(analysis, records, { province: 1, date: 1, rain: 1 }, { mapOnly: true });
+  assert.deepEqual(result[0].popupSuggestions, popupSuggestions);
+  assert.equal(result[0].available, true);
+  const rule = prepareSuggestions({ columns: columns.map(column => column.role === "geo" ? { ...column, geoLevel: "admin1" } : column),
+    suggestions: [] }, records, { province: 1, date: 1, rain: 1 }, { mapOnly: true });
+  assert.equal(rule[0].source, "rule");
+  assert.equal(rule[0].popupSuggestions, undefined, "generated maps do not invent AI scores");
+});
+
 test("bar aggregate theo nhóm và gộp phần dư thành Khác", () => {
   const records = Array.from({ length: 15 }, (_, index) => ({ province: `P${index}`, rain: index + 1 }));
   const option = buildBarChartOption({ id: "bar", title: "Mưa", reason: "", bindings: { x: "province", y: "rain" }, agg: "sum" }, records, columns, { top: 3 });

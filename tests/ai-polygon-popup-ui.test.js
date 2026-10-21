@@ -48,6 +48,7 @@ class Element {
 }
 
 function harness({ road = false, point = false, path = false, thematic = false, storeNameRole = "category", pointRecords = storeRecords,
+  popupSuggestions = [{ name: "info", confidence: .95 }, { name: "bar", confidence: .9 }, { name: "line", confidence: .85 }],
   fetchImpl = () => assert.fail("map interactions must not call AI"), boundaryLoader = loadAdministrativeBoundaries,
   boundaryClipper = async boundary => boundary } = {}) {
   const elements = new Map(); const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -117,6 +118,8 @@ function harness({ road = false, point = false, path = false, thematic = false, 
     dataset.suggestions = [{ id: "path", chartType: "map_line", available: true, bindings: { lat: "lat", lng: "lng" } }];
     dataset.selectedSuggestionId = "path";
   }
+  if (popupSuggestions !== null) dataset.suggestions = dataset.suggestions.map(suggestion => ({ ...suggestion,
+    popupSuggestions: popupSuggestions.map(item => ({ ...item })) }));
   const context = vm.createContext({
     ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract,
     fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
@@ -211,7 +214,8 @@ test("one upload analysis supplies legends before polygon activation and subsequ
     columns: h.dataset.analysis.columns.map(column => ({ ...column,
       geoLevel: column.role === "geo" ? "admin1" : null,
       legend: column.role === "measure" ? legendFixture({ aggregation: column.aggDefault }) : null })),
-    suggestions: [{ ...h.dataset.suggestions[1], agg: "mean", legend: null }]
+    suggestions: [{ ...h.dataset.suggestions[1], agg: "mean", legend: null,
+      popupSuggestions: [{ name: "line", confidence: .96 }, { name: "bar", confidence: .78 }] }]
   };
   globalThis.fetch = async (url, options) => {
     requests.push(url); assert.equal(url, "/api/ai/analyze-map-data");
@@ -228,12 +232,16 @@ test("one upload analysis supplies legends before polygon activation and subsequ
       dataset.records = result.pipeline.records; dataset.analysis = result.pipeline.analysis;
       dataset.suggestions = result.pipeline.analysis.suggestions.map(item => ({...item, available:true, feasibilityScore:1}));
       dataset.selectedSuggestionId = dataset.suggestions[0].id;
+      dataset.popupSelections = {};
       replaceBoundary = async data => { state.boundary = data; state.dataProfile = analyzeSpatialData(data); };
       await activateAiChoropleth(dataset.suggestions[0]);
     })()`);
     assert.equal(h.run("activePolygonLegendScale().source"), "ai");
     assert.equal(h.run("activePolygonLegendScale().max"), 40);
     assert.equal(h.run("activePolygonLegendScale() === activePolygonLegendScale()"), true);
+    assert.equal(h.run("popupSelectionFor().mode"), "line");
+    h.run("openMapPopup(state.boundary.features[0], [105,21])");
+    h.mode("bar");
     const metric = h.all(".ai-metric-selector")[0]; metric.value = "minimum"; await h.change(metric);
     const time = h.all(".ai-generated-filter")[0]; time.value = "2026-09-01T00:00:00.000Z"; await h.change(time);
     h.run("state.regionHexEnabled=true; applyStyle(); applyMapLayerVisibility();");
@@ -243,6 +251,7 @@ test("one upload analysis supplies legends before polygon activation and subsequ
     h.run("state.regionHexEnabled=false; dataset.geoAliases={A:'A'}; applyStyle();");
     await h.run("activateAiChoropleth(dataset.suggestions[0])");
     assert.equal(h.run("activePolygonLegendScale().source"), "ai");
+    assert.equal(h.run("popupSelectionFor().mode"), "bar");
     assert.deepEqual(requests, ["/api/ai/analyze-map-data"]);
   } finally { globalThis.fetch = originalFetch; }
 });
@@ -284,6 +293,104 @@ test("polygon defaults to information with map controls and accurate map-only su
   h.run("renderAiSuggestionGrid()");
   assert.match(h.get("map-type-summary").textContent, /1 đề xuất/);
   assert.equal(h.get("map-type-grid").children[1].children[1].textContent, AI_CHART_REGISTRY.choropleth.label);
+});
+
+test("Polygon, Line and Point show only their AI-ranked popup choices and initialize their own default", () => {
+  for (const [mapOptions, popupSuggestions, names, initial] of [
+    [{}, [{ name: "info", confidence: .91 }, { name: "line", confidence: .96 }], ["line", "info"], "line"],
+    [{ road: true }, [{ name: "bar", confidence: .78 }], ["bar"], "bar"],
+    [{ point: true }, [{ name: "info", confidence: 0 }], ["info"], "info"]
+  ]) {
+    const h = harness({ ...mapOptions, popupSuggestions });
+    assert.deepEqual(h.all(".ai-popup-type").map(button => button.dataset.popupMode), names);
+    assert.equal(h.run("popupSelectionFor().mode"), initial);
+    assert.equal(h.all(".ai-popup-type")[0].attributes["aria-pressed"], "true");
+    assert.equal(h.all(".ai-popup-type")[0].disabled, false);
+    assert.equal(h.all(".ai-popup-type-score")[0].textContent,
+      `${Math.round(Math.max(...popupSuggestions.map(item => item.confidence)) * 100)}%`);
+    assert.equal(h.all(".ai-popup-settings").length, initial === "info" ? 0 : 1);
+  }
+});
+
+test("missing, invalid or entirely impossible popup proposals show only unscored information fallback", () => {
+  for (const popupSuggestions of [null, [], [{ name: "pie", confidence: .99 }], [{ name: "info", confidence: "1" }]]) {
+    const h = harness({ popupSuggestions });
+    assert.deepEqual(h.all(".ai-popup-type").map(button => button.dataset.popupMode), ["info"]);
+    assert.equal(h.all(".ai-popup-type")[0].children[1].children[0].textContent, "Hiển thị mặc định");
+    assert.equal(h.all(".ai-popup-type-score").length, 0);
+    assert.equal(h.run("popupSelectionFor().mode"), "info");
+    h.run("openMapPopup(testFeatures[0], [105,21])");
+    assert.equal(h.popups[0].card.children.length, 2);
+  }
+  const h = harness({ popupSuggestions: [{ name: "line", confidence: .99 }] });
+  h.dataset.analysis.columns = h.dataset.analysis.columns.filter(column => column.role !== "time");
+  h.run("populateAiFilters(dataset)");
+  assert.deepEqual(h.all(".ai-popup-type").map(button => button.dataset.popupMode), ["info"]);
+  assert.equal(h.all(".ai-popup-type-score").length, 0);
+  assert.equal(h.all(".ai-popup-settings").length, 0);
+});
+
+test("an impossible higher-ranked line stays disabled while the next available proposal is selected", () => {
+  const h = harness({ popupSuggestions: [{ name: "line", confidence: .99 }, { name: "bar", confidence: .1 }] });
+  h.dataset.analysis.columns = h.dataset.analysis.columns.filter(column => column.role !== "time");
+  h.run("populateAiFilters(dataset)");
+  assert.deepEqual(h.all(".ai-popup-type").map(button => button.dataset.popupMode), ["line", "bar"]);
+  assert.equal(h.all(".ai-popup-type")[0].disabled, true);
+  assert.match(h.all(".ai-popup-type")[0].title, /thời gian/);
+  assert.equal(h.run("popupSelectionFor().mode"), "bar");
+  assert.equal(h.all(".ai-popup-type")[1].attributes["aria-pressed"], "true");
+});
+
+test("changing maps keeps manual popup choices and chart settings scoped to each suggestion", () => {
+  const h = harness({ point: true, popupSuggestions: [
+    { name: "line", confidence: .96 }, { name: "bar", confidence: .8 }, { name: "info", confidence: .7 }
+  ] });
+  h.mode("bar");
+  const aggregation = h.all(".ai-popup-aggregation")[0]; aggregation.value = "mean"; h.change(aggregation);
+  const saved = h.run("JSON.stringify(popupSelectionFor())");
+  h.run(`
+    dataset.suggestions[1].popupSuggestions=[{name:'info',confidence:1}];
+    dataset.selectedSuggestionId='cities'; dataset.recommendation=recommendationForSuggestion(dataset.suggestions[1]);
+    populateAiFilters(dataset);
+  `);
+  assert.deepEqual(h.all(".ai-popup-type").map(button => button.dataset.popupMode), ["info"]);
+  assert.equal(h.run("popupSelectionFor().mode"), "info");
+  h.run("showChartStyleControls=()=>{}; dataset.selectedSuggestionId='stores'; activateAiPoint(dataset.suggestions[0]);");
+  assert.equal(h.run("JSON.stringify(popupSelectionFor())"), saved);
+  assert.equal(h.all(".ai-popup-aggregation")[0].value, "mean");
+  assert.equal(h.all(".ai-popup-type").find(button => button.dataset.popupMode === "bar").attributes["aria-pressed"], "true");
+});
+
+test("AI-default line remains selected for sparse objects and empty chart ranges", () => {
+  const h = harness({ popupSuggestions: [{ name: "line", confidence: .96 }] });
+  h.dataset.records.forEach(record => { if (record.region === "A" && record.date.getUTCDate() !== 1) record.temperature = null; });
+  h.run("openMapPopup(testFeatures[0], [105,21])");
+  assert.equal(h.run("popupSelectionFor().mode"), "line");
+  assert.match(h.popups[0].card.children[0].textContent, /hai mốc/);
+  assert.equal(h.rendered.length, 0);
+  h.run("openMapPopup(testFeatures[1], [106,21])");
+  assert.equal(h.rendered.at(-1).kind, "line");
+  h.run("popupSelectionFor().line.from='2027-01-01'; popupSelectionFor().line.to='2027-01-02'; refreshMapPopup();");
+  assert.match(h.popups.at(-1).card.children[0].textContent, /khoảng thời gian/);
+  assert.equal(h.run("popupSelectionFor().mode"), "line");
+});
+
+test("a replacement upload chooses its AI default instead of the previous manual popup mode", async () => {
+  const h = harness({ popupSuggestions: [{ name: "line", confidence: .96 }, { name: "bar", confidence: .8 }] });
+  h.mode("bar"); h.run("openMapPopup(testFeatures[0], [105,21])");
+  h.run(`
+    showChartStyleControls = () => {};
+    selectAiSuggestion = async id => {
+      const suggestion=state.aiDataset.suggestions.find(item=>item.id===id);
+      state.aiDataset.selectedSuggestionId=id; state.aiDataset.recommendation=recommendationForSuggestion(suggestion);
+      populateAiFilters(state.aiDataset); return true;
+    };
+  `);
+  await h.run("replaceAiPipelineData({records:dataset.records,analysis:{...dataset.analysis,suggestions:dataset.suggestions},validRowRate:{region:1,date:1,temperature:1,minimum:1}}, 'new.csv')");
+  assert.equal(h.run("popupSelectionFor().mode"), "line");
+  assert.equal(h.run("popupSelectionFor().bar"), null);
+  assert.equal(h.popups[0].removed, true);
+  assert.equal(h.all(".ai-popup-type")[0].attributes["aria-pressed"], "true");
 });
 
 test("polygon filters geographic and categorical columns with cascading choices regardless of field names", async () => {

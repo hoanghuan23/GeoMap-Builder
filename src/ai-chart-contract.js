@@ -6,6 +6,19 @@ import { normalizeDataSearchConfig } from "./data-search-config.js";
 
 const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "text", "ignore"]);
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
+const POPUP_TYPES = Object.freeze(["info", "bar", "line"]);
+
+export function normalizePopupSuggestions(raw) {
+  const byName = new Map();
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (!item || !POPUP_TYPES.includes(item.name) || !Number.isFinite(item.confidence)
+      || item.confidence < 0 || item.confidence > 1) continue;
+    const previous = byName.get(item.name);
+    if (!previous || item.confidence > previous.confidence) byName.set(item.name, { name: item.name, confidence: item.confidence });
+  }
+  // Map preserves the first occurrence when duplicate entries have their score updated.
+  return [...byName.values()].sort((a, b) => b.confidence - a.confidence);
+}
 
 const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area|state)/i;
 const ADMINISTRATIVE_LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|khu vực|region|area|state)/i;
@@ -106,7 +119,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend"],
+        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend", "popupSuggestions"],
         properties: {
           id: { type: "string" },
           chartType: { type: "string", enum: Object.keys(AI_MAP_REGISTRY) },
@@ -128,7 +141,17 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
           agg: nullable({ type: "string", enum: AGG_VALUES }),
           confidence: { type: "number", minimum: 0, maximum: 1 },
           reason: { type: "string" },
-          legend: LEGEND_SCHEMA
+          legend: LEGEND_SCHEMA,
+          popupSuggestions: {
+            type: "array", minItems: 1, maxItems: POPUP_TYPES.length,
+            items: {
+              type: "object", additionalProperties: false, required: ["name", "confidence"],
+              properties: {
+                name: { type: "string", enum: POPUP_TYPES },
+                confidence: { type: "number", minimum: 0, maximum: 1 }
+              }
+            }
+          }
         }
       }
     }
@@ -248,6 +271,7 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds) {
     confidence: Math.min(1, Math.max(0, Number(raw.confidence) || 0)),
     reason: typeof raw.reason === "string" ? raw.reason.trim() : "",
     legend: raw.chartType === "choropleth" ? raw.legend ?? null : null,
+    popupSuggestions: normalizePopupSuggestions(raw.popupSuggestions),
     source: "ai"
   };
 }
@@ -273,7 +297,8 @@ export function fallbackAnalysis(profile, { datasetTitle = "Dữ liệu tải l�
   if (time && measures.length) suggestions.push({ id: "rule-line", chartType: "line", title: `Xu hướng theo ${time.name}`, bindings: { x: time.name, y: [measures[0].name], ...(groupingRegion || category ? { series: (groupingRegion || category).name } : {}) }, agg: null, confidence: .68, reason: "Nhận diện theo quy tắc từ cột thời gian và chỉ số số.", source: "rule" });
   const x = groupingRegion || category || region;
   if (x) suggestions.push({ id: "rule-bar", chartType: "bar", title: measures[0] ? `${measures[0].name} theo ${x.name}` : `Số bản ghi theo ${x.name}`, bindings: { x: x.name, y: measures[0]?.name || "count" }, agg: measures[0] ? measures[0].aggDefault : "count", confidence: .65, reason: "Nhận diện theo quy tắc từ cột phân loại.", source: "rule" });
-  return { datasetTitle, grain: "Một dòng tương ứng một bản ghi dữ liệu", columns, suggestions, source: "rule" };
+  return { datasetTitle, grain: "Một dòng tương ứng một bản ghi dữ liệu", columns,
+    suggestions: suggestions.map(suggestion => ({ ...suggestion, popupSuggestions: [] })), source: "rule" };
 }
 
 export function validateAndNormalizeAnalysis(raw, profile) {

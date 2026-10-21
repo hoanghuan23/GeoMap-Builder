@@ -22,6 +22,7 @@ async function call(middleware, body, path = "/api/ai/analyze-map-data") {
 test("middleware forwards per-column temperature semantics and legends without changing the input contract", async () => {
   const originalFetch = globalThis.fetch;
   const legend = legendFixture();
+  const popupSuggestions = [{ name: "line", confidence: .96 }, { name: "info", confidence: .91 }];
   let calls = 0;
   const profile = { rowCount: 2, columns: [
     { name: "province", inferredType: "text", uniqueCount: 2 },
@@ -52,10 +53,15 @@ test("middleware forwards per-column temperature semantics and legends without c
     assert.ok(payload.text.format.schema.required.includes("search_fields"));
     assert.match(payload.instructions, /không áp ngưỡng 30 cứng/);
     assert.match(payload.instructions, /Đặt tên định danh chính ở đầu/);
+    const suggestionSchema = payload.text.format.schema.properties.suggestions.items;
+    assert.ok(suggestionSchema.required.includes("popupSuggestions"));
+    assert.deepEqual(suggestionSchema.properties.popupSuggestions.items.required, ["name", "confidence"]);
+    assert.match(payload.instructions, /bar\/line được phép trong popupSuggestions/);
+    assert.match(payload.instructions, /MỘT đối tượng được bấm/);
     return { ok: true, json: async () => ({ output_text: JSON.stringify({
       search_bar: true, search_fields: ["province", "temperature", "not_in_input", "province"],
       columns: [{ name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", semanticType: "air_temperature", legend }],
-      suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend }]
+      suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend, popupSuggestions }]
     }) }) };
   };
   try {
@@ -66,6 +72,7 @@ test("middleware forwards per-column temperature semantics and legends without c
     assert.deepEqual(response.body.search_fields, ["province"]);
     assert.deepEqual(response.body.columns[1].legend, legend);
     assert.deepEqual(response.body.suggestions[0].legend, legend);
+    assert.deepEqual(response.body.suggestions[0].popupSuggestions, popupSuggestions);
     assert.equal(response.body.columns[1].semanticType, "air_temperature");
   } finally { globalThis.fetch = originalFetch; }
 });
