@@ -62,7 +62,7 @@ test("data units and provenance survive legacy legend fallback through server/cl
   assert.ok(client.columns.every(column => column.legend === null));
 });
 
-test("v2 suggestion legends seed only their own matching column default and survive two normalizations", () => {
+test("compact suggestion legends seed only their own matching column default and survive two normalizations", () => {
   const legend = legendFixture({ unit: "Celsius" });
   const raw = {
     columns: [{ name: "temperature", role: "measure", semanticType: "custom_measure", unit: "℃", aggDefault: "mean" },
@@ -72,13 +72,14 @@ test("v2 suggestion legends seed only their own matching column default and surv
   const server = validateAndNormalizeAnalysis(raw, profile);
   assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), profile), server);
   assert.equal(server.columns[2].semanticType, "custom_measure");
-  assert.equal(server.columns[2].legend.legendSchemaVersion, 2);
+  assert.equal(Object.hasOwn(server.columns[2].legend, "legendSchemaVersion"), false);
+  assert.equal(Object.hasOwn(server.columns[2].legend, "field"), false);
   assert.equal(server.columns[2].unit, "°C");
   assert.deepEqual(server.suggestions[0].legend, server.columns[2].legend);
   assert.equal(server.columns[3].legend, null); assert.equal(server.columns[3].semanticType, null);
 });
 
-test("invalid v2 legend falls back independently without removing a valid choropleth", () => {
+test("invalid legend falls back independently without removing a valid choropleth", () => {
   for (const patch of [{ unit: null }, { legend: legendFixture({ field: "other" }) }, { legend: legendFixture({ stops: [] }) }]) {
     const column = { name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", legend: legendFixture(), ...patch };
     const result = validateAndNormalizeAnalysis({ columns: [column],
@@ -340,7 +341,7 @@ test("relative auto stops and units survive server/client normalization for ever
   const dataProfile = { rowCount: 2, columns: [{ name: "province", inferredType: "text" },
     ...columns.map(({ name }) => ({ name, inferredType: "number" }))] };
   const raw = { columns: columns.map(column => ({ ...column,
-    legend: legendFixture({ field: column.name, aggregation: column.aggDefault, unit: column.unit, mode: "auto",
+    legend: legendFixture({ aggregation: column.aggDefault, unit: column.unit, mode: "auto",
       domain: [0, 1], stops: [{ value: 0, color: "#000000" }, { value: .2, color: "#808080" }, { value: 1, color: "#ffffff" }] }) })),
     suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend: null }] };
   const server = validateAndNormalizeAnalysis(raw, dataProfile);

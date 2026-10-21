@@ -40,6 +40,14 @@ test("middleware forwards per-column temperature semantics and legends without c
     const columnSchema = payload.text.format.schema.properties.columns.items;
     assert.ok(columnSchema.required.includes("semanticType"));
     assert.ok(columnSchema.required.includes("legend"));
+    for (const parent of [columnSchema, payload.text.format.schema.properties.suggestions.items]) {
+      for (const legendSchema of parent.properties.legend.anyOf.filter(schema => schema.type === "object")) {
+        for (const key of ["legendSchemaVersion", "field"]) {
+          assert.equal(Object.hasOwn(legendSchema.properties, key), false);
+          assert.equal(legendSchema.required.includes(key), false);
+        }
+      }
+    }
     assert.ok(payload.text.format.schema.required.includes("search_bar"));
     assert.ok(payload.text.format.schema.required.includes("search_fields"));
     assert.match(payload.instructions, /không áp ngưỡng 30 cứng/);
@@ -82,7 +90,7 @@ test("metadata keeps generic data units and supplies auto legends in the analysi
     assert.ok(schema.columns.items.required.includes("unitSource"));
     return { ok: true, json: async () => ({ output_text: JSON.stringify({
       columns: expected.map(([name, unit]) => ({ name, role: "measure", unit,
-        aggDefault: "mean", legend: legendFixture({ field: name, unit, mode: "auto", domain: [0, 1],
+        aggDefault: "mean", legend: legendFixture({ unit, mode: "auto", domain: [0, 1],
           stops: [{ value: 0, color: "#000000" }, { value: 1, color: "#ffffff" }] }) })), suggestions: []
     }) }) };
   };

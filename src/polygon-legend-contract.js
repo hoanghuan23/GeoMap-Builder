@@ -1,16 +1,14 @@
 import { AGGREGATION_VALUES, measureAggregation } from "./measure-semantics.js";
 
-export const LEGEND_SCHEMA_VERSION = 2;
 export const LEGEND_MAX_STOPS = 12;
 const nullable = schema => ({ anyOf: [schema, { type: "null" }] });
-const LEGEND_KEYS = ["legendSchemaVersion", "field", "aggregation", "type", "mode", "title", "unit", "domain", "center", "stops", "reason"];
+const LEGEND_KEYS = ["aggregation", "type", "mode", "title", "unit", "domain", "center", "stops", "reason"];
+const LEGACY_LEGEND_KEYS = ["legendSchemaVersion", "field"];
 
 function legendSchema(type) {
   return {
     type: "object", additionalProperties: false, required: LEGEND_KEYS,
     properties: {
-      legendSchemaVersion: { type: "integer", enum: [LEGEND_SCHEMA_VERSION] },
-      field: { type: "string" },
       aggregation: nullable({ type: "string", enum: AGGREGATION_VALUES }),
       type: { type: "string", enum: [type] },
       mode: { type: "string", enum: type === "diverging" ? ["semantic"] : ["auto", "semantic"] },
@@ -55,13 +53,15 @@ export function normalizePolygonLegendRecommendation(raw, target = {}, { onFallb
   if (raw == null) return null;
   const fail = (code, reason) => { onFallback?.(reason, code); return null; };
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fail("INVALID_LEGEND", "Cấu hình chú giải không phải object.");
-  if (raw.legendSchemaVersion !== LEGEND_SCHEMA_VERSION) return fail("LEGACY_LEGEND", "Chú giải cũ hoặc version không được hỗ trợ.");
-  if (LEGEND_KEYS.some(key => !Object.hasOwn(raw, key)) || Object.keys(raw).some(key => !LEGEND_KEYS.includes(key))) {
+  // Accept the former v2 metadata on input, but never emit it in normalized output.
+  if (Object.hasOwn(raw, "legendSchemaVersion") && raw.legendSchemaVersion !== 2) return fail("LEGACY_LEGEND", "Chú giải cũ hoặc version không được hỗ trợ.");
+  if (LEGEND_KEYS.some(key => !Object.hasOwn(raw, key))
+    || Object.keys(raw).some(key => !LEGEND_KEYS.includes(key) && !LEGACY_LEGEND_KEYS.includes(key))) {
     return fail("INVALID_SHAPE", "Cấu hình chú giải thiếu trường hoặc có trường không được hỗ trợ.");
   }
-  if (typeof raw.field !== "string" || !raw.field.trim() || raw.field.length > 500
+  if (Object.hasOwn(raw, "field") && (typeof raw.field !== "string" || !raw.field.trim() || raw.field.length > 500)
     || raw.aggregation !== null && !AGGREGATION_VALUES.includes(raw.aggregation)) return fail("INVALID_TARGET", "Trường hoặc phép tổng hợp không hợp lệ.");
-  if (target.role != null && target.role !== "measure" || target.field != null && raw.field !== target.field
+  if (target.role != null && target.role !== "measure" || Object.hasOwn(raw, "field") && target.field != null && raw.field !== target.field
     || Object.hasOwn(target, "aggregation") && raw.aggregation !== target.aggregation) return fail("TARGET_MISMATCH", "Chú giải không khớp trường hoặc phép tổng hợp đang hiển thị.");
   if (raw.unit !== null && (typeof raw.unit !== "string" || !raw.unit.trim() || raw.unit.length > 80)) return fail("INVALID_UNIT", "Đơn vị chú giải không hợp lệ.");
   const unit = normalizeLegendUnit(raw.unit);
@@ -85,7 +85,7 @@ export function normalizePolygonLegendRecommendation(raw, target = {}, { onFallb
     return fail("INVALID_CENTER", "Thang diverging cần mốc tâm nằm giữa hai phía; continuous không có tâm.");
   }
   return {
-    legendSchemaVersion: LEGEND_SCHEMA_VERSION, field: raw.field, aggregation: raw.aggregation,
+    aggregation: raw.aggregation,
     type: raw.type, mode: raw.mode, title: raw.title.trim(), unit, domain: [...raw.domain], center: raw.center,
     stops: raw.stops.map(stop => ({ value: stop.value, color: stop.color.toLowerCase() })), reason: raw.reason.trim()
   };

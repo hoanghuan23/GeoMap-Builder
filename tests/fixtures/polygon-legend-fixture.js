@@ -1,6 +1,6 @@
 export function legendFixture(overrides = {}) {
   return {
-    legendSchemaVersion: 2, field: "temperature", aggregation: "mean", type: "continuous", mode: "semantic",
+    aggregation: "mean", type: "continuous", mode: "semantic",
     title: "Nhiệt độ quan sát", unit: "°C", domain: [-20, 40], center: null,
     stops: [
       { value: -20, color: "#123456" }, { value: -10, color: "#456789" }, { value: 0, color: "#789abc" },

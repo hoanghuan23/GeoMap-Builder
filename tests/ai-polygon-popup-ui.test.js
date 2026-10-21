@@ -148,11 +148,11 @@ test("AI semantic/auto legends lock palette controls, follow metrics and filters
   h.get("weather-legend").clientWidth = 330;
   h.run(`
     for (const column of dataset.analysis.columns.filter(column => column.role === 'measure')) {
-      column.semanticType='air_temperature'; column.legend=legendFixture({field:column.name,aggregation:column.aggDefault});
+      column.semanticType='air_temperature'; column.legend=legendFixture({aggregation:column.aggDefault});
     }
     dataset.records.forEach(record => { record.temperature += 24; record.minimum += 20; record.revenue = record.temperature * 10; });
     dataset.analysis.columns.push({name:'revenue',role:'measure',unit:'triệu',aggDefault:'sum',
-      legend:legendFixture({field:'revenue',aggregation:'sum',unit:'triệu',mode:'auto',title:'Doanh thu',domain:[0,1],stops:[{value:0,color:'#000000'},{value:0.25,color:'#888888'},{value:1,color:'#ffffff'}]})});
+      legend:legendFixture({aggregation:'sum',unit:'triệu',mode:'auto',title:'Doanh thu',domain:[0,1],stops:[{value:0,color:'#000000'},{value:0.25,color:'#888888'},{value:1,color:'#ffffff'}]})});
     dataset.recommendation.numericFields.push('revenue');
     dataset.suggestions[1].legend=dataset.analysis.columns.find(column=>column.name==='temperature').legend;
     state.polygonPalette='blue';
@@ -210,7 +210,7 @@ test("one upload analysis supplies legends before polygon activation and subsequ
   const raw = {
     columns: h.dataset.analysis.columns.map(column => ({ ...column,
       geoLevel: column.role === "geo" ? "admin1" : null,
-      legend: column.role === "measure" ? legendFixture({ field: column.name, aggregation: column.aggDefault }) : null })),
+      legend: column.role === "measure" ? legendFixture({ aggregation: column.aggDefault }) : null })),
     suggestions: [{ ...h.dataset.suggestions[1], agg: "mean", legend: null }]
   };
   globalThis.fetch = async (url, options) => {
@@ -265,7 +265,7 @@ test("missing or invalid per-field legends fall back immediately without request
   await h.run("filteredAiBoundary()");
   assert.equal(h.run("activePolygonLegendScale().source"), "technical-fallback");
   assert.equal(h.get("weather-legend-mode").textContent, "Chú giải dự phòng");
-  h.run("dataset.analysis.columns[2].legend=legendFixture(); dataset.analysis.columns[3].legend=legendFixture({field:'minimum',aggregation:'min',stops:[]});");
+  h.run("dataset.analysis.columns[2].legend=legendFixture(); dataset.analysis.columns[3].legend=legendFixture({aggregation:'min',stops:[]});");
   await h.run("filteredAiBoundary()");
   assert.equal(h.run("activePolygonLegendScale().source"), "ai");
   const metric = h.all(".ai-metric-selector")[0]; metric.value = "minimum"; await h.change(metric);

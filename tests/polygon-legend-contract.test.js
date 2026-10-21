@@ -5,7 +5,7 @@ import { legendFixture, legendColumn } from "./fixtures/polygon-legend-fixture.j
 
 const target = polygonLegendTarget(legendColumn);
 
-test("v2 preserves arbitrary AI stops, generic semantics and units across JSON normalization", () => {
+test("compact legends preserve arbitrary AI stops, generic semantics and units across JSON normalization", () => {
   const legend = legendFixture({ unit: "Celsius", stops: legendFixture().stops.map(stop => ({ ...stop, color: stop.color.toUpperCase() })) });
   const normalized = normalizePolygonLegendRecommendation(legend, target);
   assert.equal(normalized.unit, "°C");
@@ -16,6 +16,21 @@ test("v2 preserves arbitrary AI stops, generic semantics and units across JSON n
   assert.equal(normalizePolygonLegendRecommendation(unknown, { ...target, unit: null }).unit, null);
   assert.deepEqual(POLYGON_LEGEND_SCHEMA.anyOf.map(schema => schema.properties.type.enum[0]), ["continuous", "diverging"]);
   assert.deepEqual(POLYGON_LEGEND_SCHEMA.anyOf[1].properties.mode.enum, ["semantic"]);
+});
+
+test("AI legend schemas and normalized output omit version and field metadata", () => {
+  for (const schema of POLYGON_LEGEND_SCHEMA.anyOf) {
+    for (const key of ["legendSchemaVersion", "field"]) {
+      assert.equal(Object.hasOwn(schema.properties, key), false);
+      assert.equal(schema.required.includes(key), false);
+    }
+    assert.equal(schema.additionalProperties, false);
+    assert.deepEqual([...schema.required].sort(), Object.keys(schema.properties).sort());
+  }
+  const legend = legendFixture();
+  assert.deepEqual(normalizePolygonLegendRecommendation(legend, target), legend);
+  const legacy = { ...legend, legendSchemaVersion: 2, field: target.field };
+  assert.deepEqual(normalizePolygonLegendRecommendation(legacy, target), legend);
 });
 
 test("invalid shape, binding, unit, mode, domain, stops and text reject independently", () => {
