@@ -140,6 +140,9 @@ function inferredRole(column) {
   const name = String(column?.name || "");
   if (LAT_HINT.test(name)) return { role: "geo", geoLevel: "point_lat" };
   if (LNG_HINT.test(name)) return { role: "geo", geoLevel: "point_lng" };
+  if (/quốc gia|quoc gia|country|nation/i.test(name) && column?.inferredType !== "number") {
+    return { role: "geo", geoLevel: "country" };
+  }
   if (ID_HINT.test(name)) return { role: "id" };
   if (TIME_HINT.test(name) || column?.inferredType === "date") {
     return { role: "time", timeParse: column?.dateHint || (column?.inferredType === "date" ? "iso" : "text"), granularity: column?.temporalGranularity || inferTimeGranularity(name) };
@@ -175,16 +178,17 @@ function normalizeColumn(raw, fallback) {
   // Administrative names remain geographic dimensions even if AI calls them categories.
   const isAdministrativeRegion = fallback.role === "geo" && ADMINISTRATIVE_LOCATION_HINT.test(fallback.name)
     && ["geo", "category", "text"].includes(raw.role);
+  const isCountry = fallback.geoLevel === "country" && ["geo", "category", "text", "id"].includes(raw.role);
   const isRoadName = fallback.role === "category" && ROAD_NAME_HINT.test(fallback.name)
     && ["geo", "category", "text"].includes(raw.role);
   return {
     name: fallback.name,
-    role: isAdministrativeRegion ? "geo" : isRoadName ? "category" : raw.role,
+    role: isCountry || isAdministrativeRegion ? "geo" : isRoadName ? "category" : raw.role,
     labelVi: typeof raw.labelVi === "string" && raw.labelVi.trim() ? raw.labelVi.trim() : null,
-    geoLevel: isRoadName ? null : isAdministrativeRegion
+    geoLevel: isCountry ? "country" : isRoadName ? null : isAdministrativeRegion
       ? cleanOptional(raw.geoLevel, ["country", "admin1", "admin2"]) || fallback.geoLevel
       : cleanOptional(raw.geoLevel, ["country", "admin1", "admin2", "point_lat", "point_lng", "h3"]),
-    country: !isRoadName && typeof raw.country === "string" && raw.country.trim() ? raw.country.trim().toUpperCase() : null,
+    country: !isCountry && raw.geoLevel !== "country" && !isRoadName && typeof raw.country === "string" && raw.country.trim() ? raw.country.trim().toUpperCase() : null,
     timeParse: cleanOptional(raw.timeParse, ["iso", "excel_serial", "unix_s", "unix_ms", "text"]) || (raw.role === "time" ? fallback.timeParse : null),
     granularity: cleanOptional(raw.granularity, TIME_GRANULARITIES) || (raw.role === "time" ? fallback.granularity : null),
     unit: normalizeLegendUnit(raw.unit),

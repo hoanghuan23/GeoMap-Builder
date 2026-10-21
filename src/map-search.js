@@ -1,18 +1,15 @@
 import polygonClipping from "polygon-clipping";
+import {
+  COUNTRY_BOUNDARY_SOURCES, loadCountryBoundaryData, resolveBoundaryCountry
+} from "./country-boundary-sources.js";
 
 const MAPTILER_GEOCODING_URL = "https://api.maptiler.com/geocoding";
-const VIETNAM_LAND_URLS = [
-  new URL("../administrative_division/gadm41_VNM_0.json", import.meta.url),
-  new URL("../administrative_division/gadm41_VNM_1.json", import.meta.url),
-  new URL("../administrative_division/gadm41_VNM_2.json", import.meta.url)
-];
 const VIETNAM_BBOX = "102.14,8.18,109.47,23.4";
 const ADMIN_TYPES = "country,region,subregion,county,joint_municipality,joint_submunicipality,municipality,municipal_district,locality,place";
 const MIN_QUERY_LENGTH = 2;
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
 const SEARCH_BOUNDARY_SOURCE = "map-search-boundary";
 const SEARCH_BOUNDARY_LINE = "map-search-boundary-line";
-const vietnamLandPromises = new Map();
 const mapTilerBoundaryCache = new Map();
 const mapTilerRegionCache = new Map();
 
@@ -30,8 +27,8 @@ export function normalizePlaceName(value) {
   return normalizePlaceWords(value).replace(/ /g, "");
 }
 
-function displayGadmName(value) {
-  return String(value || "").replace(/([\p{Ll}])([\p{Lu}])/gu, "$1 $2");
+function displayAdministrativeName(value) {
+  return String(value || "").replace(/([\p{Ll}])([\p{Lu}])/gu, "$1 $2").trim();
 }
 
 export function buildGeocodingUrl(query, apiKey, center) {
@@ -50,9 +47,11 @@ export function buildGeocodingUrl(query, apiKey, center) {
   return url.toString();
 }
 
-export async function searchMapTiler(query, { apiKey, center, signal, fetchImpl = fetch }) {
+export async function searchMapTiler(query, { apiKey, center, placeType, signal, fetchImpl = fetch }) {
   if (!apiKey) throw new Error("MAPTILER_API_KEY_MISSING");
-  const response = await fetchImpl(buildGeocodingUrl(query, apiKey, center), { signal });
+  const url = placeType === "country" ? buildAdministrativeGeocodingUrl(query, apiKey, "country")
+    : buildGeocodingUrl(query, apiKey, center);
+  const response = await fetchImpl(url, { signal });
   if (!response.ok) {
     const error = new Error(`MapTiler geocoding failed (${response.status})`);
     error.status = response.status;
@@ -117,11 +116,16 @@ export async function searchMapTilerBoundaries(query, options) {
 }
 
 export function buildAdministrativeGeocodingUrl(name, apiKey, placeType = "region") {
-  const url = new URL(`${MAPTILER_GEOCODING_URL}/${encodeURIComponent(`${name}, Việt Nam`)}.json`);
+  const isCountry = placeType === "country";
+  const code = isCountry ? resolveBoundaryCountry(name) : null;
+  const query = code && String(name).trim().toUpperCase() === code ? COUNTRY_BOUNDARY_SOURCES[code].name : String(name).trim();
+  const url = new URL(`${MAPTILER_GEOCODING_URL}/${encodeURIComponent(isCountry ? query : `${name}, Việt Nam`)}.json`);
   url.searchParams.set("key", apiKey);
   url.searchParams.set("language", "vi");
-  url.searchParams.set("country", "vn");
-  url.searchParams.set("bbox", VIETNAM_BBOX);
+  if (!isCountry) {
+    url.searchParams.set("country", "vn");
+    url.searchParams.set("bbox", VIETNAM_BBOX);
+  }
   url.searchParams.set("types", placeType);
   url.searchParams.set("limit", "5");
   url.searchParams.set("autocomplete", "false");
@@ -150,9 +154,32 @@ function provinceCandidateScore(feature, name) {
   return 2;
 }
 
+const countryDisplayNames = ["vi", "en"].map(language => new Intl.DisplayNames([language], { type: "region" }));
+
+export function countryCandidateScore(feature, name) {
+  if (!feature?.place_type?.includes("country")) return 2;
+  const properties = feature.properties || {};
+  const code = String(properties.country_code || properties.short_code || feature.country_code || "").toUpperCase();
+  const localizedNames = /^[A-Z]{2}$/.test(code) ? countryDisplayNames.map(names => names.of(code)) : [];
+  const localCode = resolveBoundaryCountry(properties.__country_code || properties.GID_0 || code)
+    || resolveBoundaryCountry(feature.text || feature.place_name);
+  const targetCode = resolveBoundaryCountry(name);
+  if (targetCode && localCode) return targetCode === localCode ? 0 : 2;
+  const aliases = [feature.text, feature.place_name, feature.matching_text, feature.matching_place_name,
+    properties.name, code, localCode, COUNTRY_BOUNDARY_SOURCES[localCode]?.name, ...localizedNames,
+    ...(COUNTRY_BOUNDARY_SOURCES[localCode]?.aliases || []),
+    ...Object.entries(feature).filter(([key]) => /^(?:text|place_name)_[a-z]{2}$/i.test(key)).map(([, value]) => value)]
+    .filter(value => typeof value === "string" && value.trim())
+    .flatMap(value => [value, value.replace(/\s*\([^)]*\)/g, "").trim(), ...[...value.matchAll(/\(([^)]+)\)/g)].map(match => match[1])])
+    .map(normalizePlaceName);
+  const target = normalizePlaceName(name);
+  return target && aliases.includes(target) ? 0 : 2;
+}
+
 export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeType = "region", signal, fetchImpl = fetch } = {}) {
   if (!apiKey) throw new Error("MAPTILER_API_KEY_MISSING");
-  const cacheKey = `${placeType}:${normalizedAdministrativeName(name)}`;
+  const normalizedName = placeType === "country" ? resolveBoundaryCountry(name) || normalizePlaceName(name) : normalizedAdministrativeName(name);
+  const cacheKey = `${placeType === "country" ? "global" : "VNM"}:${placeType}:${normalizedName}`;
   if (fetchImpl === fetch && mapTilerBoundaryCache.has(cacheKey)) return mapTilerBoundaryCache.get(cacheKey);
   const response = await fetchImpl(buildAdministrativeGeocodingUrl(name, apiKey, placeType), { signal });
   if (!response.ok) {
@@ -161,10 +188,13 @@ export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeTyp
     throw error;
   }
   const data = await response.json();
-  const candidate = (data.features || [])
+  const score = placeType === "country" ? countryCandidateScore : provinceCandidateScore;
+  const candidates = (data.features || [])
     .filter(feature => feature?.id && (feature.place_type || []).includes(placeType))
-    .sort((a, b) => provinceCandidateScore(a, name) - provinceCandidateScore(b, name))[0];
-  if (!candidate || provinceCandidateScore(candidate, name) > 1) return null;
+    .sort((a, b) => score(a, name) - score(b, name));
+  const candidate = candidates[0];
+  if (!candidate || score(candidate, name) > 1) return null;
+  if (placeType === "country" && candidates.some(other => other.id !== candidate.id && score(other, name) === score(candidate, name))) return null;
   const detail = isBoundaryFeature(candidate)
     ? candidate
     : await getMapTilerFeature(candidate.id, { apiKey, signal, fetchImpl });
@@ -260,19 +290,36 @@ function boxesOverlap(a, b) {
 export function isVietnamFeature(feature) {
   const candidates = [feature, feature?.properties, ...(feature?.context || [])];
   return candidates.some(value => {
-    const countryCode = String(value?.country_code || value?.short_code || "").toLowerCase();
-    return countryCode === "vn" || countryCode === "vnm" || String(value?.id || "").toLowerCase().startsWith("country.vn");
-  }) || /(?:việt nam|vietnam)/iu.test(feature?.place_name || "");
+    const countryCode = value?.GID_0 || value?.__country_code || value?.country_code || value?.short_code || value?.COUNTRY;
+    return resolveBoundaryCountry(countryCode) === "VNM" || /^country\.(?:vn|vnm)(?:\.|$)/i.test(value?.id || "");
+  }) || String(feature?.place_name || "").split(",").some(part => resolveBoundaryCountry(part) === "VNM");
 }
 
-export function gadmLevelForFeature(feature) {
+export function administrativeLevelForFeature(feature) {
+  const properties = feature?.properties || {};
+  const level = properties.__admin_level ?? [4, 3, 2, 1, 0].find(level => properties[`GID_${level}`]);
+  if (level != null) return Number(level);
   const type = feature?.place_type?.[0];
   if (type === "country") return 0;
   if (["region", "subregion"].includes(type)) return 1;
   return 2;
 }
 
-export function clipBoundaryToLand(feature, landData, level = 0) {
+export function localBoundaryNameAliases(feature) {
+  const properties = feature?.properties || {};
+  const level = administrativeLevelForFeature(feature);
+  const code = resolveBoundaryCountry(properties.__country_code || properties.GID_0);
+  const source = COUNTRY_BOUNDARY_SOURCES[code];
+  const names = [properties[`NAME_${level}`], properties[`VARNAME_${level}`], properties[`NL_NAME_${level}`],
+    ...(level === 0 ? [properties.COUNTRY, code, source?.name, ...(source?.aliases || [])] : [])]
+    .filter(value => value && String(value).trim().toUpperCase() !== "NA")
+    .flatMap(value => String(value).split(/[|;]/)).map(value => value.trim()).filter(value => value && value.toUpperCase() !== "NA");
+  const aliases = Object.entries(source?.nameAliases?.[level] || {}).flatMap(([name, aliases]) =>
+    names.some(value => normalizePlaceName(value) === normalizePlaceName(name)) ? aliases : []);
+  return [...new Set([...names, ...aliases])];
+}
+
+export function clipBoundaryToLand(feature, landData, level = 0, country = "VNM") {
   if (!isBoundaryFeature(feature)) return null;
   const boundary = asMultiPolygon(feature.geometry);
   const boundaryBounds = feature.bbox || geometryBounds(feature.geometry.coordinates);
@@ -285,80 +332,85 @@ export function clipBoundaryToLand(feature, landData, level = 0) {
   return {
     ...feature,
     bbox: geometryBounds(coordinates),
-    properties: { ...(feature.properties || {}), land_clipped: true, land_mask: `GADM 4.1 VNM level ${level}` },
+    properties: { ...(feature.properties || {}), land_clipped: true, land_mask: `${country} ADM${level}` },
     geometry: { type: "MultiPolygon", coordinates }
   };
 }
 
-async function loadVietnamLand(level, fetchImpl = fetch, signal) {
-  const url = VIETNAM_LAND_URLS[level] || VIETNAM_LAND_URLS[0];
-  if (fetchImpl !== fetch) {
-    const response = await fetchImpl(url, { signal });
-    if (!response.ok) throw new Error(`Không thể tải ranh giới GADM cấp ${level} (${response.status})`);
-    return response.json();
-  }
-  if (!vietnamLandPromises.has(level)) {
-    const promise = fetchImpl(url).then(response => {
-      if (!response.ok) throw new Error(`Không thể tải ranh giới GADM cấp ${level} (${response.status})`);
-      return response.json();
-    }).catch(error => {
-      vietnamLandPromises.delete(level);
-      throw error;
-    });
-    vietnamLandPromises.set(level, promise);
-  }
-  return vietnamLandPromises.get(level);
-}
-
-export async function searchGadmBoundaries(query, { signal, fetchImpl = fetch, limit = 8 } = {}) {
-  const needle = normalizePlaceName(query);
+export async function searchLocalBoundaries(query, {
+  country = "VNM", levels = [1, 2, 0], signal, fetchImpl = fetch, limit = 8
+} = {}) {
+  const parts = String(query ?? "").split(",").map(part => part.trim()).filter(Boolean);
+  const queryCountry = resolveBoundaryCountry(query);
+  const code = queryCountry || resolveBoundaryCountry(parts.at(-1)) || resolveBoundaryCountry(country);
+  if (!code) return [];
+  const source = COUNTRY_BOUNDARY_SOURCES[code];
+  if (/^(?:xa|phuong|thi tran)\s+(?=\S)/.test(normalizePlaceWords(parts[0]))) return [];
+  const needle = normalizedAdministrativeName(parts[0]);
   if (!needle) return [];
-  const collections = await Promise.all([1, 2, 0].map(level => loadVietnamLand(level, fetchImpl, signal)));
+  const parents = parts.slice(1).filter(part => !resolveBoundaryCountry(part)).map(normalizedAdministrativeName);
+  const requestedLevels = (queryCountry ? [0] : levels).filter(level => source.files[level]);
+  const collections = await Promise.all(requestedLevels.map(level => loadCountryBoundaryData(code, level, { fetchImpl, signal })));
   if (signal?.aborted) throw new DOMException("Search aborted", "AbortError");
   const candidates = collections.flatMap((collection, collectionIndex) => (collection.features || []).flatMap(feature => {
-    const level = collectionIndex === 0 ? 1 : collectionIndex === 1 ? 2 : 0;
+    if (!isBoundaryFeature(feature)) return [];
+    const level = requestedLevels[collectionIndex];
     const properties = feature.properties || {};
-    const rawName = properties[`NAME_${level}`] || properties.COUNTRY;
-    const aliases = [rawName, properties[`VARNAME_${level}`], properties[`NL_NAME_${level}`]].map(normalizePlaceName);
-    const matchIndex = aliases.findIndex(name => name.includes(needle));
-    if (matchIndex < 0) return [];
-    const name = displayGadmName(rawName);
-    const province = level === 2 ? displayGadmName(properties.NAME_1) : "";
+    if (level === 0 && properties.GID_0 && properties.GID_0 !== code) return [];
+    const name = level === 0 ? source.name : displayAdministrativeName(properties[`NAME_${level}`]);
+    if (!name) return [];
+    const aliases = localBoundaryNameAliases({ properties: { ...properties, __admin_level: level, __country_code: code } })
+      .map(normalizedAdministrativeName);
+    const matchingAliases = aliases.filter(alias => alias.includes(needle));
+    if (!matchingAliases.length) return [];
     const bbox = geometryBounds(feature.geometry?.coordinates);
     const center = bbox ? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2] : null;
+    const province = level > 1 ? displayAdministrativeName(properties.NAME_1) : "";
     return [{
       ...feature,
-      id: `gadm.${properties[`GID_${level}`] || "vnm"}`,
+      id: `adm.${properties[`GID_${level}`] || `${code}.ADM${level}.${normalizePlaceName(name)}`}`,
       bbox,
       center,
       text: name,
-      place_name: [name, province, "Việt Nam"].filter(Boolean).join(", "),
+      place_name: level === 0 ? name : [name, province, source.name].filter(Boolean).join(", "),
       place_type: [level === 0 ? "country" : level === 1 ? "region" : "county"],
-      properties: { ...properties, country_code: "vn", local_gadm: true },
-      _searchScore: aliases[matchIndex] === needle ? 0 : aliases[matchIndex].startsWith(needle) ? 1 : 2
+      properties: { ...properties, __country_code: code,
+        __admin_level: level, __province_name: province, local_boundary: true, boundary_source: "Local ADM" },
+      _searchScore: Math.min(...matchingAliases.map(alias => alias === needle ? 0 : alias.startsWith(needle) ? 1 : 2))
     }];
   }));
-  return candidates
+  const ranked = candidates
     .sort((a, b) => a._searchScore - b._searchScore || a.text.localeCompare(b.text, "vi"))
-    .slice(0, limit)
-    .map(({ _searchScore, ...feature }) => feature);
+    .slice(0, parents.length ? Infinity : limit);
+  if (signal?.aborted) throw new DOMException("Search aborted", "AbortError");
+  return ranked.filter(feature => parents.every(parent => parent === normalizedAdministrativeName(feature.properties.__province_name)))
+    .slice(0, limit).map(({ _searchScore, ...feature }) => feature);
 }
 
-export async function landOnlyBoundary(feature, { fetchImpl = fetch, signal, forceVietnam = false } = {}) {
+export async function landOnlyBoundary(feature, { fetchImpl = fetch, signal, forceVietnam = false, country } = {}) {
   if (!isBoundaryFeature(feature)) return null;
-  if (feature.properties?.local_gadm) return feature;
-  if (!forceVietnam && !isVietnamFeature(feature)) return feature;
-  const level = gadmLevelForFeature(feature);
-  const landData = await loadVietnamLand(level, fetchImpl, signal);
+  if (feature.properties?.local_boundary) return feature;
+  const properties = feature.properties || {};
+  const featureCountry = properties.__country_code || properties.GID_0 || properties.country_code || properties.short_code;
+  // A country polygon determines its own mask; never clip another country to Vietnam.
+  const isCountry = feature.place_type?.includes("country");
+  const code = isCountry
+    ? resolveBoundaryCountry(featureCountry) || resolveBoundaryCountry(feature.text || feature.place_name)
+    : resolveBoundaryCountry(featureCountry || country) || (forceVietnam || isVietnamFeature(feature) ? "VNM" : null);
+  if (!code) return feature;
+  const source = COUNTRY_BOUNDARY_SOURCES[code];
+  const requestedLevel = administrativeLevelForFeature(feature);
+  const level = source.files[requestedLevel] ? requestedLevel : 0;
+  if (!source.files[level]) return feature;
+  const landData = await loadCountryBoundaryData(code, level, { fetchImpl, signal });
   if (signal?.aborted) throw new DOMException("Boundary clipping aborted", "AbortError");
-  const clipped = clipBoundaryToLand(feature, landData, level);
+  const clipped = clipBoundaryToLand(feature, landData, level, code);
   if (clipped || level === 0) return clipped;
 
-  // Dữ liệu hành chính có thể thay đổi giữa hai nguồn. GADM 0 là mặt nạ
-  // dự phòng để vẫn giữ phần đất liền khi cấp 1/2 không còn giao nhau.
-  const countryLand = await loadVietnamLand(0, fetchImpl, signal);
+  // The country outline remains a fallback when administrative vintages differ.
+  const countryLand = await loadCountryBoundaryData(code, 0, { fetchImpl, signal });
   if (signal?.aborted) throw new DOMException("Boundary clipping aborted", "AbortError");
-  return clipBoundaryToLand(feature, countryLand, 0);
+  return clipBoundaryToLand(feature, countryLand, 0, code);
 }
 
 export function renderSearchBoundary(map, feature) {
@@ -557,7 +609,7 @@ export function createMapSearch({ map, apiKey, onBoundariesChange = null }) {
     try {
       const detailedFeature = isBoundaryFeature(feature) ? feature : feature.id ? await getMapTilerFeature(feature.id, { apiKey, signal: controller.signal }) : null;
       if (detailControllers.get(key) !== controller || !isBoundaryFeature(detailedFeature)) return;
-      const clippedBoundary = detailedFeature.properties?.local_gadm
+      const clippedBoundary = detailedFeature.properties?.local_boundary
         ? detailedFeature
         : await landOnlyBoundary(detailedFeature, { signal: controller.signal, forceVietnam: true });
       if (detailControllers.get(key) !== controller || !selectedRegions.has(key)) return;
@@ -567,7 +619,7 @@ export function createMapSearch({ map, apiKey, onBoundariesChange = null }) {
       const boundaries = [...selectedRegions.values()].map(item => item.boundary).filter(Boolean);
       notifyBoundariesChange();
       if (clippedBoundary) focusMapOnFeatures(map, boundaries);
-      else console.warn("Ranh giới MapTiler không giao với mặt nạ đất liền GADM.");
+      else console.warn("Ranh giới MapTiler không giao với dữ liệu ranh giới VNM.");
     } catch (error) {
       if (error.name !== "AbortError") {
         console.warn("Không thể tải hoặc cắt ranh giới MapTiler:", error);
@@ -628,9 +680,24 @@ export function createMapSearch({ map, apiKey, onBoundariesChange = null }) {
     requestController = controller;
     updateSpinner();
     try {
-      const boundaries = apiKey
-        ? await searchMapTilerBoundaries(query, { apiKey, center: map.getCenter(), signal: controller.signal })
-        : await searchGadmBoundaries(query, { signal: controller.signal });
+      let boundaries = []; let providerError;
+      if (apiKey) {
+        try {
+          boundaries = await searchMapTilerBoundaries(query, { apiKey, center: map.getCenter(), signal: controller.signal });
+        } catch (error) {
+          if (error.name === "AbortError" || controller.signal.aborted) throw error;
+          providerError = error;
+        }
+      }
+      if (!boundaries.length) {
+        try {
+          boundaries = await searchLocalBoundaries(query, { signal: controller.signal });
+        } catch (error) {
+          if (error.name === "AbortError" || controller.signal.aborted) throw error;
+          throw providerError || error;
+        }
+        if (!boundaries.length && providerError) throw providerError;
+      }
       if (requestController !== controller || controller.signal.aborted) return;
       renderFeatures(boundaries);
     } catch (error) {
@@ -695,7 +762,7 @@ export function createMapSearch({ map, apiKey, onBoundariesChange = null }) {
     if (boundaryRenderPending) drawSelectedBoundary();
   });
 
-  if (!apiKey) input.title = "Tìm trong ranh giới hành chính GADM Việt Nam";
+  if (!apiKey) input.title = "Tìm trong dữ liệu ranh giới Việt Nam (VNM)";
   return () => {
     clearTimeout(debounceTimer);
     requestController?.abort();

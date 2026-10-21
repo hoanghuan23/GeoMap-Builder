@@ -4,6 +4,7 @@ import test from "node:test";
 import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
 import { landOnlyBoundary } from "../src/map-search.js";
 import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
 
 const polygon = { type: "Polygon", coordinates: [[[105, 20], [106, 20], [106, 21], [105, 20]]] };
 const response = features => ({ ok: true, json: async () => ({ type: "FeatureCollection", features }) });
@@ -11,7 +12,7 @@ const localFetch = async url => ({ ok: true, json: async () => JSON.parse(await 
 const commune = id => ({ type: "Feature", id, text: "Xã Tân Châu", place_name: "Xã Tân Châu, Việt Nam",
   place_type: ["municipality"], center: [105, 20], geometry: polygon });
 
-test("real GADM files resolve the missing province/district/town, but never a commune as a district", async () => {
+test("country-folder GeoJSON resolves provinces/districts/towns, but never communes as districts", async () => {
   const names = ["tỉnh thái bình", "huyện An Phú", "thị xã Từ Sơn", "xã Tân Châu"];
   const requested = [];
   const boundaries = await loadAdministrativeBoundaries(names, {
@@ -21,46 +22,100 @@ test("real GADM files resolve the missing province/district/town, but never a co
   assert.deepEqual(boundaries.matched, names.slice(0, 3));
   assert.deepEqual(boundaries.unmatched, ["xã Tân Châu"]);
   assert.equal(boundaries.matchRate, .75);
-  assert.equal(requested.length, 3, "workers share each local file load");
-  assert.deepEqual(boundaries.features.map(feature => feature.id), ["gadm.VNM.55_1", "gadm.VNM.1.1_1", "gadm.VNM.5.5_1"]);
+  assert.equal(requested.length, 2, "workers share each required local file load");
+  assert.ok(requested.every(url => /\/VNM\/VNM_ADM[12]\.geojson$/.test(url)));
+  assert.deepEqual(boundaries.features.map(feature => feature.properties[`NAME_${feature.properties.__admin_level}`]), ["TháiBình", "AnPhú", "TừSơn"]);
+  assert.ok(boundaries.features.every(feature => feature.id.startsWith("adm.VNM.")));
   const records = names.map((region, i) => ({ region, date: "2026-09-30", temperature: 25 + i }));
   const joined = joinRecordsToMapTilerBoundaries(records, boundaries, {
     geometry: { field: "region" }, metricField: "temperature"
   }, { filters: { date: "2026-09-30" } });
   assert.deepEqual(joined.features.map(feature => feature.properties.temperature), [25, 26, 27]);
-  assert.ok(joined.features.every(feature => feature.properties.boundary_source === "GADM"));
+  assert.ok(joined.features.every(feature => feature.properties.boundary_source === "Local ADM"));
   assert.equal(await landOnlyBoundary(boundaries.features[0], {
-    fetchImpl: () => assert.fail("a local GADM polygon must not be clipped again")
+    fetchImpl: () => assert.fail("a local polygon must not be clipped again")
   }), boundaries.features[0]);
 });
 
-test("real district names use type and province context to disambiguate Tân Châu", async () => {
-  const names = ["Tân Châu", "thị xã Tân Châu", "huyện Tân Châu", "Tân Châu, tỉnh An Giang"];
+test("all 63 source provinces resolve from NAME_1 using only VNM_ADM1", async () => {
+  const source = JSON.parse(await readFile(new URL("../administrative_division/VNM/VNM_ADM1.geojson", import.meta.url), "utf8"));
+  const names = source.features.map(feature => feature.properties.NAME_1);
+  assert.equal(names.length, 63);
+  const urls = [];
+  const result = await loadAdministrativeBoundaries(names, {
+    fetchImpl: async url => { urls.push(String(url)); return localFetch(url); }
+  });
+  assert.equal(result.matchRate, 1);
+  assert.deepEqual(result.unmatched, []);
+  assert.deepEqual(result.features.map(feature => feature.properties.GID_1), source.features.map(feature => feature.properties.GID_1));
+  assert.equal(urls.length, 1);
+  assert.ok(urls[0].endsWith("/VNM/VNM_ADM1.geojson"));
+});
+
+test("34-province weather data joins every name while preserving the source polygons", async () => {
+  const source = JSON.parse(await readFile(new URL("../administrative_division/VNM/VNM_ADM1.geojson", import.meta.url), "utf8"));
+  const result = await loadAdministrativeBoundaries(WEATHER_PROVINCES, { fetchImpl: localFetch });
+  assert.equal(result.matchRate, 1);
+  assert.deepEqual(result.unmatched, []);
+  assert.equal(result.features.length, 34);
+  assert.deepEqual(result.features.map(feature => feature.properties.__data_location), [...WEATHER_PROVINCES]);
+  const hue = result.features.find(feature => feature.properties.__data_location === "Huế");
+  assert.equal(hue.properties.NAME_1, "ThừaThiênHuế");
+  for (const feature of result.features) {
+    assert.deepEqual(feature.geometry, source.features.find(original => original.properties.GID_1 === feature.properties.GID_1).geometry);
+  }
+  const records = WEATHER_PROVINCES.map((province, index) => ({ province, value: index + 1 }));
+  const joined = joinRecordsToMapTilerBoundaries(records, result, { geometry: { field: "province" }, metricField: "value" });
+  assert.equal(joined.features.length, 34);
+  assert.deepEqual(joined.features.map(feature => feature.properties.value), records.map(record => record.value));
+});
+
+test("TYPE_2 and NAME_1 disambiguate districts and towns of the same name", async () => {
+  const names = ["Tân Châu", "thị xã Tân Châu", "huyện Tân Châu", "Tân Châu, tỉnh An Giang", "Tân Châu, tỉnh Tây Ninh"];
   const boundaries = await loadAdministrativeBoundaries(names, { placeType: "county", strict: false, fetchImpl: localFetch });
   assert.deepEqual(boundaries.unmatched, ["Tân Châu"]);
   assert.equal(boundaries.candidates["Tân Châu"].length, 2);
-  assert.deepEqual(boundaries.candidates["Tân Châu"].map(administrativeBoundaryLabel), ["Tân Châu — An Giang", "Tân Châu — Tây Ninh"]);
-  assert.deepEqual(boundaries.features.map(feature => feature.id), ["gadm.VNM.1.9_1", "gadm.VNM.53.7_1", "gadm.VNM.1.9_1"]);
+  assert.deepEqual(boundaries.candidates["Tân Châu"].map(administrativeBoundaryLabel).sort(), ["Tân Châu — An Giang", "Tân Châu — Tây Ninh"]);
+  assert.deepEqual(boundaries.features.map(feature => feature.properties.__province_name), ["An Giang", "Tây Ninh", "An Giang", "Tây Ninh"]);
+  assert.notEqual(boundaries.features[0].id, boundaries.features[1].id);
 });
 
-test("mixed province/commune input uses municipality search, preserving MapTiler province geometry", async () => {
+test("MapTiler province and commune polygons take priority without loading local files", async () => {
   const urls = [];
   const boundaries = await loadAdministrativeBoundaries(["Hà Nội", "xã Tân Châu"], {
     apiKey: "key", strict: false,
     fetchImpl: async rawUrl => {
       const url = new URL(rawUrl); urls.push(url);
-      assert.equal(url.origin, "https://api.maptiler.com", "successful provider results must not load GADM");
+      assert.equal(url.origin, "https://api.maptiler.com", "valid provider polygons must not be replaced by local geometry");
       return response(decodeURIComponent(url.pathname).includes("Hà Nội")
         ? [{ id: "region.hanoi", text: "Hà Nội", place_type: ["region"], geometry: polygon }]
         : [commune("municipality.tanchau")]);
     }
   });
   assert.equal(boundaries.matchRate, 1);
+  assert.equal(urls.length, 2);
   assert.equal(urls[0].searchParams.get("types"), "region");
-  assert.ok(urls[1].searchParams.get("types").split(",").includes("municipality"));
+  assert.ok(urls.some(url => url.searchParams.get("types")?.split(",").includes("municipality")));
   assert.equal(boundaries.features[1].properties.__data_location, "xã Tân Châu");
   assert.equal(boundaries.features[1].properties.__data_place_type, "municipality");
   assert.ok(boundaries.features.every(feature => feature.properties.boundary_source === "MapTiler"));
+  assert.equal(boundaries.features[0].geometry, polygon);
+});
+
+test("34-province input keeps the MapTiler geometry for every province", async () => {
+  const boundaries = await loadAdministrativeBoundaries(WEATHER_PROVINCES, {
+    apiKey: "key", fetchImpl: async rawUrl => {
+      const url = new URL(rawUrl);
+      assert.equal(url.origin, "https://api.maptiler.com");
+      const path = decodeURIComponent(url.pathname);
+      const name = WEATHER_PROVINCES.find(name => path.includes(name));
+      assert.ok(name);
+      return response([{ id: `region.${name}`, text: name, place_type: ["region"], geometry: polygon }]);
+    }
+  });
+  assert.equal(boundaries.matchRate, 1);
+  assert.deepEqual(boundaries.matched, [...WEATHER_PROVINCES]);
+  assert.ok(boundaries.features.every(feature => feature.geometry === polygon && feature.properties.boundary_source === "MapTiler"));
 });
 
 test("same-name communes require a choice and can reuse the explicitly selected polygon", async () => {
@@ -118,25 +173,36 @@ test("a province query cannot match the ward of the same name, and aliases prese
     apiKey: "key", aliases: { TB: "tỉnh thái bình" }, strict: false,
     fetchImpl: async url => String(url).startsWith("https:") ? response([ward]) : localFetch(url)
   });
-  assert.equal(result.features[0].id, "gadm.VNM.55_1");
+  assert.equal(result.features[0].properties.NAME_1, "TháiBình");
   assert.equal(result.features[0].properties.__data_location, "TB");
   assert.equal(result.features[0].properties.__data_query, "tỉnh thái bình");
-  assert.equal(result.features[0].properties.boundary_source, "GADM");
+  assert.equal(result.features[0].properties.boundary_source, "Local ADM");
 });
 
-test("provider failure falls back locally; cancellation never starts a fallback", async () => {
+test("empty or failed MapTiler requests fall back to VNM_ADM; cancellation skips fallback", async () => {
   const controller = new AbortController();
-  const resolved = await loadAdministrativeBoundaries(["tỉnh thái bình"], {
-    apiKey: "key", fetchImpl: async url => {
-      if (String(url).startsWith("https:")) throw new Error("Provider unavailable");
-      return localFetch(url);
-    }
-  });
-  assert.equal(resolved.features[0].properties.boundary_source, "GADM");
+  for (const failure of ["empty", "http", "network"]) {
+    const urls = [];
+    const resolved = await loadAdministrativeBoundaries(["tỉnh thái bình"], {
+      apiKey: "key", fetchImpl: async url => {
+        urls.push(String(url));
+        if (String(url).startsWith("https:")) {
+          if (failure === "network") throw new Error("Provider unavailable");
+          return failure === "http" ? { ok: false, status: 503 } : response([]);
+        }
+        return localFetch(url);
+      }
+    });
+    assert.equal(resolved.features[0].properties.boundary_source, "Local ADM");
+    assert.equal(resolved.features[0].properties.NAME_1, "TháiBình");
+    assert.equal(urls.length, 2);
+    assert.ok(urls[0].startsWith("https://api.maptiler.com/"));
+    assert.ok(urls[1].endsWith("/VNM/VNM_ADM1.geojson"));
+  }
   await assert.rejects(loadAdministrativeBoundaries(["tỉnh thái bình"], {
     apiKey: "key", strict: false, signal: controller.signal,
     fetchImpl: async url => {
-      assert.ok(String(url).startsWith("https:"));
+      assert.ok(String(url).startsWith("https://api.maptiler.com/"));
       controller.abort();
       throw new DOMException("Aborted", "AbortError");
     }

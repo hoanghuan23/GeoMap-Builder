@@ -1,7 +1,7 @@
 import { AI_MAP_REGISTRY, fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
 import { normalizeTabularRecords, profileTabularData } from "./tabular-data.js";
 
-const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area)/i;
+const LOCATION_HINT = /(quốc gia|quoc gia|country|nation|tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area)/i;
 const TIME_HINT = /(ngày|date|time|tháng|month|năm|year)/i;
 
 function isDate(value) {
@@ -27,7 +27,9 @@ export function fallbackMapRecommendation(records) {
   return {
     canRenderMap: true,
     visualization: "polygon",
-    geometry: { field: location.name, provider: "maptiler", placeType: /quận|huyện|district/i.test(location.name) ? "county" : "region" },
+    geometry: { field: location.name, provider: "maptiler",
+      placeType: /quốc gia|quoc gia|country|nation/i.test(location.name) ? "country" : /quận|huyện|district/i.test(location.name) ? "county" : "region",
+      country: /quốc gia|quoc gia|country|nation/i.test(location.name) ? null : "VNM" },
     metricField: metrics[0].name,
     numericFields: metrics.map(column => column.name),
     filters: [
@@ -77,7 +79,9 @@ export async function requestAiMapRecommendation(records, options = {}) {
   return {
     canRenderMap: true,
     visualization: "polygon",
-    geometry: { field: suggestion.bindings.region, provider: "maptiler", placeType: region?.geoLevel === "admin2" ? "county" : "region" },
+    geometry: { field: suggestion.bindings.region, provider: "maptiler",
+      placeType: region?.geoLevel === "country" ? "country" : region?.geoLevel === "admin2" ? "county" : "region",
+      country: region?.geoLevel === "country" ? null : region?.country || null },
     metricField: suggestion.bindings.value,
     numericFields: pipeline.analysis.columns.filter(column => column.role === "measure").map(column => column.name),
     filters: [

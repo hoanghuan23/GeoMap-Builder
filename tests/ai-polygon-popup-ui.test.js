@@ -48,7 +48,8 @@ class Element {
 }
 
 function harness({ road = false, point = false, path = false, thematic = false, storeNameRole = "category", pointRecords = storeRecords,
-  fetchImpl = () => assert.fail("map interactions must not call AI"), boundaryLoader = loadAdministrativeBoundaries } = {}) {
+  fetchImpl = () => assert.fail("map interactions must not call AI"), boundaryLoader = loadAdministrativeBoundaries,
+  boundaryClipper = async boundary => boundary } = {}) {
   const elements = new Map(); const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   const rendered = []; const cleared = []; const popups = [];
   class Popup {
@@ -118,7 +119,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   }
   const context = vm.createContext({
     ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract,
-    fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: async boundary => boundary, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
+    fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
     humanizeField: field => field, renderMapIcon() {}, renderChartIcon() {}, keepSelectOpenAfterMouseClick: value => value,
@@ -316,6 +317,33 @@ test("count coloring and popup values use record units rather than the source me
   assert.equal(h.get("weather-legend-title").textContent, "Số bản ghi");
   const rows = JSON.parse(h.run("JSON.stringify(aiWeatherPopupContent(state.boundary.features[0]).children[1].children.map(row=>row.children.map(cell=>cell.textContent)))"));
   assert.ok(rows.some(([label, value]) => label === "Số bản ghi" && value === "1"));
+});
+
+test("country choropleth requests global country boundaries and never forces a Vietnam clipping option", async () => {
+  const clipped = [];
+  const h = harness({
+    boundaryLoader: async (names, options) => {
+      assert.deepEqual([...names], ["A", "B"]);
+      assert.equal(options.placeType, "country");
+      assert.equal(options.country, null);
+      return { type: "FeatureCollection", matchRate: 1, matched: names, unmatched: [], candidates: {},
+        features: names.map(name => ({ type: "Feature", place_type: ["country"],
+          properties: { __data_location: name, boundary_source: "MapTiler" },
+          geometry: { type: "Polygon", coordinates: [] } })) };
+    },
+    boundaryClipper: async (boundary, options) => {
+      clipped.push(options);
+      assert.equal(options.country, undefined);
+      return boundary;
+    }
+  });
+  h.run(`dataset.analysis.columns[0].geoLevel = 'country'; dataset.analysis.columns[0].country = 'VN';
+    dataset.suggestions[1].confidence = .9; dataset.suggestions[1].feasibilityScore = 1;
+    replaceBoundary = async () => {}; filteredAiBoundary = async () => {}; renderAiSuggestionGrid = () => {};`);
+  assert.equal(await h.run("activateAiChoropleth(dataset.suggestions[1])"), true);
+  assert.equal(clipped.length, 2);
+  assert.equal(h.dataset.recommendation.geometry.placeType, "country");
+  assert.equal(h.dataset.recommendation.geometry.country, null);
 });
 
 test("ambiguous geographic names show provinces and retries join exactly the chosen geometry", async () => {

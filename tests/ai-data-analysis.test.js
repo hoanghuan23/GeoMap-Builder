@@ -17,7 +17,7 @@ test("tóm tắt bảng dữ liệu mà không gửi toàn bộ workbook", () =>
 test("rule fallback nhận diện địa phương, thời gian và metric", () => {
   const recommendation = fallbackMapRecommendation(records);
   assert.equal(recommendation.visualization, "polygon");
-  assert.deepEqual(recommendation.geometry, { field: "Tỉnh/thành phố", provider: "maptiler", placeType: "region" });
+  assert.deepEqual(recommendation.geometry, { field: "Tỉnh/thành phố", provider: "maptiler", placeType: "region", country: "VNM" });
   assert.equal(recommendation.metricField, "Nhiệt độ trung bình");
   assert.deepEqual(recommendation.numericFields, ["Nhiệt độ trung bình", "Độ ẩm"]);
   assert.deepEqual(recommendation.filters, [

@@ -1297,9 +1297,15 @@ function renderTable() {
   const nums = [1, state.page - 1, state.page, state.page + 1, pages].filter((v, i, a) => v > 0 && v <= pages && a.indexOf(v) === i).sort((a, b) => a - b); let last = 0; $("page-buttons").innerHTML = nums.map(n => { const gap = n - last > 1 ? "<em>…</em>" : ""; last = n; return `${gap}<button class="${n === state.page ? "active" : ""}" data-page="${n}">${n}</button>` }).join("");
 }
 
+function boundaryProvinceName(feature) {
+  const properties = feature?.properties || {};
+  return properties.__province_name
+    || properties.NAME_1;
+}
+
 function provinceNames(data) {
   if (data?.type !== "FeatureCollection" || !Array.isArray(data.features)) return [];
-  return [...new Set(data.features.map(feature => feature?.properties?.NAME_1).filter(name => typeof name === "string" && name.trim()))]
+  return [...new Set(data.features.map(boundaryProvinceName).filter(name => typeof name === "string" && name.trim()))]
     .sort((a, b) => a.localeCompare(b, "vi"));
 }
 
@@ -1326,7 +1332,7 @@ function updateProvinceFilterLabel(names = selectedProvinceNames()) {
 
 function boundaryForProvinces(data, names) {
   if (!names.length || data?.type !== "FeatureCollection") return data;
-  const selected = new Set(names); return { ...data, features: data.features.filter(feature => selected.has(feature?.properties?.NAME_1)) };
+  const selected = new Set(names); return { ...data, features: data.features.filter(feature => selected.has(boundaryProvinceName(feature))) };
 }
 
 function fitGeoJSON(data) {
@@ -1939,7 +1945,9 @@ function recommendationForSuggestion(suggestion) {
     canRenderMap: true,
     visualization: suggestion.chartType === "map_line" ? "line" : suggestion.chartType === "choropleth" ? "polygon" : suggestion.chartType === "point" ? "point" : "h3",
     geometry: coordinateMap ? { field: regionField || null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: coordinateLine ? "line" : "point" } : regionField
-      ? { field: regionField, provider: suggestion.chartType === "map_line" ? "local-roads" : "maptiler", placeType: region?.geoLevel === "admin2" ? "county" : "region" }
+      ? { field: regionField, provider: suggestion.chartType === "map_line" ? "local-roads" : "maptiler",
+        placeType: region?.geoLevel === "country" ? "country" : region?.geoLevel === "admin2" ? "county" : "region",
+        country: region?.geoLevel === "country" ? null : region?.country || null }
       : { field: null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: "point" },
     metricField: valueField,
     numericFields: dataset.analysis.columns.filter(column => column.role === "measure").map(column => column.name),
@@ -2842,6 +2850,7 @@ async function activateAiChoropleth(suggestion) {
     resolvedBoundaries = await loadAdministrativeBoundaries(locations, {
       apiKey: CONFIG.MAPTILER_API_KEY,
       placeType: recommendation.geometry.placeType,
+      country: recommendation.geometry.country,
       strict: false,
       aliases: dataset.geoAliases || {},
       selections: dataset.geoSelections || {},
@@ -2853,7 +2862,10 @@ async function activateAiChoropleth(suggestion) {
     boundaries = {
       ...resolvedBoundaries,
       features: await Promise.all(resolvedBoundaries.features.map(async boundary =>
-        await landOnlyBoundary(boundary, { forceVietnam: true, signal: controller.signal }) || boundary
+        await landOnlyBoundary(boundary, {
+          country: recommendation.geometry.placeType === "country" ? undefined : recommendation.geometry.country || "VNM",
+          signal: controller.signal
+        }) || boundary
       ))
     };
     if (revision !== aiBoundaryRevision || dataset !== state.aiDataset || dataset.selectedSuggestionId !== suggestion.id) return null;

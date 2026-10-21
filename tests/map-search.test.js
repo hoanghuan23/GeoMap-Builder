@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, gadmLevelForFeature, getMapTilerAdministrativeBoundary, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, loadMapTilerAdministrativeBoundaries, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchGadmBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
+import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, administrativeLevelForFeature, getMapTilerAdministrativeBoundary, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, localBoundaryNameAliases, loadMapTilerAdministrativeBoundaries, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchLocalBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
 import { WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
 
 test("tolerant administrative loading trả match rate và giữ tên dữ liệu khi dùng alias", async () => {
@@ -68,7 +68,7 @@ test("searchMapTiler returns GeoJSON suggestions", async () => {
   assert.deepEqual(features, expected);
 });
 
-test("province lookup requests exact MapTiler region data without GADM", async () => {
+test("province lookup requests exact MapTiler region data without local GeoJSON", async () => {
   const url = new URL(buildProvinceGeocodingUrl("Phú Thọ", "test-key"));
   assert.equal(url.searchParams.get("types"), "region");
   assert.equal(url.searchParams.get("autocomplete"), "false");
@@ -253,7 +253,7 @@ test("getMapTilerFeature requests the full geometry by feature id", async () => 
   assert.deepEqual(feature, polygon);
 });
 
-test("clipBoundaryToLand removes MapTiler geometry outside the GADM land mask", () => {
+test("clipBoundaryToLand removes MapTiler geometry outside the local GeoJSON land mask", () => {
   const feature = {
     type: "Feature",
     bbox: [0, 0, 4, 4],
@@ -271,14 +271,14 @@ test("clipBoundaryToLand removes MapTiler geometry outside the GADM land mask", 
   assert.deepEqual(clipped.geometry.coordinates[0][0], [[0, 0], [2, 0], [2, 4], [0, 4], [0, 0]]);
 });
 
-test("GADM mask level follows the MapTiler administrative type", () => {
-  assert.equal(gadmLevelForFeature({ place_type: ["country"] }), 0);
-  assert.equal(gadmLevelForFeature({ place_type: ["region"] }), 1);
-  assert.equal(gadmLevelForFeature({ place_type: ["municipal_district"] }), 2);
-  assert.equal(gadmLevelForFeature({ place_type: ["place"] }), 2);
+test("local GeoJSON mask level follows the MapTiler administrative type", () => {
+  assert.equal(administrativeLevelForFeature({ place_type: ["country"] }), 0);
+  assert.equal(administrativeLevelForFeature({ place_type: ["region"] }), 1);
+  assert.equal(administrativeLevelForFeature({ place_type: ["municipal_district"] }), 2);
+  assert.equal(administrativeLevelForFeature({ place_type: ["place"] }), 2);
 });
 
-test("landOnlyBoundary loads matching GADM level and clips a Vietnam boundary", async () => {
+test("landOnlyBoundary loads matching local GeoJSON level and clips a Vietnam boundary", async () => {
   const feature = {
     type: "Feature",
     place_type: ["region"],
@@ -291,10 +291,33 @@ test("landOnlyBoundary loads matching GADM level and clips a Vietnam boundary", 
     requestedUrl = String(url);
     return { ok: true, json: async () => land };
   } });
-  assert.match(requestedUrl, /gadm41_VNM_1\.json$/);
+  assert.match(requestedUrl, /VNM\/VNM_ADM1\.geojson$/);
   assert.equal(clipped.properties.land_clipped, true);
-  assert.equal(clipped.properties.land_mask, "GADM 4.1 VNM level 1");
+  assert.equal(clipped.properties.land_mask, "VNM ADM1");
   assert.deepEqual(clipped.bbox, [0, 0, 3, 4]);
+});
+
+test("a MapTiler region spanning two old provinces keeps a single merged outline after clipping", async () => {
+  const rectangle = (left, right) => ({ type: "Polygon", coordinates: [
+    [[left, 0], [right, 0], [right, 3], [left, 3], [left, 0]]
+  ] });
+  const feature = { type: "Feature", place_type: ["region"],
+    properties: { boundary_source: "MapTiler" }, geometry: rectangle(0, 4) };
+  const land = { type: "FeatureCollection", features: [0, 2].map(left => ({ type: "Feature",
+    properties: {}, geometry: rectangle(left, left + 2) })) };
+  const urls = [];
+  const clipped = await landOnlyBoundary(feature, {
+    country: "VNM", fetchImpl: async url => {
+      urls.push(String(url)); return { ok: true, json: async () => land };
+    }
+  });
+  assert.equal(urls.length, 1);
+  assert.ok(urls[0].endsWith("/VNM/VNM_ADM1.geojson"));
+  assert.equal(clipped.properties.boundary_source, "MapTiler");
+  assert.equal(clipped.properties.land_mask, "VNM ADM1");
+  assert.deepEqual(clipped.bbox, [0, 0, 4, 3]);
+  assert.equal(clipped.geometry.coordinates.length, 1);
+  assert.equal(clipped.geometry.coordinates[0].length, 1, "old province boundaries must not become interior borders");
 });
 
 test("Vietnam detection supports properties and MapTiler context", () => {
@@ -303,9 +326,11 @@ test("Vietnam detection supports properties and MapTiler context", () => {
   assert.equal(isVietnamFeature({ properties: { country_code: "fr" } }), false);
 });
 
-test("landOnlyBoundary keeps non-Vietnam boundaries unchanged", async () => {
-  const feature = { type: "Feature", properties: { country_code: "fr" }, geometry: { type: "Polygon", coordinates: [] } };
-  assert.equal(await landOnlyBoundary(feature), feature);
+test("landOnlyBoundary keeps boundaries without configured local files unchanged", async () => {
+  const feature = { type: "Feature", properties: { country_code: "is" }, geometry: { type: "Polygon", coordinates: [] } };
+  assert.equal(await landOnlyBoundary(feature, {
+    fetchImpl: () => assert.fail("an unconfigured country must not load local files")
+  }), feature);
 });
 
 test("renderSearchBoundary adds only the clipped outline and clears its data", () => {
@@ -361,10 +386,11 @@ test("selection retries boundary rendering on idle after moving the map", async 
     properties: { country_code: "vn" },
     geometry: { type: "Polygon", coordinates: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]] }
   };
-  t.mock.method(globalThis, "fetch", async url => ({
-    ok: true,
-    json: async () => ({ type: "FeatureCollection", features: [polygon] })
-  }));
+  const requested = [];
+  t.mock.method(globalThis, "fetch", async url => {
+    requested.push(String(url));
+    return { ok: true, json: async () => ({ type: "FeatureCollection", features: [polygon] }) };
+  });
   const sources = new Map(); const layers = new Map(); const handlers = {};
   let loaded = true;
   const map = {
@@ -380,8 +406,11 @@ test("selection retries boundary rendering on idle after moving the map", async 
   get("map-search-input").value = "Lâm Đồng";
   get("map-search-form").handlers.submit({ preventDefault() {} });
   await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requested.length, 1);
+  assert.ok(requested[0].startsWith("https://api.maptiler.com/"), "search must prefer MapTiler over local ADM");
   const option = get("map-search-results").children[0];
   await option.handlers.click();
+  assert.ok(requested.some(url => url.endsWith("/VNM/VNM_ADM1.geojson")), "selection uses VNM_ADM only as its land mask");
   assert.equal(sources.has("map-search-boundary"), false);
   loaded = true;
   handlers.idle();
@@ -412,22 +441,47 @@ test("feature helpers use MapTiler center and place name", () => {
   assert.equal(featureLabel(feature), "Hưng Yên, Việt Nam");
 });
 
-test("GADM fallback finds Vietnamese names without requiring accents or spaces", async () => {
+test("local GeoJSON fallback finds Vietnamese names without requiring accents or spaces", async () => {
   const polygon = coordinates => ({ type: "Polygon", coordinates: [coordinates] });
   const collections = {
     0: { type: "FeatureCollection", features: [{ type: "Feature", properties: { GID_0: "VNM", COUNTRY: "Vietnam" }, geometry: polygon([[102, 8], [109, 8], [109, 23], [102, 8]]) }] },
-    1: { type: "FeatureCollection", features: [{ type: "Feature", properties: { GID_1: "VNM.35_1", NAME_1: "LâmĐồng", VARNAME_1: "LamDong" }, geometry: polygon([[107, 11], [108, 11], [108, 12], [107, 11]]) }] },
+    1: { type: "FeatureCollection", features: [{ type: "Feature", properties: { GID_0: "VNM", GID_1: "VNM.35_1", NAME_1: "LâmĐồng", VARNAME_1: "LamDong", NL_NAME_1: "NA", TYPE_1: "Tỉnh" }, geometry: polygon([[107, 11], [108, 11], [108, 12], [107, 11]]) }] },
     2: { type: "FeatureCollection", features: [] }
   };
   const fetchImpl = async url => {
-    const level = Number(String(url).match(/VNM_(\d)\.json/)?.[1]);
+    const level = Number(String(url).match(/VNM_ADM(\d)\.geojson/)?.[1]);
     return { ok: true, json: async () => collections[level] };
   };
-  const results = await searchGadmBoundaries("lam dong", { fetchImpl });
+  const results = await searchLocalBoundaries("lam dong", { fetchImpl });
   assert.equal(results.length, 1);
   assert.equal(results[0].text, "Lâm Đồng");
-  assert.equal(results[0].properties.local_gadm, true);
+  assert.equal(results[0].properties.local_boundary, true);
   assert.deepEqual(results[0].bbox, [107, 11, 108, 12]);
+});
+
+test("local ADM search reads split aliases and skips NA without requesting parent geometry", async () => {
+  const feature = { type: "Feature", properties: {
+    GID_0: "VNM", GID_1: "VNM.1_1", GID_2: "VNM.1.1_1", NAME_1: "AnGiang", NAME_2: "AnPhú",
+    VARNAME_2: "AnPhu|Alternate District;Other Name", NL_NAME_2: "Native Name|NA", TYPE_2: "Huyện"
+  }, geometry: { type: "Polygon", coordinates: [[[105, 10], [106, 10], [106, 11], [105, 10]]] } };
+  for (const query of ["An Phú", "Alternate District", "Other Name", "Native Name"]) {
+    const urls = [];
+    const result = await searchLocalBoundaries(query, {
+      levels: [2], fetchImpl: async url => {
+        urls.push(String(url)); return { ok: true, json: async () => ({ type: "FeatureCollection", features: [feature] }) };
+      }
+    });
+    assert.equal(result.length, 1, query);
+    assert.equal(result[0].id, "adm.VNM.1.1_1");
+    assert.equal(result[0].text, "An Phú");
+    assert.equal(result[0].properties.__province_name, "An Giang");
+    assert.equal(result[0].place_name, "An Phú, An Giang, Việt Nam");
+    assert.equal(urls.length, 1);
+    assert.ok(urls[0].endsWith("/VNM/VNM_ADM2.geojson"));
+  }
+  assert.ok(!localBoundaryNameAliases(feature).includes("NA"));
+  assert.equal(administrativeLevelForFeature(feature), 2);
+  assert.equal(isVietnamFeature(feature), true);
 });
 
 test("focusMapOnFeature fits the clipped boundary", () => {

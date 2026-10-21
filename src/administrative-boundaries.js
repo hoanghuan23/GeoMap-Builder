@@ -1,15 +1,18 @@
 import {
-  getMapTilerAdministrativeBoundary, getMapTilerRegion, isBoundaryFeature, normalizedAdministrativeName,
-  normalizePlaceName, normalizePlaceWords, searchGadmBoundaries, searchMapTilerBoundaries
+  countryCandidateScore, getMapTilerAdministrativeBoundary, getMapTilerRegion, isBoundaryFeature, normalizedAdministrativeName,
+  localBoundaryNameAliases, normalizePlaceName, normalizePlaceWords, searchLocalBoundaries, searchMapTilerBoundaries
 } from "./map-search.js";
+import { resolveBoundaryCountry } from "./country-boundary-sources.js";
 
 function provinceName(feature) {
   const region = feature.context?.find(item => item.id?.startsWith("region.") || item.place_type?.includes("region"));
-  return feature.properties?.__province_name || feature.properties?.NAME_1 || region?.text || "";
+  return feature.properties?.__province_name
+    || feature.properties?.NAME_1 || region?.text || "";
 }
 
 export function administrativeBoundaryLabel(feature) {
   const name = feature.text || feature.place_name?.split(",")[0] || "Địa danh chưa có tên";
+  if (feature.place_type?.includes("country")) return name;
   const province = String(provinceName(feature)).replace(/([\p{Ll}])([\p{Lu}])/gu, "$1 $2")
     .replace(/^(?:tỉnh|thành\s*phố|tp\.?)\s+/iu, "").trim();
   if (!province) return `${name} — Chưa rõ tỉnh/thành`;
@@ -18,7 +21,7 @@ export function administrativeBoundaryLabel(feature) {
 
 async function describeCandidates(features, options) {
   return Promise.all(features.map(async feature => {
-    if (provinceName(feature) || !options.apiKey) return feature;
+    if (feature.place_type?.includes("country") || provinceName(feature) || !options.apiKey) return feature;
     const center = feature.center || (feature.bbox && [(feature.bbox[0] + feature.bbox[2]) / 2, (feature.bbox[1] + feature.bbox[3]) / 2]);
     try {
       const region = await getMapTilerRegion(center, options);
@@ -41,13 +44,14 @@ function administrativeQuery(value, placeType) {
     : ["huyen", "quan", "thixa"].includes(type) ? "district"
     : ["xa", "phuong", "thitran"].includes(type) ? "commune" : null;
   return {
-    name: normalizePlaceName(prefix ? words.slice(prefix[0].length) : label),
+    name: normalizePlaceName(placeType === "country" ? resolveBoundaryCountry(label) || label : prefix ? words.slice(prefix[0].length) : label),
     kind, type, placeType,
-    parents: context.map(normalizedAdministrativeName).filter(name => name && !["vietnam", "viet nam", "vn"].includes(name))
+    parents: context.filter(part => !resolveBoundaryCountry(part)).map(normalizedAdministrativeName).filter(Boolean)
   };
 }
 
 function mapTilerScore(feature, query) {
+  if (query.placeType === "country") return countryCandidateScore(feature, query.name);
   const label = feature.text || feature.place_name?.split(",")[0] || feature.properties?.name;
   const candidate = administrativeQuery(label, feature.place_type?.[0]);
   if (query.kind && candidate.kind && query.kind !== candidate.kind
@@ -71,32 +75,37 @@ function withSource(feature, name, source) {
   } };
 }
 
-async function gadmCandidates(name, query, options) {
-  // The bundled GADM data ends at level 2; a commune must not match a district of the same name.
+async function localCandidates(name, query, options) {
+  // Only configured ADM levels are available; communes must never match ADM2 districts.
   if (!query.name || query.kind === "commune") return [];
-  const levels = query.kind === "region" ? [1] : query.kind === "district" ? [2]
+  const countryName = resolveBoundaryCountry(name);
+  const levels = countryName ? [0] : query.kind === "region" ? [1] : query.kind === "district" ? [2]
     : query.kind === "city" ? [1, 2] : query.placeType === "country" ? [0]
     : ["region", "subregion"].includes(query.placeType) ? [1] : [2];
+  const candidates = await searchLocalBoundaries(name, { ...options, levels, limit: Infinity });
   const expectedType = query.kind === "city" ? "thanhpho" : query.type;
-  const candidates = await searchGadmBoundaries(query.name, { ...options, limit: Infinity });
   return candidates.filter(feature => {
     if (!isBoundaryFeature(feature)) return false;
     const properties = feature.properties || {};
-    const level = properties.GID_2 ? 2 : properties.GID_1 ? 1 : 0;
+    const level = properties.__admin_level;
     if (!levels.includes(level)) return false;
     if (expectedType && normalizePlaceName(properties[`TYPE_${level}`]) !== expectedType) return false;
-    const aliases = [properties[`NAME_${level}`], properties[`VARNAME_${level}`], properties[`NL_NAME_${level}`], level === 0 && properties.COUNTRY]
-      .filter(value => value && value !== "NA").flatMap(value => String(value).split(/[|;]/)).map(normalizePlaceName);
-    return aliases.includes(query.name) && query.parents.every(parent => parent === normalizePlaceName(properties.NAME_1));
-  }).map(feature => withSource(feature, name, "GADM"));
+    return localBoundaryNameAliases(feature).map(normalizedAdministrativeName).includes(query.name)
+      && query.parents.every(parent => parent === normalizedAdministrativeName(properties.NAME_1));
+  }).map(feature => withSource(feature, name, "Local ADM"));
 }
 
-async function resolveCandidates(name, { apiKey, placeType, signal, fetchImpl }) {
+async function resolveCandidates(name, { apiKey, placeType, country, signal, fetchImpl }) {
   const query = administrativeQuery(name, placeType);
-  if (apiKey) {
+  const code = resolveBoundaryCountry(name) || resolveBoundaryCountry(String(name).split(",").at(-1))
+    || (placeType === "country" ? null : resolveBoundaryCountry(country ?? "VNM"));
+  const isCountry = placeType === "country";
+  if (!code && !isCountry) return [];
+  // Country lookup is global and does not depend on configured local files.
+  if (apiKey && (isCountry || code === "VNM")) {
     try {
       let candidates;
-      if (!query.parents.length && (!query.kind || query.kind === "region")) {
+      if (isCountry || !query.parents.length && (!query.kind || query.kind === "region")) {
         const boundary = await getMapTilerAdministrativeBoundary(name, { apiKey, placeType: query.kind === "region" ? "region" : placeType, signal, fetchImpl });
         candidates = boundary ? [boundary] : [];
       } else {
@@ -114,14 +123,14 @@ async function resolveCandidates(name, { apiKey, placeType, signal, fetchImpl })
       }
     } catch (error) {
       if (error?.name === "AbortError" || signal?.aborted) throw error;
-      // Local boundaries can still resolve the name when the provider is unavailable.
+      // Keep local ADM files available when the provider is unavailable.
     }
   }
-  return gadmCandidates(name, query, { signal, fetchImpl });
+  return code ? localCandidates(name, query, { country: code, signal, fetchImpl }) : [];
 }
 
 export async function loadAdministrativeBoundaries(names, {
-  apiKey, placeType = "region", signal, fetchImpl = fetch, concurrency = 4,
+  apiKey, placeType = "region", country, signal, fetchImpl = fetch, concurrency = 4,
   onProgress, strict = true, aliases = {}, selections = {}
 } = {}) {
   const uniqueNames = [...new Set((names || []).map(name => String(name ?? "").trim()).filter(Boolean))];
@@ -130,7 +139,7 @@ export async function loadAdministrativeBoundaries(names, {
   // Share local file loads across workers, including when a custom fetch implementation is used.
   const localFiles = new Map();
   const sharedFetch = (url, options) => {
-    if (!/gadm41_VNM_[012]\.json(?:$|\?)/.test(String(url))) return fetchImpl(url, options);
+    if (!/\.geojson(?:$|\?)/i.test(String(url))) return fetchImpl(url, options);
     const key = String(url);
     if (!localFiles.has(key)) localFiles.set(key, Promise.resolve(fetchImpl(url, options)).then(async response => {
       const data = response.ok ? await response.json() : null;
@@ -148,7 +157,7 @@ export async function loadAdministrativeBoundaries(names, {
       try {
         const selected = selections[sourceName];
         const matches = isBoundaryFeature(selected) ? [selected]
-          : await resolveCandidates(queryName, { apiKey, placeType, signal, fetchImpl: fetchImpl === fetch ? fetch : sharedFetch });
+          : await resolveCandidates(queryName, { apiKey, placeType, country, signal, fetchImpl: fetchImpl === fetch ? fetch : sharedFetch });
         if (signal?.aborted) throw new DOMException("Boundary loading aborted", "AbortError");
         if (matches.length === 1) results[index] = { ...matches[0], properties: {
           ...(matches[0].properties || {}), __data_location: sourceName, __data_query: queryName
