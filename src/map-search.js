@@ -1,4 +1,5 @@
 import polygonClipping from "polygon-clipping";
+import { normalizeDataSearchConfig, resolveDataSearchColumns } from "./data-search-config.js";
 import {
   COUNTRY_BOUNDARY_SOURCES, loadCountryBoundaryData, resolveBoundaryCountry
 } from "./country-boundary-sources.js";
@@ -510,21 +511,35 @@ export function focusMapOnFeature(map, feature) {
   return true;
 }
 
-/** Index only fields identified by the uploaded data analysis. No geocoding requests. */
-export function buildDataSearchIndex({ data, columns = [], titleField } = {}) {
-  const fields = columns.filter(column => ["geo", "category", "text", "id"].includes(column.role)
-    && !["point_lat", "point_lng", "h3"].includes(column.geoLevel) && !column.name.startsWith("__"));
-  if (!fields.length) return { entries: [], placeholder: "Tìm trong dữ liệu đã tải lên..." };
-  const primary = fields.find(column => column.name === titleField) || fields[0];
+function dataSearchValue(value) {
+  return ["string", "number", "boolean"].includes(typeof value) ? String(value).trim() : "";
+}
+
+function dataSearchEntityKey(properties, fields) {
+  const primary = dataSearchValue(properties?.[fields[0].name]);
+  if (!primary) return null;
+  const context = fields[0].role === "id" ? [] : fields.slice(1).filter(column => column.role === "geo");
+  return JSON.stringify([primary, ...context.map(column => dataSearchValue(properties?.[column.name]))]);
+}
+
+/** Index only uploaded fields. AI supplies defaults; filtering never calls AI/geocoding. */
+export function buildDataSearchIndex({ data, columns = [], titleField, chartType, search_bar, search_fields,
+  filtered = false, sourceRecords, minFilteredObjects = 5 } = {}) {
+  const config = normalizeDataSearchConfig({ ...(search_bar === undefined ? {} : { search_bar }),
+    ...(search_fields === undefined ? {} : { search_fields }) }, columns);
+  const fields = resolveDataSearchColumns({ columns, titleField, chartType, search_fields: config.search_fields });
+  if (!fields.length) return { entries: [], fields: [], uniqueCount: 0, enabled: false, placeholder: "Tìm trong dữ liệu đã tải lên..." };
+  const primary = fields[0];
   const entries = (data?.features || []).flatMap(feature => {
     if (!featureCenter(feature)) return [];
     const properties = feature.properties || {};
+    const entityKey = dataSearchEntityKey(properties, fields);
+    if (!entityKey) return [];
     const values = fields.flatMap(column => {
-      const value = properties[column.name];
-      return value == null || String(value).trim() === "" ? [] : [{ column, value: String(value).trim() }];
+      const value = dataSearchValue(properties[column.name]);
+      return value ? [{ column, value }] : [];
     });
-    if (!values.length) return [];
-    const label = values.find(item => item.column.name === primary.name)?.value || values[0].value;
+    const label = values[0].value;
     const aliases = values.flatMap(({ column, value }) => {
       if (column.geoLevel !== "country") return [value];
       const code = resolveBoundaryCountry(value);
@@ -535,10 +550,16 @@ export function buildDataSearchIndex({ data, columns = [], titleField } = {}) {
     if (!terms.length) return [];
     const subtitle = values.filter(item => item.value !== label).slice(0, 2)
       .map(item => `${item.column.labelVi || item.column.name}: ${item.value}`).join(" · ") || primary.labelVi || primary.name;
-    return [{ feature, label, subtitle, terms }];
+    return [{ feature, label, subtitle, terms, entityKey }];
   });
+  const uniqueCount = new Set(entries.map(entry => entry.entityKey)).size;
+  const totalCount = Array.isArray(sourceRecords)
+    ? new Set(sourceRecords.map(record => dataSearchEntityKey(record, fields)).filter(Boolean)).size : null;
+  const reducedByFilter = filtered && (totalCount == null || uniqueCount < totalCount);
+  const enabled = config.search_bar !== false && uniqueCount > 0
+    && (!reducedByFilter || uniqueCount >= minFilteredObjects);
   const name = primary.geoLevel === "country" ? "quốc gia" : (primary.labelVi || primary.name).toLocaleLowerCase("vi");
-  return { entries, placeholder: `Tìm ${name} trong dữ liệu...` };
+  return { entries, fields: fields.map(column => column.name), uniqueCount, enabled, placeholder: `Tìm ${name} trong dữ liệu...` };
 }
 
 export function searchDataIndex(index, query, limit = 8) {
@@ -551,7 +572,7 @@ export function searchDataIndex(index, query, limit = 8) {
     .slice(0, limit);
 }
 
-export function createMapSearch({ map, onSelect = null }) {
+export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }) {
   const root = document.getElementById("map-search");
   const form = document.getElementById("map-search-form");
   const input = document.getElementById("map-search-input");
@@ -669,11 +690,12 @@ export function createMapSearch({ map, onSelect = null }) {
 
   return {
     setData(next = {}) {
-      if (snapshot && snapshot.data === next.data && snapshot.columns === next.columns && snapshot.titleField === next.titleField) return;
-      snapshot = next;
-      index = buildDataSearchIndex(next);
+      const keys = ["data", "columns", "titleField", "chartType", "search_bar", "search_fields", "filtered", "sourceRecords"];
+      if (snapshot && keys.every(key => snapshot[key] === next[key])) return;
+      snapshot = { ...next };
+      index = buildDataSearchIndex({ ...next, minFilteredObjects });
       reset();
-      root.hidden = index.entries.length === 0;
+      root.hidden = !index.enabled;
       input.disabled = root.hidden;
       input.placeholder = index.placeholder;
       input.setAttribute("aria-label", index.placeholder.replace(/\.\.\.$/, ""));

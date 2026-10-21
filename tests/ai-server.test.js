@@ -40,7 +40,12 @@ test("middleware forwards per-column temperature semantics and legends without c
     const columnSchema = payload.text.format.schema.properties.columns.items;
     assert.ok(columnSchema.required.includes("semanticType"));
     assert.ok(columnSchema.required.includes("legend"));
+    assert.ok(payload.text.format.schema.required.includes("search_bar"));
+    assert.ok(payload.text.format.schema.required.includes("search_fields"));
+    assert.match(payload.instructions, /không áp ngưỡng 30 cứng/);
+    assert.match(payload.instructions, /Đặt tên định danh chính ở đầu/);
     return { ok: true, json: async () => ({ output_text: JSON.stringify({
+      search_bar: true, search_fields: ["province", "temperature", "not_in_input", "province"],
       columns: [{ name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", semanticType: "air_temperature", legend }],
       suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend }]
     }) }) };
@@ -49,6 +54,8 @@ test("middleware forwards per-column temperature semantics and legends without c
     const response = await call(middlewareFor({ OPENAI_API_KEY: "test" }), { profile });
     assert.equal(response.status, 200);
     assert.equal(calls, 1);
+    assert.equal(response.body.search_bar, true);
+    assert.deepEqual(response.body.search_fields, ["province"]);
     assert.deepEqual(response.body.columns[1].legend, legend);
     assert.deepEqual(response.body.suggestions[0].legend, legend);
     assert.equal(response.body.columns[1].semanticType, "air_temperature");

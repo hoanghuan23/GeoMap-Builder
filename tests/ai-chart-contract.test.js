@@ -13,6 +13,28 @@ const profile = {
   ]
 };
 
+test("AI search defaults survive server/client normalization and reject invalid fields", () => {
+  assert.ok(ANALYSIS_RESPONSE_SCHEMA.required.includes("search_bar"));
+  assert.ok(ANALYSIS_RESPONSE_SCHEMA.required.includes("search_fields"));
+  const raw = { columns: [{ name: "note", role: "text" }], suggestions: [], search_bar: true,
+    search_fields: ["note", "province", "note", "temperature", "date", "missing", null] };
+  const normalized = validateAndNormalizeAnalysis(raw, profile);
+  assert.equal(normalized.search_bar, true);
+  assert.deepEqual(normalized.search_fields, ["note", "province"]);
+  assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(normalized)), profile), normalized);
+  const disabled = validateAndNormalizeAnalysis({ ...raw, search_bar: false }, profile);
+  assert.equal(disabled.search_bar, false);
+  assert.deepEqual(disabled.search_fields, ["note", "province"]);
+  for (const search_fields of [null, {}, "province", [], ["missing", "temperature", "date"]]) {
+    const result = validateAndNormalizeAnalysis({ ...raw, search_fields }, profile);
+    assert.equal(result.search_bar, false);
+    assert.deepEqual(result.search_fields, []);
+  }
+  const legacy = validateAndNormalizeAnalysis({ columns: [], suggestions: [] }, profile);
+  assert.equal(Object.hasOwn(legacy, "search_bar"), false);
+  assert.equal(Object.hasOwn(legacy, "search_fields"), false);
+});
+
 test("strict schema requires nullable semantic and legend fields on every AI column/suggestion", () => {
   const columns = ANALYSIS_RESPONSE_SCHEMA.properties.columns.items;
   const suggestions = ANALYSIS_RESPONSE_SCHEMA.properties.suggestions.items;

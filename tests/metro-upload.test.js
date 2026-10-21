@@ -179,11 +179,13 @@ test("data search follows analyzed upload fields and clears when the dataset is 
 test("uploaded country weather enables search using the current date and country filters", async () => {
   const { context, get } = createHarness();
   const indexes = [];
+  let analysisCalls = 0;
   context.parseSpreadsheetFile = parseSpreadsheetFile;
   context.searchController = { setData(snapshot) { indexes.push(buildDataSearchIndex(snapshot)); } };
   vm.runInContext("mapSearch = searchController", context);
   context.requestAiDataAnalysis = async (rows, { profile }) => {
-    const analysis = fallbackAnalysis(profile);
+    analysisCalls += 1;
+    const analysis = { ...fallbackAnalysis(profile), search_bar: true, search_fields: ["Quốc gia"] };
     return { analysis, profile, ...normalizeTabularRecords(rows, analysis.columns) };
   };
   context.loadAdministrativeBoundaries = async names => ({
@@ -197,6 +199,8 @@ test("uploaded country weather enables search using the current date and country
   context.countryFile = { name: "country-weather.xlsx", arrayBuffer: async () => workbook };
   await vm.runInContext("processSpatialFile(countryFile)", context);
   assert.equal(vm.runInContext("state.mapType", context), "polygon");
+  assert.equal(indexes.at(-1).enabled, true);
+  assert.deepEqual(Array.from(indexes.at(-1).fields), ["Quốc gia"]);
   let result = searchDataIndex(indexes.at(-1), "Vietnam")[0];
   assert.equal(result.label, "Việt Nam");
   assert.equal(result.feature.properties["Nhiệt độ trung bình"], 28.6, "search opens the latest displayed date");
@@ -208,8 +212,53 @@ test("uploaded country weather enables search using the current date and country
   await vm.runInContext("filteredAiBoundary()", context);
   result = searchDataIndex(indexes.at(-1), "Vietnam")[0];
   assert.equal(result.feature.properties["Nhiệt độ trung bình"], 28, "filter changes refresh the searchable feature values");
+  const countries = descendants(controls).filter(node => node.className === "ai-generated-filter" && node.dataset.field === "Quốc gia");
+  assert.equal(countries.length, 1);
+  countries[0].value = "Việt Nam";
+  await vm.runInContext("filteredAiBoundary()", context);
+  assert.equal(indexes.at(-1).uniqueCount, 1);
+  assert.equal(indexes.at(-1).enabled, false);
+  countries[0].value = "";
+  await vm.runInContext("filteredAiBoundary()", context);
+  assert.equal(indexes.at(-1).enabled, true);
+  vm.runInContext("state.aiDataset.analysis.search_bar = false; syncDataSearch()", context);
+  assert.equal(indexes.at(-1).enabled, false);
+  assert.equal(analysisCalls, 1, "filters and search preferences never repeat AI analysis");
   vm.runInContext("deleteData()", context);
   assert.equal(indexes.at(-1).entries.length, 0);
+});
+
+test("AI road search works without a spatial profile and counts names rather than segments", () => {
+  const { context } = createHarness();
+  const indexes = [];
+  context.searchController = { setData(snapshot) { indexes.push(buildDataSearchIndex(snapshot)); } };
+  context.roadRows = Array.from({ length: 8 }, (_, i) => ({ "Tên đường": `Đường ${i}`, "Khu vực": "Hà Nội" }));
+  vm.runInContext(`
+    mapSearch = searchController;
+    state.mapType = "line"; state.dataProfile = null;
+    state.aiDataset = {
+      records: roadRows, selectedSuggestionId: "roads", filters: {},
+      analysis: { search_bar: true, search_fields: ["Tên đường"], columns: [
+        { name: "Khu vực", role: "geo", geoLevel: "admin1" }, { name: "Tên đường", role: "category" }
+      ] },
+      suggestions: [{ id: "roads", chartType: "map_line", bindings: { region: "Tên đường" } }],
+      recommendation: { geometry: { field: "Tên đường" } }
+    };
+    state.lineData = { type: "FeatureCollection", features: roadRows.flatMap(properties => [0, 1].map(() => ({
+      type: "Feature", properties, geometry: { type: "LineString", coordinates: [[105, 21], [106, 22]] }
+    }))) };
+    syncDataSearch();
+  `, context);
+  assert.equal(indexes.at(-1).enabled, true);
+  assert.equal(indexes.at(-1).uniqueCount, 8);
+  assert.equal(searchDataIndex(indexes.at(-1), "duong 0")[0].label, "Đường 0");
+  vm.runInContext(`
+    state.aiDataset.filters = { "Tên đường": ["Đường 0"] };
+    state.lineData = { ...state.lineData, features: state.lineData.features.slice(0, 2) };
+    syncDataSearch();
+  `, context);
+  assert.equal(indexes.at(-1).uniqueCount, 1);
+  assert.equal(indexes.at(-1).enabled, false);
 });
 
 test("Point style panel applies appearance and resets it without rebuilding H3 or changing filters", async () => {

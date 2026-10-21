@@ -156,3 +156,112 @@ test("analyzed point names and IDs are searchable without indexing coordinates o
   assert.deepEqual(searchDataIndex(index, "21"), []);
   assert.deepEqual(searchDataIndex(index, "hidden-provider"), []);
 });
+
+function storeData(count = 6) {
+  const records = Array.from({ length: count }, (_, i) => ({ name: `Cửa hàng ${i + 1}`, city: "Hà Nội", code: `SHOP-${i + 1}`, value: i }));
+  return {
+    data: { type: "FeatureCollection", features: records.map(properties => ({ type: "Feature", properties,
+      geometry: { type: "Point", coordinates: [105, 21] } })) },
+    columns: [{ name: "name", role: "text" }, { name: "city", role: "geo", geoLevel: "admin1" },
+      { name: "code", role: "id" }, { name: "value", role: "measure" }],
+    titleField: "name", chartType: "point", sourceRecords: records,
+    search_bar: true, search_fields: ["name", "city"]
+  };
+}
+
+test("AI selects the searchable columns and can enable fewer than 30 objects or disable valid fields", t => {
+  const { controller, get, search } = harness(t);
+  const snapshot = storeData();
+  const index = buildDataSearchIndex(snapshot);
+  assert.deepEqual(index.fields, ["name", "city"]);
+  assert.equal(index.enabled, true);
+  assert.equal(index.uniqueCount, 6);
+  assert.equal(searchDataIndex(index, "ha noi").length, 6);
+  assert.deepEqual(searchDataIndex(index, "SHOP-1"), [], "unselected IDs are not indexed");
+  controller.setData(snapshot);
+  assert.equal(get("map-search").hidden, false);
+  search("cua hang");
+  controller.setData({ ...snapshot, search_bar: false });
+  assert.equal(get("map-search").hidden, true);
+  assert.equal(get("map-search-input").disabled, true);
+  assert.equal(get("map-search-results").hidden, true);
+  assert.equal(get("map-search-input").value, "");
+  assert.equal(buildDataSearchIndex(storeData(1)).enabled, true, "AI can enable one object before filters narrow the dataset");
+});
+
+test("search rejects malformed fields, measures, coordinates and metadata without choosing another column", () => {
+  const snapshot = storeData();
+  snapshot.columns.push({ name: "lat", role: "geo", geoLevel: "point_lat" }, { name: "__source", role: "text" });
+  for (const search_fields of [null, "name", {}, [], ["missing", "value", "lat", "__source"]]) {
+    const index = buildDataSearchIndex({ ...snapshot, search_fields });
+    assert.equal(index.enabled, false);
+    assert.deepEqual(index.entries, []);
+  }
+  assert.deepEqual(buildDataSearchIndex({ ...snapshot, search_fields: ["name", "name", "value", "city"] }).fields, ["name", "city"]);
+  assert.equal(buildDataSearchIndex({ ...snapshot, data: { type: "FeatureCollection", features: [
+    { ...snapshot.data.features[0], properties: { name: " ", city: "Hà Nội" } },
+    { ...snapshot.data.features[0], geometry: null }
+  ] } }).enabled, false, "context alone and features without geometry cannot enable search");
+});
+
+test("filtering below five unique objects hides and clears search, and restoring the data enables it", t => {
+  const { controller, get, search, selected } = harness(t);
+  const snapshot = storeData();
+  controller.setData(snapshot);
+  const stale = search("Cửa hàng 1")[0];
+  const filtered = { ...snapshot, filtered: true,
+    data: { ...snapshot.data, features: snapshot.data.features.slice(0, 4) } };
+  controller.setData(filtered);
+  assert.equal(buildDataSearchIndex(filtered).uniqueCount, 4);
+  assert.equal(get("map-search").hidden, true);
+  assert.equal(get("map-search-input").value, "");
+  assert.equal(get("map-search-results").hidden, true);
+  stale.handlers.click();
+  assert.equal(selected.length, 0);
+  controller.setData({ ...snapshot, filtered: true, data: { ...snapshot.data, features: snapshot.data.features.slice(0, 5) } });
+  assert.equal(get("map-search").hidden, false, "five is inclusive");
+  controller.setData(snapshot);
+  search("Cửa hàng 1");
+  controller.setData({ ...snapshot });
+  assert.equal(get("map-search-input").value, "Cửa hàng 1", "styling preserves the query and current results");
+  assert.equal(get("map-search-results").hidden, false);
+  controller.setData({ ...snapshot, search_bar: false });
+  assert.equal(get("map-search").hidden, true, "restoring data never overrides AI false");
+  assert.equal(buildDataSearchIndex({ ...filtered, minFilteredObjects: 4 }).enabled, true, "the UX threshold is configurable");
+  assert.equal(buildDataSearchIndex({ ...storeData(2), filtered: true }).enabled, true, "filters retaining all objects preserve the AI default");
+});
+
+test("unique objects ignore repeated rows/segments and whitespace but retain geographic context and accents", () => {
+  const snapshot = storeData(1);
+  const feature = snapshot.data.features[0];
+  const rows = [
+    { name: "Springfield", city: "USA" }, { name: " Springfield ", city: "USA" },
+    { name: "Springfield", city: "Canada" }, { name: "Á", city: "USA" }, { name: "A", city: "USA" }
+  ];
+  const data = { ...snapshot.data, features: rows.map(properties => ({ ...feature, properties })) };
+  const index = buildDataSearchIndex({ ...snapshot, data });
+  assert.equal(index.uniqueCount, 4);
+  assert.equal(searchDataIndex(index, "Springfield").length, 3);
+  assert.match(searchDataIndex(index, "Canada")[0].subtitle, /Canada/);
+  const line = { ...snapshot, chartType: "map_line", search_fields: ["name"],
+    data: { ...data, features: Array.from({ length: 100 }, () => ({ ...feature,
+      geometry: { type: "LineString", coordinates: [[105, 21], [106, 22]] } })) } };
+  assert.equal(buildDataSearchIndex(line).uniqueCount, 1, "a hundred road segments still represent one named road");
+});
+
+test("the active polygon level controls the primary field while Point prefers names before IDs", () => {
+  const snapshot = storeData();
+  const columns = [{ name: "country", role: "geo", geoLevel: "country" }, { name: "region", role: "geo", geoLevel: "admin1" }];
+  const data = { ...snapshot.data, features: snapshot.data.features.map(feature => ({ ...feature,
+    properties: { country: "Việt Nam", region: feature.properties.name } })) };
+  const country = { data, columns, chartType: "choropleth", titleField: "country", search_bar: true, search_fields: ["region", "country"] };
+  assert.deepEqual(buildDataSearchIndex(country).fields, ["country"]);
+  assert.equal(buildDataSearchIndex(country).uniqueCount, 1);
+  const region = buildDataSearchIndex({ ...country, titleField: "region", search_fields: ["country"] });
+  assert.deepEqual(region.fields, ["region", "country"]);
+  assert.equal(region.uniqueCount, 6);
+  assert.deepEqual(buildDataSearchIndex({ ...snapshot, search_fields: ["code", "city"] }).fields, ["name", "code", "city"]);
+  const idOnly = buildDataSearchIndex({ ...snapshot, columns: snapshot.columns.filter(column => column.name !== "name"), titleField: "code", search_fields: ["code"] });
+  assert.equal(idOnly.entries[0].label, "SHOP-1");
+  assert.equal(idOnly.enabled, true);
+});

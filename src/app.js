@@ -2915,12 +2915,12 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
 // Search follows the analyzed fields and the features produced by the active filters.
 function syncDataSearch() {
   if (!mapSearch) return;
-  if (!state.mapType || state.chartConfig || !state.dataProfile) { mapSearch.setData(); return; }
+  if (!state.mapType || state.chartConfig || !state.aiDataset && !state.dataProfile) { mapSearch.setData(); return; }
   const suggestion = activeMapPopupSuggestion();
   const data = state.mapType === "point" ? state.pointData
     : state.mapType === "line" ? state.lineData : state.boundary;
   if (state.aiDataset && !suggestion) { mapSearch.setData(); return; }
-  if (dataSearchProfile !== state.dataProfile) {
+  if (!state.aiDataset && dataSearchProfile !== state.dataProfile) {
     dataSearchProfile = state.dataProfile;
     dataSearchColumns = (state.dataProfile.textFields || [])
       .filter(name => !name.startsWith("__"))
@@ -2929,7 +2929,15 @@ function syncDataSearch() {
   const columns = state.aiDataset?.analysis.columns || dataSearchColumns;
   const titleField = suggestion?.chartType === "point" ? pointTitleField(columns)
     : state.aiDataset?.recommendation?.geometry?.field;
-  mapSearch.setData({ data, columns, titleField });
+  const dataset = state.aiDataset;
+  const pointSelection = dataset?.activePointView?.selection;
+  const filtered = dataset ? Object.values(dataset.filters || {}).some(value =>
+    Array.isArray(value) ? value.length > 0 : value != null && value !== "")
+    || suggestion?.chartType === "point" && Boolean(pointSelection?.mode === "pick" || pointSelection?.time)
+    : selectedProvinceNames().length > 0;
+  mapSearch.setData({ data, columns, titleField, chartType: suggestion?.chartType,
+    search_bar: dataset?.analysis.search_bar, search_fields: dataset?.analysis.search_fields,
+    filtered, sourceRecords: dataset?.records });
 }
 
 function showSheetSelection(file, sheetNames, fileKey = null) {
@@ -3618,7 +3626,7 @@ async function init() {
   bindUI(); syncMapStyleControls();
   map = new maplibregl.Map({ container: "map", style: MAP_STYLES[state.mapStyle], center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
   observeMapSize();
-  mapSearch = createMapSearch({ map, onSelect(feature, center) {
+  mapSearch = createMapSearch({ map, minFilteredObjects: CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS, onSelect(feature, center) {
     if (!activeMapPopupSuggestion()) return;
     openMapPopup(feature, center);
     const view = mapPopupView;

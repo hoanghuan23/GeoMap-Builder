@@ -2,6 +2,7 @@ import { inferTimeGranularity, TIME_GRANULARITIES } from "./time-values.js";
 import { inferMeasureAggregation, measureAggregation } from "./measure-semantics.js";
 import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "./polygon-legend-contract.js";
 import { preferredAdministrativeColumn } from "./geographic-grain.js";
+import { normalizeDataSearchConfig } from "./data-search-config.js";
 
 const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "text", "ignore"]);
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
@@ -71,10 +72,12 @@ const LEGEND_SCHEMA = { anyOf: [...POLYGON_LEGEND_SCHEMA.anyOf, { type: "null" }
 export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["datasetTitle", "grain", "columns", "suggestions"],
+  required: ["datasetTitle", "grain", "columns", "suggestions", "search_bar", "search_fields"],
   properties: {
     datasetTitle: { type: "string" },
     grain: { type: "string" },
+    search_bar: { type: "boolean", description: "Có nên bật tìm kiếm mặc định theo số đối tượng và lợi ích tìm nhanh; không dùng ngưỡng 30 cứng." },
+    search_fields: { type: "array", items: { type: "string" }, description: "Tên cột gốc có thật để tìm đối tượng: tên định danh chính trước, ngữ cảnh sau; không chọn cột đo lường." },
     columns: {
       type: "array",
       items: {
@@ -326,6 +329,7 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     grain: typeof raw.grain === "string" && raw.grain.trim() ? raw.grain.trim() : fallback.grain,
     columns,
     suggestions: suggestions.map(suggestion => ({ ...suggestion, source })),
+    ...normalizeDataSearchConfig(raw, columns),
     source,
     validationErrors: [...new Set(errors)]
   };
