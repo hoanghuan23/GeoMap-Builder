@@ -2,13 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeTabularRecords, parseTimeValue, profileTabularData } from "../src/tabular-data.js";
 
-test("privacy mode mặc định không đưa samples/head vào profile", () => {
+test("profile mặc định có mẫu và cho phép tắt samples/head", () => {
   const records = Array.from({ length: 20 }, (_, index) => ({ place: `P${index}`, value: index }));
-  const profile = profileTabularData(records);
+  const profile = profileTabularData(records, { includeSamples: false });
   assert.equal(profile.samplesIncluded, false);
   assert.equal("head" in profile, false);
   assert.ok(profile.columns.every(column => !("samples" in column)));
-  const shared = profileTabularData(records, { includeSamples: true });
+  const shared = profileTabularData(records);
+  assert.equal(shared.samplesIncluded, true);
   assert.equal(shared.head.length, 8);
   assert.equal(shared.columns[0].samples.length, 5);
 });

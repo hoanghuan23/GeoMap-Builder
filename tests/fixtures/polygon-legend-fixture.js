@@ -4,7 +4,7 @@ export function legendFixture(overrides = {}) {
     title: "Nhiệt độ quan sát", unit: "°C", domain: [-20, 40], center: null,
     stops: [
       { value: -20, color: "#123456" }, { value: -10, color: "#456789" }, { value: 0, color: "#789abc" },
-      { value: 10, color: "#abcdef" }, { value: 20, color: "#fedcba" }, { value: 40, color: "#a86432" }
+      { value: 10, color: "#abcdef" }, { value: 20, color: "#fedcba" }, { value: 30, color: "#d39076" }, { value: 40, color: "#a86432" }
     ],
     reason: "Thang minh họa do AI đề xuất cho dữ liệu kiểm thử.", ...overrides
   };

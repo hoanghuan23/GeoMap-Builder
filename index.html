@@ -44,7 +44,7 @@
         <div class="tabs"><button class="tab active" data-tab="upload">Upload file</button><button class="tab" data-tab="draw">Vẽ trên bản đồ</button><button class="tab" data-tab="coordinates">Nhập tọa độ</button></div>
         <div class="tab-panel active" data-panel="upload"><label class="drop-zone" for="spatial-file"><input id="spatial-file" type="file" accept=".geojson,.json,.csv,.xlsx,.xls,.zip" multiple><span class="upload-icon">⇧</span><b>Kéo thả nhiều file vào đây</b><span>hoặc <u>chọn từ máy tính</u></span><small>GeoJSON/JSON được xếp thành từng lớp bản đồ</small></label><div id="selected-file" class="selected-file" hidden><span class="file-badge">GJ</span><div><b id="file-name"></b><small id="file-note"></small><ul id="uploaded-layer-list" class="uploaded-layer-list"></ul></div><button id="remove-current-file" class="remove-uploaded-layer" type="button" aria-label="Xóa file đang sử dụng" title="Xóa file">×</button></div><div id="province-filter-field" class="field province-filter" hidden><span>Tỉnh / thành phố</span><div id="province-filter" class="province-multiselect"><button id="province-filter-toggle" class="province-filter-toggle" type="button" aria-expanded="false"><span id="province-filter-label">Tất cả tỉnh/thành</span><span>⌄</span></button><div id="province-filter-menu" class="province-filter-menu" hidden><div id="province-filter-options" class="province-filter-options"></div><div class="province-filter-actions"><button id="clear-provinces" type="button">Bỏ chọn</button><button id="apply-provinces" type="button">Áp dụng</button></div></div></div></div></div>
         <div id="ai-upload-options" class="ai-upload-options">
-          <label class="toggle-row"><span><b>Gửi giá trị mẫu cho AI</b><small>Mặc định tắt. Khi bật, gửi tối đa 5 mẫu mỗi cột và 8 dòng đã cắt ngắn.</small></span><input id="ai-include-samples" type="checkbox"><i></i></label>
+          <label class="toggle-row"><span><b>Gửi giá trị mẫu cho AI</b><small>Mặc định bật. Gửi tối đa 5 mẫu mỗi cột và 8 dòng đã cắt ngắn.</small></span><input id="ai-include-samples" type="checkbox" checked><i></i></label>
           <label id="sheet-selector-field" class="field" hidden><span>Chọn sheet dữ liệu</span><select id="sheet-selector"></select><button id="apply-sheet" class="secondary-button" type="button">Phân tích sheet</button></label>
         </div>
         <div class="tab-panel placeholder-panel" data-panel="draw">Chọn công cụ vẽ trên bản đồ để bắt đầu.</div>
@@ -83,7 +83,6 @@
         <button id="feature-toggle" class="section-title collapsible" aria-expanded="true"><span class="step">4</span><div><h2>Chức năng</h2><p>Bật/tắt tính năng bổ sung</p></div><span class="chevron">⌃</span></button>
         <div id="feature-controls" class="feature-controls">
           <label class="toggle-row feature-toggle-row"><span class="feature-copy"><b>Hiển thị lớp bản đồ</b><small>Bật để vẽ các đối tượng/lớp dữ liệu lên bản đồ</small></span><span class="switch-control"><input id="show-map-layers" type="checkbox" checked><i></i><em id="show-map-layers-status">Đang bật</em></span></label>
-          <label id="weather-toggle-field" class="toggle-row feature-toggle-row" hidden><span class="feature-copy"><b>Dữ liệu thời tiết</b><small>Nhiệt độ, độ ẩm, tầm nhìn và gió theo ô H3</small></span><span class="switch-control"><input id="show-weather" type="checkbox"><i></i><em id="show-weather-status">Đang tắt</em></span></label>
           <div id="region-hex-controls" class="region-hex-controls" hidden>
             <label class="toggle-row feature-toggle-row"><span class="feature-copy"><b>Hiển thị lưới lục giác</b><small>Biểu diễn dữ liệu bằng các ô lục giác thay cho vùng hành chính</small></span><input id="show-region-hex" type="checkbox" aria-controls="region-hex-resolution-control"><i></i></label>
             <div id="region-hex-resolution-control" class="field range-field resolution-control" hidden>
@@ -159,18 +158,13 @@
           </div>
         </div>
         <div class="map-query-panel">
-        <div id="map-search" class="map-search">
+        <div id="map-search" class="map-search" hidden>
           <form id="map-search-form" class="map-search-form" role="search">
             <span class="map-search-location" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/></svg></span>
-            <input id="map-search-input" type="search" placeholder="Tìm quốc gia, tỉnh, quận/huyện..." autocomplete="off" spellcheck="false" role="combobox" aria-label="Tìm khu vực hành chính tại Việt Nam" aria-autocomplete="list" aria-controls="map-search-results" aria-expanded="false">
-            <span id="map-search-spinner" class="map-search-spinner" hidden aria-label="Đang tìm kiếm"></span>
+            <input id="map-search-input" type="search" placeholder="Tìm trong dữ liệu đã tải lên..." disabled autocomplete="off" spellcheck="false" role="combobox" aria-label="Tìm trong dữ liệu đã tải lên" aria-autocomplete="list" aria-controls="map-search-results" aria-expanded="false">
             <button id="map-search-clear" class="map-search-clear" type="button" aria-label="Xóa tìm kiếm" hidden>×</button>
             <button class="map-search-submit" type="submit" aria-label="Tìm kiếm"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg></button>
           </form>
-          <div id="map-search-selection" class="map-search-selection" hidden>
-            <div id="map-search-chips" class="map-search-chips" aria-label="Các khu vực đang hiển thị"></div>
-            <button id="map-search-clear-all" class="map-search-clear-all" type="button">Xóa tất cả</button>
-          </div>
           <div id="map-search-results" class="map-search-results" role="listbox" aria-label="Kết quả tìm kiếm" hidden></div>
         </div>
         </div>

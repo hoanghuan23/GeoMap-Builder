@@ -25,9 +25,23 @@ test("semantic scale shares exact AI stops with paint and legend, preserving une
 test("auto remaps the original relative stop positions to filtered data without changing colors", () => {
   const legend = legendFixture({ mode: "auto" });
   const first = resolve([10, 70], legend); const second = resolve([20, 140], legend);
-  assert.deepEqual(first.stops.map(stop => stop[0]), [10, 20, 30, 40, 50, 70]);
-  assert.deepEqual(second.stops.map(stop => stop[0]), [20, 40, 60, 80, 100, 140]);
+  assert.deepEqual(first.stops.map(stop => stop[0]), [10, 20, 30, 40, 50, 60, 70]);
+  assert.deepEqual(second.stops.map(stop => stop[0]), [20, 40, 60, 80, 100, 120, 140]);
   assert.deepEqual(first.colors, second.colors); assert.deepEqual(first.positions, second.positions);
+});
+
+test("legend keeps all seven reference ticks on full and narrow layouts", () => {
+  const scale = resolve([20, 30]);
+  const expected = [-20, -10, 0, 10, 20, 30, 40];
+  for (const width of [100, 280, 330]) {
+    const labels = polygonLegendLabels(scale, width);
+    assert.deepEqual(labels.map(label => label.value), expected);
+    assert.deepEqual(labels.map(label => label.text), expected.map(String));
+    assert.equal(labels[0].position, 0);
+    assert.equal(labels.at(-1).position, 100);
+    assert.ok(labels.every((label, index) => !index || label.position > labels[index - 1].position));
+  }
+  assert.ok(polygonLegendLabels(scale, 100).some(label => label.row > 0), "crowded labels move to another row instead of disappearing");
 });
 
 test("diverging keeps its center and colors when observations are one-sided or filtered", () => {

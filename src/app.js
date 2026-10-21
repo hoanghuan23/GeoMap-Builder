@@ -1,5 +1,5 @@
 import { CONFIG } from "./config.js";
-import { cellAtMaxResolution, geoJSONToCells, geoJSONToH3FeatureCollection, h3CellCenter, recordsToAggregatedH3, recordsToPointGeoJSON } from "./h3-utils.js";
+import { geoJSONToCells, geoJSONToH3FeatureCollection, recordsToAggregatedH3, recordsToPointGeoJSON } from "./h3-utils.js";
 import { buildRegionHexGrid } from "./region-hex-grid.js";
 import { analyzeSpatialData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
 import { BarRenderer, analyzeBarData } from "./charts/bar-chart.js";
@@ -29,13 +29,11 @@ import { polygonLegendKey, polygonLegendTarget } from "./polygon-legend-contract
 import { createMapSearch, focusMapOnFeature, landOnlyBoundary } from "./map-search.js";
 import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "./administrative-boundaries.js";
 import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColors } from "./metro-data.js";
-import { fetchCurrentWeather, formatVisibility, readCachedWeather, WEATHER_CACHE_TTL_MS, windDirectionLabel, writeCachedWeather } from "./openweather.js";
-import { TEMPERATURE_STOPS, temperatureFillExpression, temperatureLegendGradient } from "./renderers/weather-style.js";
 import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } from "./geojson-layers.js";
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
 import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
-import { applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
+import { administrativeContextFields, geographicLocationName, applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
 import { compareTimeValues, filterTimeRange, formatTimeValue, timeValueInfo, uniqueTimeValues } from "./time-values.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
 import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupChartColumns, popupFeaturesMatch, popupTimeColumn } from "./ai-popup-chart.js";
@@ -77,7 +75,7 @@ const state = {
   aiDataset: null, pendingSheet: null,
   mapStyle: "liberty"
 };
-let map; let toastTimer; let statusTimer; let cellPopup; let pointPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
+let map; let mapSearch; let toastTimer; let statusTimer; let cellPopup; let pointPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
 let mapPopupView = null;
 let layerOrderRevision = 0;
 let mapLayerEventsBound = false;
@@ -85,11 +83,10 @@ const uploadedPointerLayerIds = new Set();
 let mapReady = false;
 let pendingMapStyle = null;
 let mapStyleLoadTimer = null;
-const weatherCache = new Map();
-const MAX_WEATHER_SAMPLES = 50;
-let weatherLoadRevision = 0;
 let tabularLoadRevision = 0;
 let aiBoundaryRevision = 0;
+let dataSearchProfile;
+let dataSearchColumns = [];
 
 function createAbortController() {
   return typeof AbortController === "function" ? new AbortController() : { signal: undefined, abort() {} };
@@ -173,133 +170,6 @@ function setStatus(message, hide = false) {
 function setDataPanelVisible(visible) { $("data-panel").hidden = !visible; document.querySelector(".content-area").classList.toggle("table-hidden", !visible); map?.resize(); }
 function fmt(value, digits = 1) { return Number.isFinite(value) ? value.toFixed(digits) : "--"; }
 
-function weatherPopupContent(feature, weather = null, message = "") {
-  const card = document.createElement("div");
-  card.className = "weather-popup";
-  const title = document.createElement("strong");
-  title.textContent = weather?.description ? weather.description.charAt(0).toUpperCase() + weather.description.slice(1) : "Thời tiết tại ô H3";
-  const index = document.createElement("small");
-  index.textContent = feature.properties?.h3 || "";
-  card.append(title, index);
-  if (message) {
-    const status = document.createElement("p");
-    status.className = "weather-popup-status";
-    status.textContent = message;
-    card.append(status);
-    return card;
-  }
-  const grid = document.createElement("dl");
-  const values = [
-    ["Nhiệt độ", `${fmt(weather.temperature)} °C`],
-    ["Độ ẩm", `${fmt(weather.humidity, 0)}%`],
-    ["Tầm nhìn", formatVisibility(weather.visibility)],
-    ["Gió", `${fmt(weather.windSpeed)} m/s${windDirectionLabel(weather.windDirection) ? ` · ${windDirectionLabel(weather.windDirection)}` : ""}`]
-  ];
-  for (const [label, value] of values) {
-    const group = document.createElement("div");
-    const term = document.createElement("dt");
-    const description = document.createElement("dd");
-    term.textContent = label;
-    description.textContent = value;
-    group.append(term, description);
-    grid.append(group);
-  }
-  card.append(grid);
-  return card;
-}
-
-function weatherForCell(feature) {
-  const h3 = feature.properties?.weather_h3 || cellAtMaxResolution(feature.properties?.h3, 5);
-  const now = Date.now();
-  const memoryEntry = weatherCache.get(h3);
-  if (memoryEntry?.expiresAt > now) return memoryEntry.promise;
-  weatherCache.delete(h3);
-  const storedEntry = readCachedWeather(h3, { now });
-  if (storedEntry) {
-    const promise = Promise.resolve(storedEntry.data);
-    weatherCache.set(h3, { promise, expiresAt: storedEntry.expiresAt });
-    return promise;
-  }
-  const [longitude, latitude] = h3CellCenter(h3);
-  const request = fetchCurrentWeather(latitude, longitude, { apiKey: CONFIG.OPENWEATHER_API_KEY })
-    .then(weather => {
-      writeCachedWeather(h3, weather, { now });
-      return weather;
-    })
-    .catch(error => {
-      weatherCache.delete(h3);
-      throw error;
-    });
-  weatherCache.set(h3, { promise: request, expiresAt: now + WEATHER_CACHE_TTL_MS });
-  return request;
-}
-
-function weatherGroups(features) {
-  let resolution = Math.min(state.resolution, 5);
-  let groups;
-  do {
-    groups = new Map();
-    for (const feature of features) {
-      const weatherH3 = cellAtMaxResolution(feature.properties.h3, resolution);
-      feature.properties.weather_h3 = weatherH3;
-      feature.properties.weather_resolution = resolution;
-      if (!groups.has(weatherH3)) groups.set(weatherH3, []);
-      groups.get(weatherH3).push(feature);
-    }
-    if (groups.size <= MAX_WEATHER_SAMPLES || resolution === 0) break;
-    resolution -= 1;
-  } while (true);
-  return { groups, resolution };
-}
-
-function applyWeatherToFeatures(features, weather) {
-  for (const feature of features) {
-    Object.assign(feature.properties, {
-      temperature: weather.temperature,
-      humidity: weather.humidity,
-      visibility: weather.visibility,
-      wind_speed: weather.windSpeed,
-      wind_direction: weather.windDirection,
-      weather_description: weather.description
-    });
-  }
-}
-
-async function loadWeatherForGrid() {
-  const revision = ++weatherLoadRevision;
-  if (state.dataOrigin !== "search" || !$("show-weather").checked || !state.h3Data.features.length || !CONFIG.OPENWEATHER_API_KEY) {
-    applyStyle();
-    return;
-  }
-  const { groups, resolution } = weatherGroups(state.h3Data.features);
-  state.weatherResolution = resolution;
-  const queue = [...groups.values()];
-  let completed = 0;
-  let failed = 0;
-  setStatus(`Đang tải thời tiết cho ${queue.length} vùng H3 đại diện…`);
-  const worker = async () => {
-    while (queue.length && revision === weatherLoadRevision) {
-      const features = queue.shift();
-      try {
-        const weather = await weatherForCell(features[0]);
-        if (revision !== weatherLoadRevision) return;
-        applyWeatherToFeatures(features, weather);
-      } catch (error) {
-        failed += 1;
-        console.warn("Không thể tải thời tiết cho vùng H3:", error);
-      }
-      completed += 1;
-      if (completed % 5 === 0) map.getSource("h3-grid")?.setData(state.h3Data);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker));
-  if (revision !== weatherLoadRevision) return;
-  map.getSource("h3-grid")?.setData(state.h3Data);
-  applyStyle();
-  const loaded = groups.size - failed;
-  setStatus(`Đã tải thời tiết cho ${loaded}/${groups.size} vùng H3 đại diện.`, true);
-}
-
 function renderSupportedChartCatalog() {
   const grid = $("supported-chart-grid");
   grid.replaceChildren(...SUPPORTED_VIEW_TYPES.map(type => {
@@ -342,7 +212,6 @@ function updateModelSections() {
   $("line-toggle-field").hidden = isChart || isRoad || !state.lineData.features.length;
   $("line-toggle-label").textContent = activeRoadSuggestion() ? "Hiển thị tuyến đường" : "Hiển thị đường nối giữa các điểm";
   $("travel-palette").hidden = !state.metroData;
-  $("weather-toggle-field").hidden = state.dataOrigin !== "search" || isChart;
   $("chart-data-mapping-section").hidden = !isChart || !state.chartMapping;
   $("resolution-section").hidden = !hasModel || isChart || state.mapType !== "h3";
   $("feature-section").hidden = !hasModel || isChart;
@@ -363,14 +232,13 @@ function updateModelSections() {
       : "Chọn chỉ số, nhóm dữ liệu và khoảng thời gian";
   if (!isChart) {
     const isPolygon = state.mapType === "polygon";
-    const isWeather = state.dataOrigin === "search" && state.mapType === "h3";
     const isAiThematic = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
-    $("style-description").textContent = isRoad ? "Màu sắc, độ dày, độ mờ và chú giải tuyến" : isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isWeather ? "Bảng màu nhiệt độ, độ mờ và đường viền" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
-    $("polygon-color-ramp").hidden = !isPolygon && !isWeather && !isAiThematic;
+    $("style-description").textContent = isRoad ? "Màu sắc, độ dày, độ mờ và chú giải tuyến" : isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
+    $("polygon-color-ramp").hidden = !isPolygon && !isAiThematic;
     $("border-color-field").hidden = isPolygon && !state.metroData;
     $("show-border-field").hidden = false;
     $("line-width-field").hidden = false;
-    if (isPolygon || isWeather || isAiThematic) syncPolygonPaletteControls();
+    if (isPolygon || isAiThematic) syncPolygonPaletteControls();
   }
   if (isPoint) renderPointStyleControls();
   if (isRoad) renderRoadStyleControls();
@@ -378,6 +246,7 @@ function updateModelSections() {
   renderRoadLegend();
   if (!activePointSuggestion()) { pointPopup?.remove(); pointPopup = null; }
   if (!activeMapPopupSuggestion()) closeMapPopup();
+  syncDataSearch();
 }
 
 function fillExpression() {
@@ -408,9 +277,8 @@ function activePolygonLegendScale() {
 }
 
 function syncPolygonPaletteControls(resolvedScale = activePolygonLegendScale()) {
-  const isWeather = state.dataOrigin === "search" && state.mapType === "h3";
   const thematicData = state.mapType === "h3" ? state.h3Data : state.boundary;
-  const colorField = resolvedScale ? { field: resolvedScale.field } : isWeather ? { field: "temperature" } : state.metroData ? { field: "ratio" } : polygonColorField(thematicData, state.dataProfile);
+  const colorField = resolvedScale ? { field: resolvedScale.field } : state.metroData ? { field: "ratio" } : polygonColorField(thematicData, state.dataProfile);
   const managed = Boolean(resolvedScale);
   $("fixed-color").disabled = managed;
   $("polygon-color-label").textContent = managed ? "Chú giải màu" : "Dải màu";
@@ -425,31 +293,22 @@ function syncPolygonPaletteControls(resolvedScale = activePolygonLegendScale()) 
     summary.style.setProperty("--legend-gradient", resolvedScale.gradient || resolvedScale.noDataColor);
     summary.title = resolvedScale.reason;
   }
-  $("polygon-color-field").textContent = isWeather ? "Theo nhiệt độ (°C)" : state.metroData ? "Xe buýt / xe máy" : colorField ? `Theo ${humanizeField(colorField.field)}` : "Cần thuộc tính dữ liệu";
+  $("polygon-color-field").textContent = state.metroData ? "Xe buýt / xe máy" : colorField ? `Theo ${humanizeField(colorField.field)}` : "Cần thuộc tính dữ liệu";
   document.querySelectorAll("#polygon-color-ramp .palette").forEach(button => {
-    button.disabled = managed || !colorField || (isWeather && button.dataset.palette === "travel");
+    button.disabled = managed || !colorField;
     button.classList.toggle("active", !managed && button.dataset.palette === state.polygonPalette);
   });
 }
 
 function renderWeatherLegend(resolvedScale = activePolygonLegendScale()) {
   const legend = $("weather-legend");
-  const isWeatherMap = state.dataOrigin === "search" && state.mapType === "h3";
   const isAiMap = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
-  const show = $("show-map-layers").checked && ((isWeatherMap && $("show-weather").checked) || isAiMap);
+  const show = $("show-map-layers").checked && isAiMap;
   legend.hidden = !show;
   if (!show) return;
   const mode = $("weather-legend-mode");
   mode.hidden = !resolvedScale;
   $("weather-legend-labels").classList.toggle("positioned", Boolean(resolvedScale));
-  const palette = TEMPERATURE_STOPS[state.polygonPalette] ? state.polygonPalette : "diverging";
-  if (isWeatherMap) {
-    $("weather-legend-title").textContent = "Nhiệt độ không khí (°C)";
-    $("weather-legend-scale").style.background = temperatureLegendGradient(palette);
-    $("weather-legend-labels").replaceChildren(...TEMPERATURE_STOPS[palette].map(([value]) => Object.assign(document.createElement("span"), { textContent: String(value) })));
-    $("weather-legend-note").textContent = `Dữ liệu OpenWeather · H3 res ${state.weatherResolution ?? state.resolution}`;
-    return;
-  }
   const data = state.mapType === "h3" ? state.h3Data : state.boundary;
   const scale = polygonLegendScale(data, state.dataProfile, state.polygonPalette, resolvedScale);
   if (!scale) { legend.hidden = true; return; }
@@ -464,6 +323,7 @@ function renderWeatherLegend(resolvedScale = activePolygonLegendScale()) {
   $("weather-legend-scale").style.background = scale.gradient;
   const labels = resolvedScale ? polygonLegendLabels(scale, Math.max(100, (legend.clientWidth || 330) - 40))
     : scale.values.map(value => ({ value, text: Number(value.toFixed(1)).toLocaleString("vi-VN") }));
+  $("weather-legend-labels").style.height = resolvedScale ? `${(Math.max(0, ...labels.map(item => item.row)) + 1) * 14}px` : "";
   $("weather-legend-labels").replaceChildren(...labels.map(item => {
     const label = document.createElement("span");
     label.textContent = item.text;
@@ -474,6 +334,7 @@ function renderWeatherLegend(resolvedScale = activePolygonLegendScale()) {
 }
 
 function applyStyle() {
+  syncDataSearch();
   if (!map) return;
   const resolvedScale = activePolygonLegendScale();
   if (resolvedScale) syncPolygonPaletteControls(resolvedScale);
@@ -486,12 +347,10 @@ function applyStyle() {
   const borderColor = $("border-color").value;
   const borderWidth = Number($("line-width").value);
   if (map.getLayer("h3-fill")) {
-    const weatherColor = state.dataOrigin === "search" && state.mapType === "h3" && $("show-weather").checked
-      ? temperatureFillExpression(state.polygonPalette, color)
-      : state.aiDataset || isRegionHexMode()
+    const h3Color = state.aiDataset || isRegionHexMode()
       ? polygonFillExpression(isRegionHexMode() ? state.boundary : state.h3Data, state.dataProfile, state.polygonPalette, color, resolvedScale)
       : color;
-    map.setPaintProperty("h3-fill", "fill-color", weatherColor);
+    map.setPaintProperty("h3-fill", "fill-color", h3Color);
     map.setPaintProperty("h3-fill", "fill-opacity", opacity);
     map.setPaintProperty("h3-border", "line-color", borderColor);
     map.setPaintProperty("h3-border", "line-width", borderWidth);
@@ -612,22 +471,7 @@ function addMapLayers() {
       openCellPopup(popup, feature, "h3-fill");
       return;
     }
-    if (state.dataOrigin !== "search" || !$("show-weather").checked) {
-      openCellPopup(new maplibregl.Popup({ offset: 8 }).setHTML(`<div style="font:12px Inter;line-height:1.8"><b>H3:</b> ${p.h3}<br><b>Tâm ô:</b> ${fmt(Number(p.center_lat), 5)}, ${fmt(Number(p.center_lng), 5)}</div>`), feature, "h3-fill");
-      return;
-    }
-    const missingKey = !CONFIG.OPENWEATHER_API_KEY;
-    const popup = new maplibregl.Popup({ offset: 8, maxWidth: "300px", className: "weather-cell-popup" })
-      .setDOMContent(weatherPopupContent(feature, null, missingKey ? "Chưa cấu hình VITE_OPENWEATHER_API_KEY." : "Đang tải dữ liệu thời tiết…"));
-    openCellPopup(popup, feature, "h3-fill");
-    if (missingKey) return;
-    weatherForCell(feature).then(weather => {
-      if (cellPopup === popup) popup.setDOMContent(weatherPopupContent(feature, weather));
-    }).catch(error => {
-      console.error("OpenWeather:", error);
-      const message = error.status === 401 ? "API key OpenWeather không hợp lệ hoặc chưa được kích hoạt." : "Không thể tải dữ liệu thời tiết. Vui lòng thử lại.";
-      if (cellPopup === popup) popup.setDOMContent(weatherPopupContent(feature, null, message));
-    });
+    openCellPopup(new maplibregl.Popup({ offset: 8 }).setHTML(`<div style="font:12px Inter;line-height:1.8"><b>H3:</b> ${p.h3}<br><b>Tâm ô:</b> ${fmt(Number(p.center_lat), 5)}, ${fmt(Number(p.center_lng), 5)}</div>`), feature, "h3-fill");
   });
   map.on("mouseenter", "h3-fill", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "h3-fill", () => map.getCanvas().style.cursor = "");
   map.on("click", "point-marker", event => {
@@ -1112,7 +956,10 @@ function renderMapPopup(view) {
   let chart;
   if (selection.mode !== "info") {
     card.className = "weather-popup ai-popup-chart-only";
-    chart = buildPopupChart({ records: dataset.records, columns: dataset.analysis.columns,
+    const dimensionFilters = Object.fromEntries(Object.entries(dataset.filters || {}).filter(([field]) =>
+      dataset.analysis.columns.some(column => column.name === field && column.role !== "time")));
+    const records = activePolygonSuggestion() ? applyPipelineFilters(dataset.records, dimensionFilters) : dataset.records;
+    chart = buildPopupChart({ records, columns: dataset.analysis.columns,
       feature: view.feature, regionField: dataset.recommendation.geometry.field,
       kind: selection.mode, selection: selection[selection.mode], chartType: activeMapPopupSuggestion().chartType, bindings: activeMapPopupSuggestion().bindings });
     const container = document.createElement("div");
@@ -1283,7 +1130,6 @@ async function rebuildGrid({ fit = false } = {}) {
     syncPolygonPaletteControls();
     applyStyle();
     setStatus(`Đã vẽ ${cellCount.toLocaleString("vi-VN")} ô H3.`, true);
-    if (state.dataOrigin === "search" && $("show-weather").checked) void loadWeatherForGrid();
   } catch (error) { console.error(error); setStatus("Không thể tạo lưới H3."); showToast(error.message || "Dữ liệu không hợp lệ."); }
 }
 function updateDashboard() { renderTable(); }
@@ -1400,7 +1246,6 @@ function clearUploadedData({ preserveUploads = false } = {}) {
   $("region-hex-note").textContent = "";
   tabularAbortController?.abort(); tabularAbortController = null; tabularLoadRevision += 1;
   cancelAiBoundaryLoad();
-  weatherLoadRevision += 1;
   clearMetroData();
   if (!preserveUploads) clearUploadLayers();
   state.primaryUploadId = null;
@@ -1433,7 +1278,7 @@ async function resetConfiguration() {
   state.pointStyle = mergePointStyle();
   state.roadDisplayStyle = { ...DEFAULT_ROAD_DISPLAY_STYLE };
   if (activeRoadSuggestion()) state.aiDataset.roadColorOverrides = Object.create(null);
-  state.polygonPalette = state.metroData ? "travel" : (state.dataOrigin === "search" || state.aiDataset) ? "diverging" : null;
+  state.polygonPalette = state.metroData ? "travel" : state.aiDataset ? "diverging" : null;
 
   $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
   $("resolution-value").value = CONFIG.DEFAULT_RESOLUTION;
@@ -1454,10 +1299,7 @@ async function resetConfiguration() {
   if (!state.chartConfig) syncPolygonPaletteControls();
   $("show-map-layers").checked = true;
   $("show-map-layers-status").textContent = "Đang bật";
-  weatherLoadRevision += 1;
   cellPopup?.remove();
-  $("show-weather").checked = false;
-  $("show-weather-status").textContent = "Đang tắt";
   for (const id of ["show-metro-cells", "show-metro-boundary", "show-metro-stations", "show-map-lines"]) $(id).checked = true;
 
   if (state.chartConfig) {
@@ -1687,6 +1529,7 @@ function clearAiMapState() {
   cancelAiBoundaryLoad();
   pointPopup?.remove(); pointPopup = null;
   state.aiDataset = null;
+  mapSearch?.setData();
   $("ai-line-legend").hidden = true;
   $("point-legend").hidden = true;
   $("ai-data-filters").hidden = true;
@@ -1938,6 +1781,7 @@ function recommendationForSuggestion(suggestion) {
     || (coordinateMap ? dataset.analysis.columns.find(column => column.role === "measure" && ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name))?.name : null);
   const regionField = suggestion.bindings.region;
   const region = columns.get(regionField);
+  const contextFields = suggestion.chartType === "choropleth" ? administrativeContextFields(dataset.analysis.columns, regionField) : [];
   const areaField = suggestion.chartType === "map_line" && !coordinateLine ? roadAreaField(dataset.analysis.columns) : null;
   const area = columns.get(areaField);
   const timeFilter = coordinateLine ? null : defaultTimeFilter(dataset.records, dataset.analysis.columns, suggestion.chartType);
@@ -1947,7 +1791,8 @@ function recommendationForSuggestion(suggestion) {
     geometry: coordinateMap ? { field: regionField || null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: coordinateLine ? "line" : "point" } : regionField
       ? { field: regionField, provider: suggestion.chartType === "map_line" ? "local-roads" : "maptiler",
         placeType: region?.geoLevel === "country" ? "country" : region?.geoLevel === "admin2" ? "county" : "region",
-        country: region?.geoLevel === "country" ? null : region?.country || null }
+        country: region?.geoLevel === "country" || contextFields.some(field => columns.get(field)?.geoLevel === "country") ? null : region?.country || null,
+        ...(contextFields.length ? { contextFields } : {}) }
       : { field: null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: "point" },
     metricField: valueField,
     numericFields: dataset.analysis.columns.filter(column => column.role === "measure").map(column => column.name),
@@ -2070,6 +1915,25 @@ function buildMapPopupControls(dataset, suggestion) {
   return nodes;
 }
 
+function polygonDimensionChoices(dataset, suggestion) {
+  const geoOrder = { country: 0, admin1: 1, admin2: 2 };
+  const priority = column => column.role === "geo" ? geoOrder[column.geoLevel] ?? 3 : 4;
+  const columns = dataset.analysis.columns.filter(column =>
+    !["point_lat", "point_lng", "h3"].includes(column.geoLevel)
+    && (column.role === "geo" || column.role === "category" || column.name === suggestion.bindings.region)
+  ).sort((a, b) => priority(a) - priority(b));
+  let records = dataset.records;
+  return columns.flatMap(column => {
+    const choices = uniqueRecordValues(records, column.name).sort((a, b) => String(a[1]).localeCompare(String(b[1]), "vi"));
+    // Keep the dimension visible even if the selected parent has no value for it.
+    if (!choices.length && !uniqueRecordValues(dataset.records, column.name).length) return [];
+    const saved = dataset.filters?.[column.name];
+    const value = choices.some(([key]) => key === saved) ? saved : "";
+    if (value !== "") records = applyPipelineFilters(records, { [column.name]: value });
+    return [{ column, choices, value }];
+  });
+}
+
 function populatePolygonFilters(dataset, suggestion) {
   const columns = dataset.analysis.columns;
   const time = popupTimeColumn(columns);
@@ -2089,6 +1953,15 @@ function populatePolygonFilters(dataset, suggestion) {
     control.dataset.field = time.name; control.setAttribute("aria-label", "Ngày hiển thị bản đồ");
     filters[time.name] = value;
     mapControls.append(aiField("Ngày hiển thị", control));
+  }
+  for (const { column, choices, value } of polygonDimensionChoices(dataset, suggestion)) {
+    const caption = column.labelVi || humanizeField(column.name);
+    const control = aiSelect("ai-generated-filter", [["", `Tất cả ${caption.toLocaleLowerCase("vi")}`], ...choices], value);
+    control.dataset.field = column.name;
+    control.dataset.dimensionFilter = "true";
+    control.setAttribute("aria-label", `Lọc theo ${caption}`);
+    filters[column.name] = value;
+    mapControls.append(aiField(caption, control));
   }
   nodes.push(mapControls);
   $("ai-filter-controls").replaceChildren(...nodes);
@@ -2842,7 +2715,12 @@ async function activateAiChoropleth(suggestion) {
   const recommendation = recommendationForSuggestion(suggestion);
   const name = dataset.fileName;
   dataset.recommendation = recommendation;
-  const locations = uniqueRecordValues(records, recommendation.geometry.field).map(([, value]) => value);
+  const countryField = recommendation.geometry.contextFields?.find(field => dataset.analysis.columns.find(column => column.name === field)?.geoLevel === "country");
+  const contexts = Object.fromEntries(records.map(record => [geographicLocationName(record, recommendation.geometry), {
+    country: countryField ? String(record[countryField] ?? "").trim() || null
+      : recommendation.geometry.country || (recommendation.geometry.placeType === "country" ? null : "VNM")
+  }]).filter(([name]) => name));
+  const locations = Object.keys(contexts);
   const geometryLabel = recommendation.filters.find(filter => filter.field === recommendation.geometry.field)?.label || recommendation.geometry.field;
   setStatus(`Đang ghép ranh giới cho ${locations.length} giá trị ${geometryLabel}…`);
   let resolvedBoundaries; let boundaries;
@@ -2851,6 +2729,7 @@ async function activateAiChoropleth(suggestion) {
       apiKey: CONFIG.MAPTILER_API_KEY,
       placeType: recommendation.geometry.placeType,
       country: recommendation.geometry.country,
+      contexts,
       strict: false,
       aliases: dataset.geoAliases || {},
       selections: dataset.geoSelections || {},
@@ -2863,7 +2742,9 @@ async function activateAiChoropleth(suggestion) {
       ...resolvedBoundaries,
       features: await Promise.all(resolvedBoundaries.features.map(async boundary =>
         await landOnlyBoundary(boundary, {
-          country: recommendation.geometry.placeType === "country" ? undefined : recommendation.geometry.country || "VNM",
+          country: recommendation.geometry.placeType === "country" ? undefined
+            : countryField ? contexts[boundary.properties?.__data_location]?.country
+              : recommendation.geometry.country || "VNM",
           signal: controller.signal
         }) || boundary
       ))
@@ -3007,7 +2888,6 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   regionHexBuildRevision += 1;
   state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
   $("region-hex-note").textContent = "";
-  weatherLoadRevision += 1;
   if (!preserveAi) clearAiMapState();
   clearMetroData();
   state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; clearDataMappingPanel($("data-mapping-controls")); clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
@@ -3032,73 +2912,24 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   applyStyle();
 }
 
-function renderSearchMapTypes() {
-  const grid = $("map-type-grid");
-  const types = [
-    { id: "polygon", label: "Polygon", icon: "polygon", renderer: "MapLibre" }
-  ];
-  grid.replaceChildren(...types.map(type => {
-    const button = document.createElement("button");
-    const icon = document.createElement("span");
-    button.type = "button";
-    button.className = `map-type${type.id === state.mapType ? " active" : ""}`;
-    button.dataset.type = type.id;
-    button.dataset.label = type.label;
-    button.title = `${type.label} · ${type.renderer}`;
-    renderMapIcon(icon, type.icon);
-    button.append(icon, type.label);
-    return button;
-  }));
-  grid.classList.remove("is-empty");
-  $("map-type-summary").textContent = "Khu vực tìm kiếm · Polygon theo ranh giới đã chọn";
-  showSupportedChartCatalog(false);
-}
-
-async function applySearchBoundaries(boundaries) {
-  if (state.dataOrigin && state.dataOrigin !== "search") return;
-  regionHexBuildRevision += 1;
-  state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
-  $("region-hex-note").textContent = "";
-  if (!boundaries.length) {
-    if (state.dataOrigin === "search") {
-      clearUploadedData();
-      setDataPanelVisible(false);
-      applyMapLayerVisibility();
-      updateDashboard();
-    }
-    return;
+// Search follows the analyzed fields and the features produced by the active filters.
+function syncDataSearch() {
+  if (!mapSearch) return;
+  if (!state.mapType || state.chartConfig || !state.dataProfile) { mapSearch.setData(); return; }
+  const suggestion = activeMapPopupSuggestion();
+  const data = state.mapType === "point" ? state.pointData
+    : state.mapType === "line" ? state.lineData : state.boundary;
+  if (state.aiDataset && !suggestion) { mapSearch.setData(); return; }
+  if (dataSearchProfile !== state.dataProfile) {
+    dataSearchProfile = state.dataProfile;
+    dataSearchColumns = (state.dataProfile.textFields || [])
+      .filter(name => !name.startsWith("__"))
+      .map(name => ({ name, role: "text" }));
   }
-
-  const isNewSearch = state.dataOrigin !== "search";
-  clearMetroData();
-  cellPopup?.remove();
-  state.dataOrigin = "search";
-  if (isNewSearch) {
-    $("show-weather").checked = false;
-    $("show-weather-status").textContent = "Đang tắt";
-  }
-  state.polygonPalette = state.polygonPalette && state.polygonPalette !== "travel" ? state.polygonPalette : "diverging";
-  state.resolution = CONFIG.DEFAULT_RESOLUTION;
-  state.baselineCount = null;
-  state.boundary = { type: "FeatureCollection", features: boundaries };
-  state.sourceBoundary = state.boundary;
-  state.mapType = "polygon";
-  state.dataProfile = analyzeSpatialData(state.boundary);
-  state.pointData = EMPTY_FEATURE_COLLECTION;
-  state.lineData = EMPTY_FEATURE_COLLECTION;
-  $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
-  $("resolution-value").value = CONFIG.DEFAULT_RESOLUTION;
-  $("selected-file").hidden = true;
-  map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
-  map.getSource("line-data")?.setData(EMPTY_FEATURE_COLLECTION);
-  // Use the selected administrative boundaries directly for the default Polygon mode.
-  map.getSource("polygon-data")?.setData(state.boundary);
-  map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
-  renderSearchMapTypes();
-  updateModelSections();
-  await rebuildGrid();
-  refreshClippedUploadLayers();
-  applyStyle();
+  const columns = state.aiDataset?.analysis.columns || dataSearchColumns;
+  const titleField = suggestion?.chartType === "point" ? pointTitleField(columns)
+    : state.aiDataset?.recommendation?.geometry?.field;
+  mapSearch.setData({ data, columns, titleField });
 }
 
 function showSheetSelection(file, sheetNames, fileKey = null) {
@@ -3530,6 +3361,10 @@ function bindUI() {
       return;
     }
     if (!event.target.matches(".ai-generated-filter")) return;
+    if (event.target.dataset.dimensionFilter === "true" && activePolygonSuggestion()) {
+      state.aiDataset.filters = selectedAiFilters();
+      populateAiFilters(state.aiDataset);
+    }
     if (event.target.dataset.singleToggle === "true" && event.target.checked) {
       for (const control of document.querySelectorAll("#ai-filter-controls .ai-generated-filter")) {
         if (control !== event.target && control.dataset.field === event.target.dataset.field) control.checked = false;
@@ -3544,7 +3379,7 @@ function bindUI() {
         : checked.length === 1 ? checked[0].value : `${checked.length} giá trị đã chọn`;
     }
     const filter = state.aiDataset?.recommendation?.filters.find(item => item.field === event.target.dataset.field);
-    const shouldFit = filter?.fit || event.target.dataset.field === state.aiDataset?.recommendation?.geometry?.field;
+    const shouldFit = event.target.dataset.dimensionFilter === "true" || filter?.fit || event.target.dataset.field === state.aiDataset?.recommendation?.geometry?.field;
     await filteredAiBoundary({ fit: shouldFit });
   });
   $("ai-filter-controls").addEventListener("click", event => {
@@ -3663,7 +3498,7 @@ function bindUI() {
   for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => {
     if (id === "fixed-color" && activePolygonLegendScale()) return;
     $(`${id}-value`).textContent = e.target.value.toUpperCase();
-    if (id === "fixed-color" && (state.mapType === "polygon" || state.dataOrigin === "search" || state.aiDataset)) { state.polygonPalette = null; syncPolygonPaletteControls(); }
+    if (id === "fixed-color" && (state.mapType === "polygon" || state.aiDataset)) { state.polygonPalette = null; syncPolygonPaletteControls(); }
     applyStyle();
   }); }
   $("polygon-color-ramp").addEventListener("click", event => {
@@ -3746,11 +3581,6 @@ function bindUI() {
     $(toggleId).addEventListener("click", () => { const open = $(toggleId).getAttribute("aria-expanded") === "true"; $(toggleId).setAttribute("aria-expanded", String(!open)); $(controlsId).style.display = open ? "none" : ""; });
   }
   $("show-map-layers").addEventListener("change", e => { $("show-map-layers-status").textContent = e.target.checked ? "Đang bật" : "Đang tắt"; applyMapLayerVisibility(); });
-  $("show-weather").addEventListener("change", e => {
-    $("show-weather-status").textContent = e.target.checked ? "Đang bật" : "Đang tắt";
-    if (!e.target.checked) { weatherLoadRevision += 1; cellPopup?.remove(); applyStyle(); }
-    else void loadWeatherForGrid();
-  });
   $("reset-config").addEventListener("click", async () => {
     try {
       await resetConfiguration();
@@ -3788,7 +3618,14 @@ async function init() {
   bindUI(); syncMapStyleControls();
   map = new maplibregl.Map({ container: "map", style: MAP_STYLES[state.mapStyle], center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
   observeMapSize();
-  createMapSearch({ map, apiKey: CONFIG.MAPTILER_API_KEY, onBoundariesChange: applySearchBoundaries });
+  mapSearch = createMapSearch({ map, onSelect(feature, center) {
+    if (!activeMapPopupSuggestion()) return;
+    openMapPopup(feature, center);
+    const view = mapPopupView;
+    map.once("moveend", () => {
+      if (view === mapPopupView) sizeMapPopup(view);
+    });
+  } });
   map.on("style.load", () => {
     const switchedStyle = pendingMapStyle;
     if (switchedStyle) state.mapStyle = switchedStyle;

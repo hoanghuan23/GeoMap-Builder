@@ -36,14 +36,17 @@ export function polygonLegendLabels(scale, width = 280) {
   if (!scale.hasData || !scale.stops.length) return [];
   const position = value => scale.min === scale.max ? 50 : (value - scale.min) / (scale.max - scale.min) * 100;
   const format = value => new Intl.NumberFormat("vi-VN", { maximumSignificantDigits: 5 }).format(value);
-  const chosen = [...new Set([scale.min, ...(scale.center == null ? [] : [scale.center]), scale.max])];
-  for (const [value] of scale.stops) {
-    if (chosen.includes(value)) continue;
-    if (chosen.every(other => Math.abs(position(value) - position(other)) * width / 100 > Math.max(48, (format(value).length + format(other).length) * 3.3))) chosen.push(value);
-  }
+  const chosen = [...new Set([scale.min, ...(scale.center == null ? [] : [scale.center]), ...scale.stops.map(([value]) => value), scale.max])];
   const labels = chosen.sort((a, b) => a - b).map(value => ({ value, text: format(value), position: position(value), row: 0 }));
+  const rowEnds = [];
   labels.forEach((label, index) => {
-    if (index && (label.position - labels[index - 1].position) * width / 100 < 48) label.row = labels[index - 1].row ? 0 : 1;
+    const labelWidth = label.text.length * 6;
+    const x = label.position * width / 100;
+    const left = labels.length > 1 && index === 0 ? x : index === labels.length - 1 && labels.length > 1 ? x - labelWidth : x - labelWidth / 2;
+    let row = rowEnds.findIndex(end => left >= end + 8);
+    if (row === -1) row = rowEnds.length;
+    label.row = row;
+    rowEnds[row] = left + labelWidth;
   });
   return labels;
 }

@@ -8,7 +8,7 @@ function assertStandardHeaders(records) {
   }
 }
 
-export function parseSpreadsheetBuffer(buffer, { extension = "xlsx", sheetName = null, includeSamples = false } = {}) {
+export function parseSpreadsheetBuffer(buffer, { extension = "xlsx", sheetName = null, includeSamples = true } = {}) {
   // Keep spreadsheet dates as serials so normalization uses the documented
   // 1899-12-30 epoch consistently across browser time zones.
   const workbook = XLSX.read(buffer, { type: "array", cellDates: false, raw: true });

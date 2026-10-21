@@ -22,6 +22,13 @@ import { displayFilterValue, comparableFilterValue } from "../src/ai-data-analys
 import { parseSpreadsheetFile } from "../src/tabular-worker-client.js";
 import { metroFixture } from "./fixtures/metro-fixture.js";
 import { createRoadTrafficWorkbook, trafficAiAnalysis } from "./fixtures/road-traffic-fixture.js";
+import { fallbackAnalysis } from "../src/ai-chart-contract.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
+import { normalizeTabularRecords } from "../src/tabular-data.js";
+import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { countryFeature, createCountryWeatherWorkbook, WEATHER_COUNTRIES } from "./fixtures/country-weather-fixture.js";
+import * as polygonLegend from "../src/polygon-legend.js";
+import * as legendContract from "../src/polygon-legend-contract.js";
 
 // Exercise the actual upload and UI handlers with a MapLibre/DOM adapter.
 function createHarness() {
@@ -31,7 +38,7 @@ function createHarness() {
     classList: { add() {}, remove() {}, toggle() {} },
     replaceChildren(...children) { this.children = children; },
     append(...children) { this.children.push(...children); },
-    setAttribute() {}, addEventListener() {}
+    setAttribute() {}, addEventListener() {}, querySelector() { return null; }
   });
   const get = id => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
   const descendants = node => [node, ...node.children.flatMap(descendants)];
@@ -52,7 +59,8 @@ function createHarness() {
   };
   const context = vm.createContext({
     ...metro, ...capabilities, ...polygonStyle, ...pointStyle, ...geojsonLayers, ...congestion, ...transport, ...layerOrder, PointRenderer, PolygonRenderer,
-    ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue,
+    ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, ...polygonLegend, ...legendContract,
+    AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue,
     requestAiDataAnalysis: async records => ({ analysis: { ...trafficAiAnalysis, source: "ai" }, records, validRowRate: 1 }),
     roadNetworkUrl: () => "/roads/hanoi_roads.json",
     fetch: async () => ({ ok: true, json: async () => ({ type: "FeatureCollection", features: [{
@@ -140,35 +148,68 @@ test("upload displays independent Metro layers, changes departure, and clears al
   await vm.runInContext("resetConfiguration()", context);
   assert.equal(sources.get("polygon-data").data.features[0].properties.departure_time, "05:30");
   assert.equal(layers.get("data-lines").layout.visibility, "visible");
-  assert.equal(get("show-weather").checked, false);
-  assert.equal(get("show-weather-status").textContent, "Đang tắt");
   vm.runInContext("deleteData()", context);
   for (const id of ["polygon-data", "vietnam-boundary", "metro-station-data", "line-data"]) assert.equal(sources.get(id).data.features.length, 0);
   assert.equal(get("metro-time-section").hidden, true);
   assert.equal(get("metro-legend").hidden, true);
 });
 
-test("area search recommends Polygon by default without uploaded data", async () => {
-  const { context, get, sources, layers } = createHarness();
-  context.searchBoundaries = [{
-    type: "Feature",
-    properties: { name: "Hà Nội" },
+test("data search follows analyzed upload fields and clears when the dataset is removed", async () => {
+  const { context } = createHarness();
+  const snapshots = [];
+  context.searchController = { setData(data) { snapshots.push(data); } };
+  vm.runInContext("mapSearch = searchController; syncDataSearch()", context);
+  assert.equal(snapshots.at(-1), undefined, "no uploaded data means no search data");
+  context.polygonData = { type: "FeatureCollection", features: [{
+    type: "Feature", properties: { name: "Hà Nội", temperature: 30 },
     geometry: { type: "Polygon", coordinates: [[[105, 20], [106, 20], [106, 21], [105, 20]]] }
-  }];
-  get("show-weather").checked = true;
+  }] };
+  await vm.runInContext('replaceBoundary(polygonData, "regions.geojson", null, { preservePolygons: true })', context);
+  assert.equal(snapshots.at(-1).data, context.polygonData);
+  assert.deepEqual(Array.from(snapshots.at(-1).columns, column => column.name), ["name"]);
+  const columns = snapshots.at(-1).columns;
+  vm.runInContext("syncDataSearch()", context);
+  assert.equal(snapshots.at(-1).columns, columns, "styling must not reset the search index");
+  vm.runInContext("deleteData()", context);
+  assert.equal(snapshots.at(-1), undefined);
+  assert.equal(vm.runInContext("state.dataOrigin", context), null);
+  assert.equal(vm.runInContext("state.mapType", context), null);
+});
 
-  await vm.runInContext("applySearchBoundaries(searchBoundaries)", context);
-
-  assert.equal(vm.runInContext("state.dataOrigin", context), "search");
+test("uploaded country weather enables search using the current date and country filters", async () => {
+  const { context, get } = createHarness();
+  const indexes = [];
+  context.parseSpreadsheetFile = parseSpreadsheetFile;
+  context.searchController = { setData(snapshot) { indexes.push(buildDataSearchIndex(snapshot)); } };
+  vm.runInContext("mapSearch = searchController", context);
+  context.requestAiDataAnalysis = async (rows, { profile }) => {
+    const analysis = fallbackAnalysis(profile);
+    return { analysis, profile, ...normalizeTabularRecords(rows, analysis.columns) };
+  };
+  context.loadAdministrativeBoundaries = async names => ({
+    type: "FeatureCollection", matched: names, unmatched: [], matchRate: 1,
+    features: names.map(name => ({ ...countryFeature(WEATHER_COUNTRIES.find(country => country.name === name)),
+      properties: { __data_location: name } }))
+  });
+  context.landOnlyBoundary = async feature => feature;
+  context.joinRecordsToMapTilerBoundaries = joinRecordsToMapTilerBoundaries;
+  const workbook = createCountryWeatherWorkbook();
+  context.countryFile = { name: "country-weather.xlsx", arrayBuffer: async () => workbook };
+  await vm.runInContext("processSpatialFile(countryFile)", context);
   assert.equal(vm.runInContext("state.mapType", context), "polygon");
-  assert.equal(sources.get("polygon-data").data.features.length, 1);
-  assert.equal(layers.get("polygon-fill").layout.visibility, "visible");
-  assert.equal(layers.get("h3-fill").layout.visibility, "none");
-  assert.deepEqual(get("map-type-grid").children.map(button => button.dataset.type), ["polygon"]);
-  assert.equal(get("map-type-grid").children.find(button => button.dataset.type === "polygon").className, "map-type active");
-  assert.equal(get("map-type-summary").textContent, "Khu vực tìm kiếm · Polygon theo ranh giới đã chọn");
-  assert.equal(get("show-weather").checked, false);
-  assert.equal(get("show-weather-status").textContent, "Đang tắt");
+  let result = searchDataIndex(indexes.at(-1), "Vietnam")[0];
+  assert.equal(result.label, "Việt Nam");
+  assert.equal(result.feature.properties["Nhiệt độ trung bình"], 28.6, "search opens the latest displayed date");
+  assert.deepEqual(searchDataIndex(indexes.at(-1), "Hoa Kỳ"), [], "known countries outside the upload stay absent");
+  const controls = get("ai-filter-controls");
+  const descendants = node => [node, ...node.children.flatMap(descendants)];
+  const date = descendants(controls).find(node => node.className === "ai-generated-filter" && node.dataset.field === "Ngày");
+  date.value = "2026-09-01T00:00:00.000Z";
+  await vm.runInContext("filteredAiBoundary()", context);
+  result = searchDataIndex(indexes.at(-1), "Vietnam")[0];
+  assert.equal(result.feature.properties["Nhiệt độ trung bình"], 28, "filter changes refresh the searchable feature values");
+  vm.runInContext("deleteData()", context);
+  assert.equal(indexes.at(-1).entries.length, 0);
 });
 
 test("Point style panel applies appearance and resets it without rebuilding H3 or changing filters", async () => {

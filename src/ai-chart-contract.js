@@ -1,6 +1,7 @@
 import { inferTimeGranularity, TIME_GRANULARITIES } from "./time-values.js";
 import { inferMeasureAggregation, measureAggregation } from "./measure-semantics.js";
 import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "./polygon-legend-contract.js";
+import { preferredAdministrativeColumn } from "./geographic-grain.js";
 
 const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "text", "ignore"]);
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
@@ -257,7 +258,7 @@ export function fallbackAnalysis(profile, { datasetTitle = "Dữ liệu tải l�
   const category = byRole("category").find(column => ROAD_NAME_HINT.test(column.name)) || byRole("category")[0];
   const lat = geo.find(column => column.geoLevel === "point_lat");
   const lng = geo.find(column => column.geoLevel === "point_lng");
-  const region = geo.find(column => ["admin1", "admin2", "country"].includes(column.geoLevel));
+  const region = preferredAdministrativeColumn(columns, profile);
   const regionProfile = profile?.columns?.find(column => column.name === region?.name);
   const groupingRegion = Number(regionProfile?.uniqueCount) > 1 ? region : null;
   const suggestions = [];

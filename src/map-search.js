@@ -6,7 +6,6 @@ import {
 const MAPTILER_GEOCODING_URL = "https://api.maptiler.com/geocoding";
 const VIETNAM_BBOX = "102.14,8.18,109.47,23.4";
 const ADMIN_TYPES = "country,region,subregion,county,joint_municipality,joint_submunicipality,municipality,municipal_district,locality,place";
-const MIN_QUERY_LENGTH = 2;
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
 const SEARCH_BOUNDARY_SOURCE = "map-search-boundary";
 const SEARCH_BOUNDARY_LINE = "map-search-boundary-line";
@@ -31,12 +30,9 @@ function displayAdministrativeName(value) {
   return String(value || "").replace(/([\p{Ll}])([\p{Lu}])/gu, "$1 $2").trim();
 }
 
-export function buildGeocodingUrl(query, apiKey, center) {
-  const url = new URL(`${MAPTILER_GEOCODING_URL}/${encodeURIComponent(query)}.json`);
-  url.searchParams.set("key", apiKey);
-  url.searchParams.set("language", "vi");
-  url.searchParams.set("country", "vn");
-  url.searchParams.set("bbox", VIETNAM_BBOX);
+export function buildGeocodingUrl(query, apiKey, center, country = "VNM") {
+  const url = new URL(buildAdministrativeGeocodingUrl(query, apiKey, ADMIN_TYPES, country));
+  url.pathname = `/geocoding/${encodeURIComponent(query)}.json`;
   url.searchParams.set("types", ADMIN_TYPES);
   url.searchParams.set("limit", "8");
   url.searchParams.set("autocomplete", "true");
@@ -47,10 +43,10 @@ export function buildGeocodingUrl(query, apiKey, center) {
   return url.toString();
 }
 
-export async function searchMapTiler(query, { apiKey, center, placeType, signal, fetchImpl = fetch }) {
+export async function searchMapTiler(query, { apiKey, center, placeType, country = "VNM", signal, fetchImpl = fetch }) {
   if (!apiKey) throw new Error("MAPTILER_API_KEY_MISSING");
   const url = placeType === "country" ? buildAdministrativeGeocodingUrl(query, apiKey, "country")
-    : buildGeocodingUrl(query, apiKey, center);
+    : buildGeocodingUrl(query, apiKey, center, country);
   const response = await fetchImpl(url, { signal });
   if (!response.ok) {
     const error = new Error(`MapTiler geocoding failed (${response.status})`);
@@ -103,11 +99,13 @@ export function isBoundaryFeature(feature) {
 
 export async function searchMapTilerBoundaries(query, options) {
   const features = await searchMapTiler(query, options);
-  const details = await Promise.allSettled(features.map(async feature => {
+  const candidates = options.candidateFilter ? features.filter(options.candidateFilter) : features;
+  const details = await Promise.allSettled(candidates.map(async feature => {
     if (isBoundaryFeature(feature)) return feature;
     if (!feature.id) return null;
     const detail = await getMapTilerFeature(feature.id, options);
-    return isBoundaryFeature(detail) ? { ...feature, ...detail } : null;
+    return isBoundaryFeature(detail) ? { ...feature, ...detail,
+      properties: { ...(feature.properties || {}), ...(detail.properties || {}) } } : null;
   }));
   if (options.signal?.aborted) throw new DOMException("Search aborted", "AbortError");
   const failed = details.filter(result => result.status === "rejected");
@@ -115,16 +113,22 @@ export async function searchMapTilerBoundaries(query, options) {
   return details.flatMap(result => result.status === "fulfilled" && result.value ? [result.value] : []);
 }
 
-export function buildAdministrativeGeocodingUrl(name, apiKey, placeType = "region") {
+export function buildAdministrativeGeocodingUrl(name, apiKey, placeType = "region", country = "VNM") {
   const isCountry = placeType === "country";
   const code = isCountry ? resolveBoundaryCountry(name) : null;
   const query = code && String(name).trim().toUpperCase() === code ? COUNTRY_BOUNDARY_SOURCES[code].name : String(name).trim();
-  const url = new URL(`${MAPTILER_GEOCODING_URL}/${encodeURIComponent(isCountry ? query : `${name}, Việt Nam`)}.json`);
+  const scope = isCountry ? null : resolveBoundaryCountry(country);
+  const countryName = COUNTRY_BOUNDARY_SOURCES[scope]?.name || String(country ?? "").trim();
+  const lastPart = query.split(",").at(-1).trim();
+  const qualified = !isCountry && countryName && normalizePlaceName(lastPart) !== normalizePlaceName(countryName)
+    && (!scope || resolveBoundaryCountry(lastPart) !== scope) ? `${query}, ${countryName}` : query;
+  const url = new URL(`${MAPTILER_GEOCODING_URL}/${encodeURIComponent(qualified)}.json`);
   url.searchParams.set("key", apiKey);
   url.searchParams.set("language", "vi");
   if (!isCountry) {
-    url.searchParams.set("country", "vn");
-    url.searchParams.set("bbox", VIETNAM_BBOX);
+    const countryCode = COUNTRY_BOUNDARY_SOURCES[scope]?.aliases.find(alias => /^[a-z]{2}$/i.test(alias));
+    if (countryCode) url.searchParams.set("country", countryCode.toLowerCase());
+    if (scope === "VNM") url.searchParams.set("bbox", VIETNAM_BBOX);
   }
   url.searchParams.set("types", placeType);
   url.searchParams.set("limit", "5");
@@ -144,11 +148,16 @@ export function normalizedAdministrativeName(value) {
   return normalizePlaceName(name);
 }
 
+export function administrativeNameAliases(feature) {
+  return [feature?.text, feature?.place_name?.split(",")[0], feature?.properties?.name,
+    feature?.matching_text, feature?.matching_place_name?.split(",")[0],
+    ...Object.entries(feature || {}).filter(([key]) => /^(?:text|place_name)_[a-z]{2}$/i.test(key)).map(([, value]) => String(value).split(",")[0])]
+    .filter(value => typeof value === "string" && value.trim());
+}
+
 function provinceCandidateScore(feature, name) {
   const target = normalizedAdministrativeName(name);
-  const candidates = [feature?.text, feature?.place_name?.split(",")[0], feature?.properties?.name]
-    .filter(Boolean)
-    .map(normalizedAdministrativeName);
+  const candidates = administrativeNameAliases(feature).map(normalizedAdministrativeName).filter(Boolean);
   if (candidates.includes(target)) return 0;
   if (candidates.some(candidate => candidate.startsWith(target) || target.startsWith(candidate))) return 1;
   return 2;
@@ -176,12 +185,24 @@ export function countryCandidateScore(feature, name) {
   return target && aliases.includes(target) ? 0 : 2;
 }
 
-export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeType = "region", signal, fetchImpl = fetch } = {}) {
+export function boundaryMatchesCountry(feature, country) {
+  if (!country) return true;
+  const contexts = (feature?.context || []).filter(item => item.id?.startsWith("country.") || item.place_type?.includes("country"));
+  const properties = feature?.properties || {};
+  const code = properties.__country_code || properties.GID_0 || properties.country_code || feature?.country_code;
+  if (code) contexts.push({ text: code, properties: { country_code: code } });
+  const lastPart = String(feature?.place_name || "").split(",").at(-1).trim();
+  if (lastPart && lastPart !== feature?.text) contexts.push({ text: lastPart });
+  return !contexts.length || contexts.some(context => countryCandidateScore({ ...context, place_type: ["country"] }, country) === 0);
+}
+
+export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeType = "region", country = "VNM", signal, fetchImpl = fetch } = {}) {
   if (!apiKey) throw new Error("MAPTILER_API_KEY_MISSING");
   const normalizedName = placeType === "country" ? resolveBoundaryCountry(name) || normalizePlaceName(name) : normalizedAdministrativeName(name);
-  const cacheKey = `${placeType === "country" ? "global" : "VNM"}:${placeType}:${normalizedName}`;
+  const scope = placeType === "country" ? "global" : resolveBoundaryCountry(country) || normalizePlaceName(country) || "global";
+  const cacheKey = `${scope}:${placeType}:${normalizedName}`;
   if (fetchImpl === fetch && mapTilerBoundaryCache.has(cacheKey)) return mapTilerBoundaryCache.get(cacheKey);
-  const response = await fetchImpl(buildAdministrativeGeocodingUrl(name, apiKey, placeType), { signal });
+  const response = await fetchImpl(buildAdministrativeGeocodingUrl(name, apiKey, placeType, country), { signal });
   if (!response.ok) {
     const error = new Error(`MapTiler administrative lookup failed (${response.status})`);
     error.status = response.status;
@@ -189,16 +210,18 @@ export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeTyp
   }
   const data = await response.json();
   const score = placeType === "country" ? countryCandidateScore : provinceCandidateScore;
+  const target = placeType === "country" ? name : String(name).split(",")[0];
   const candidates = (data.features || [])
     .filter(feature => feature?.id && (feature.place_type || []).includes(placeType))
-    .sort((a, b) => score(a, name) - score(b, name));
+    .filter(feature => placeType === "country" || boundaryMatchesCountry(feature, country))
+    .sort((a, b) => score(a, target) - score(b, target));
   const candidate = candidates[0];
-  if (!candidate || score(candidate, name) > 1) return null;
-  if (placeType === "country" && candidates.some(other => other.id !== candidate.id && score(other, name) === score(candidate, name))) return null;
+  if (!candidate || score(candidate, target) > 1) return null;
+  if (candidates.some(other => other.id !== candidate.id && score(other, target) === score(candidate, target))) return null;
   const detail = isBoundaryFeature(candidate)
     ? candidate
     : await getMapTilerFeature(candidate.id, { apiKey, signal, fetchImpl });
-  if (!isBoundaryFeature(detail)) return null;
+  if (!isBoundaryFeature(detail) || placeType !== "country" && !boundaryMatchesCountry(detail, country)) return null;
   const boundary = {
     ...candidate,
     ...detail,
@@ -460,23 +483,18 @@ export function focusMapOnFeatures(map, features) {
 
 export function featureCenter(feature) {
   const center = feature?.center || (feature?.geometry?.type === "Point" ? feature.geometry.coordinates : null);
-  return Array.isArray(center) && center.length >= 2 && center.every(Number.isFinite) ? center.slice(0, 2) : null;
+  if (Array.isArray(center) && center.length >= 2 && center.every(Number.isFinite)) return center.slice(0, 2);
+  const bounds = featuresBounds([feature]);
+  return bounds ? [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2] : null;
 }
 
 export function featureLabel(feature) {
   return feature?.place_name || feature?.text || "Địa điểm chưa có tên";
 }
 
-function resultSubtitle(feature) {
-  const label = featureLabel(feature);
-  const name = feature?.text || "";
-  const subtitle = name && label.startsWith(name) ? label.slice(name.length).replace(/^,\s*/, "") : label;
-  return subtitle || (feature?.place_type?.[0] ? String(feature.place_type[0]).replaceAll("_", " ") : "Khu vực hành chính");
-}
-
 export function focusMapOnFeature(map, feature) {
   const center = featureCenter(feature);
-  const bbox = feature?.bbox;
+  const bbox = featuresBounds([feature]);
   if (Array.isArray(bbox) && bbox.length === 4 && bbox.every(Number.isFinite) && bbox[0] < bbox[2] && bbox[1] < bbox[3]) {
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
       padding: { top: 105, right: 60, bottom: 60, left: 60 },
@@ -492,96 +510,77 @@ export function focusMapOnFeature(map, feature) {
   return true;
 }
 
-export function createMapSearch({ map, apiKey, onBoundariesChange = null }) {
+/** Index only fields identified by the uploaded data analysis. No geocoding requests. */
+export function buildDataSearchIndex({ data, columns = [], titleField } = {}) {
+  const fields = columns.filter(column => ["geo", "category", "text", "id"].includes(column.role)
+    && !["point_lat", "point_lng", "h3"].includes(column.geoLevel) && !column.name.startsWith("__"));
+  if (!fields.length) return { entries: [], placeholder: "Tìm trong dữ liệu đã tải lên..." };
+  const primary = fields.find(column => column.name === titleField) || fields[0];
+  const entries = (data?.features || []).flatMap(feature => {
+    if (!featureCenter(feature)) return [];
+    const properties = feature.properties || {};
+    const values = fields.flatMap(column => {
+      const value = properties[column.name];
+      return value == null || String(value).trim() === "" ? [] : [{ column, value: String(value).trim() }];
+    });
+    if (!values.length) return [];
+    const label = values.find(item => item.column.name === primary.name)?.value || values[0].value;
+    const aliases = values.flatMap(({ column, value }) => {
+      if (column.geoLevel !== "country") return [value];
+      const code = resolveBoundaryCountry(value);
+      const source = COUNTRY_BOUNDARY_SOURCES[code];
+      return [value, code, source?.name, ...(source?.aliases || [])].filter(Boolean);
+    });
+    const terms = [...new Set(aliases.map(normalizePlaceName).filter(Boolean))];
+    if (!terms.length) return [];
+    const subtitle = values.filter(item => item.value !== label).slice(0, 2)
+      .map(item => `${item.column.labelVi || item.column.name}: ${item.value}`).join(" · ") || primary.labelVi || primary.name;
+    return [{ feature, label, subtitle, terms }];
+  });
+  const name = primary.geoLevel === "country" ? "quốc gia" : (primary.labelVi || primary.name).toLocaleLowerCase("vi");
+  return { entries, placeholder: `Tìm ${name} trong dữ liệu...` };
+}
+
+export function searchDataIndex(index, query, limit = 8) {
+  const needle = normalizePlaceName(query);
+  if (!needle) return [];
+  const score = entry => entry.terms.some(term => term === needle) ? 0
+    : entry.terms.some(term => term.startsWith(needle)) ? 1 : 2;
+  return (index?.entries || []).filter(entry => entry.terms.some(term => term.includes(needle)))
+    .sort((a, b) => score(a) - score(b) || a.label.localeCompare(b.label, "vi"))
+    .slice(0, limit);
+}
+
+export function createMapSearch({ map, onSelect = null }) {
   const root = document.getElementById("map-search");
   const form = document.getElementById("map-search-form");
   const input = document.getElementById("map-search-input");
   const results = document.getElementById("map-search-results");
   const clearButton = document.getElementById("map-search-clear");
-  const spinner = document.getElementById("map-search-spinner");
-  const selection = document.getElementById("map-search-selection");
-  const chips = document.getElementById("map-search-chips");
-  const clearAllButton = document.getElementById("map-search-clear-all");
-  if (!root || !form || !input || !results || !clearButton || !spinner || !selection || !chips || !clearAllButton) return () => {};
+  if (!root || !form || !input || !results || !clearButton) return { setData() {}, destroy() {} };
 
-  let features = [];
+  let index = { entries: [] };
+  let matches = [];
   let activeIndex = -1;
-  let debounceTimer;
-  let requestController;
-  const detailControllers = new Map();
-  const selectedRegions = new Map();
-  let boundaryRenderPending = false;
-
-  const drawSelectedBoundary = () => {
-    boundaryRenderPending = !map?.isStyleLoaded?.();
-    if (!boundaryRenderPending) renderSearchBoundary(map, [...selectedRegions.values()].map(item => item.boundary).filter(Boolean));
-  };
-
-  const notifyBoundariesChange = () => {
-    if (typeof onBoundariesChange !== "function") return;
-    const boundaries = [...selectedRegions.values()].map(item => item.boundary).filter(Boolean);
-    Promise.resolve(onBoundariesChange(boundaries)).catch(error => console.error("Không thể cập nhật vùng tìm kiếm:", error));
-  };
-
-  const featureKey = feature => String(feature?.id || featureLabel(feature)).toLocaleLowerCase("vi");
-  const updateSpinner = () => { spinner.hidden = !requestController && detailControllers.size === 0; };
-
-  const renderSelection = () => {
-    chips.replaceChildren();
-    selectedRegions.forEach((item, key) => {
-      const chip = document.createElement("span");
-      const label = document.createElement("span");
-      const remove = document.createElement("button");
-      chip.className = `map-search-chip${item.loading ? " loading" : ""}`;
-      label.textContent = item.feature.text || featureLabel(item.feature).split(",")[0];
-      remove.type = "button";
-      remove.textContent = "×";
-      remove.setAttribute("aria-label", `Bỏ ${label.textContent}`);
-      remove.addEventListener("click", () => removeRegion(key));
-      chip.append(label, remove);
-      chips.append(chip);
-    });
-    selection.hidden = selectedRegions.size === 0;
-  };
-
-  const removeRegion = key => {
-    detailControllers.get(key)?.abort();
-    detailControllers.delete(key);
-    selectedRegions.delete(key);
-    renderSelection();
-    drawSelectedBoundary();
-    notifyBoundariesChange();
-    updateSpinner();
-  };
-
-  const clearSelections = () => {
-    detailControllers.forEach(controller => controller.abort());
-    detailControllers.clear();
-    selectedRegions.clear();
-    boundaryRenderPending = false;
-    renderSelection();
-    drawSelectedBoundary();
-    notifyBoundariesChange();
-    updateSpinner();
-  };
+  let snapshot;
 
   const setOpen = open => {
     results.hidden = !open;
     input.setAttribute("aria-expanded", String(open));
     if (!open) input.removeAttribute("aria-activedescendant");
   };
-  const renderMessage = (message, kind = "empty") => {
+  const reset = () => {
+    input.value = "";
+    clearButton.hidden = true;
+    matches = [];
+    activeIndex = -1;
     results.replaceChildren();
-    const item = document.createElement("div");
-    item.className = `map-search-message ${kind}`;
-    item.textContent = message;
-    results.append(item);
-    setOpen(true);
+    setOpen(false);
   };
-  const setActive = index => {
+  const setActive = next => {
     const options = [...results.querySelectorAll(".map-search-result")];
     if (!options.length) return;
-    activeIndex = (index + options.length) % options.length;
+    activeIndex = (next + options.length) % options.length;
     options.forEach((option, optionIndex) => {
       const active = optionIndex === activeIndex;
       option.classList.toggle("active", active);
@@ -590,186 +589,101 @@ export function createMapSearch({ map, apiKey, onBoundariesChange = null }) {
     input.setAttribute("aria-activedescendant", options[activeIndex].id);
     options[activeIndex].scrollIntoView({ block: "nearest" });
   };
-  const chooseFeature = async feature => {
-    const key = featureKey(feature);
-    if (selectedRegions.has(key)) {
-      removeRegion(key);
-      return;
-    }
-    if (!focusMapOnFeature(map, feature)) return;
-    selectedRegions.set(key, { feature, boundary: null, loading: true });
-    renderSelection();
-    input.value = "";
-    clearButton.hidden = true;
+  const choose = entry => {
+    if (!entry || root.hidden || !index.entries.includes(entry)) return;
+    input.value = entry.label;
+    clearButton.hidden = false;
     setOpen(false);
-
-    const controller = new AbortController();
-    detailControllers.set(key, controller);
-    updateSpinner();
-    try {
-      const detailedFeature = isBoundaryFeature(feature) ? feature : feature.id ? await getMapTilerFeature(feature.id, { apiKey, signal: controller.signal }) : null;
-      if (detailControllers.get(key) !== controller || !isBoundaryFeature(detailedFeature)) return;
-      const clippedBoundary = detailedFeature.properties?.local_boundary
-        ? detailedFeature
-        : await landOnlyBoundary(detailedFeature, { signal: controller.signal, forceVietnam: true });
-      if (detailControllers.get(key) !== controller || !selectedRegions.has(key)) return;
-      selectedRegions.set(key, { feature, boundary: clippedBoundary, loading: false });
-      renderSelection();
-      drawSelectedBoundary();
-      const boundaries = [...selectedRegions.values()].map(item => item.boundary).filter(Boolean);
-      notifyBoundariesChange();
-      if (clippedBoundary) focusMapOnFeatures(map, boundaries);
-      else console.warn("Ranh giới MapTiler không giao với dữ liệu ranh giới VNM.");
-    } catch (error) {
-      if (error.name !== "AbortError") {
-        console.warn("Không thể tải hoặc cắt ranh giới MapTiler:", error);
-        if (detailControllers.get(key) === controller) {
-          selectedRegions.delete(key);
-          renderSelection();
-        }
-      }
-    } finally {
-      if (detailControllers.get(key) === controller) detailControllers.delete(key);
-      updateSpinner();
-    }
+    focusMapOnFeature(map, entry.feature);
+    onSelect?.(entry.feature, featureCenter(entry.feature));
   };
-  const renderFeatures = nextFeatures => {
-    features = nextFeatures.filter(feature => featureCenter(feature));
+  const runSearch = () => {
+    if (root.hidden) return;
+    clearButton.hidden = !input.value;
+    matches = searchDataIndex(index, input.value);
     activeIndex = -1;
+    input.removeAttribute("aria-activedescendant");
     results.replaceChildren();
-    if (!features.length) {
-      renderMessage("Không tìm thấy khu vực có dữ liệu ranh giới phù hợp tại Việt Nam.");
-      return;
+    if (!normalizePlaceName(input.value)) { setOpen(false); return; }
+    if (!matches.length) {
+      const message = document.createElement("div");
+      message.className = "map-search-message";
+      message.textContent = "Không tìm thấy dữ liệu phù hợp với bộ lọc hiện tại.";
+      results.append(message);
     }
-    features.forEach((feature, index) => {
+    matches.forEach((entry, position) => {
       const button = document.createElement("button");
       const icon = document.createElement("span");
       const copy = document.createElement("span");
       const title = document.createElement("b");
       const subtitle = document.createElement("small");
       button.type = "button";
-      button.id = `map-search-result-${index}`;
-      button.className = `map-search-result${selectedRegions.has(featureKey(feature)) ? " selected" : ""}`;
+      button.id = `map-search-result-${position}`;
+      button.className = "map-search-result";
       button.setAttribute("role", "option");
-      const selected = selectedRegions.has(featureKey(feature));
-      button.setAttribute("aria-selected", String(selected));
+      button.setAttribute("aria-selected", "false");
       icon.className = "map-search-result-icon";
-      icon.textContent = selected ? "✓" : "⌖";
-      title.textContent = feature.text || featureLabel(feature).split(",")[0];
-      subtitle.textContent = resultSubtitle(feature);
+      icon.textContent = "⌖";
+      title.textContent = entry.label;
+      subtitle.textContent = entry.subtitle;
       copy.append(title, subtitle);
       button.append(icon, copy);
-      button.addEventListener("mouseenter", () => setActive(index));
-      button.addEventListener("click", () => chooseFeature(feature));
+      button.addEventListener("mouseenter", () => setActive(position));
+      button.addEventListener("click", () => choose(entry));
       results.append(button);
     });
     setOpen(true);
   };
-  const runSearch = async () => {
-    const query = input.value.trim();
-    if (query.length < MIN_QUERY_LENGTH) {
-      requestController?.abort();
-      requestController = null;
-      updateSpinner();
-      features = [];
-      setOpen(false);
-      return;
-    }
-    requestController?.abort();
-    const controller = new AbortController();
-    requestController = controller;
-    updateSpinner();
-    try {
-      let boundaries = []; let providerError;
-      if (apiKey) {
-        try {
-          boundaries = await searchMapTilerBoundaries(query, { apiKey, center: map.getCenter(), signal: controller.signal });
-        } catch (error) {
-          if (error.name === "AbortError" || controller.signal.aborted) throw error;
-          providerError = error;
-        }
-      }
-      if (!boundaries.length) {
-        try {
-          boundaries = await searchLocalBoundaries(query, { signal: controller.signal });
-        } catch (error) {
-          if (error.name === "AbortError" || controller.signal.aborted) throw error;
-          throw providerError || error;
-        }
-        if (!boundaries.length && providerError) throw providerError;
-      }
-      if (requestController !== controller || controller.signal.aborted) return;
-      renderFeatures(boundaries);
-    } catch (error) {
-      if (error.name === "AbortError") return;
-      console.error(error);
-      renderMessage(error.status === 403 ? "API key MapTiler không hợp lệ hoặc bị giới hạn." : "Không thể tải dữ liệu tìm kiếm. Vui lòng thử lại.", "error");
-    } finally {
-      if (requestController === controller) requestController = null;
-      updateSpinner();
-    }
-  };
-
-  input.addEventListener("input", () => {
-    clearButton.hidden = !input.value;
-    clearTimeout(debounceTimer);
-    requestController?.abort();
-    requestController = null;
-    updateSpinner();
-    features = [];
-    setOpen(false);
-    debounceTimer = setTimeout(runSearch, 320);
-  });
-  input.addEventListener("focus", () => {
-    if (features.length && input.value.trim().length >= MIN_QUERY_LENGTH) setOpen(true);
-  });
-  input.addEventListener("keydown", event => {
+  const keydown = event => {
+    if (root.hidden) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      setActive(activeIndex + (event.key === "ArrowDown" ? 1 : -1));
-    } else if (event.key === "Enter" && features.length) {
+      if (results.hidden) runSearch();
+      setActive(activeIndex < 0 ? (event.key === "ArrowDown" ? 0 : matches.length - 1)
+        : activeIndex + (event.key === "ArrowDown" ? 1 : -1));
+    } else if (event.key === "Enter") {
       event.preventDefault();
-      chooseFeature(features[activeIndex >= 0 ? activeIndex : 0]);
+      runSearchIfClosed();
+      choose(matches[activeIndex >= 0 ? activeIndex : 0]);
     } else if (event.key === "Escape") {
       setOpen(false);
       input.blur();
     }
-  });
-  form.addEventListener("submit", event => {
+  };
+  const runSearchIfClosed = () => { if (results.hidden) runSearch(); };
+  const submit = event => {
     event.preventDefault();
-    if (features.length) chooseFeature(features[activeIndex >= 0 ? activeIndex : 0]);
-    else runSearch();
-  });
-  clearButton.addEventListener("click", () => {
-    clearTimeout(debounceTimer);
-    requestController?.abort();
-    requestController = null;
-    input.value = "";
-    clearButton.hidden = true;
-    features = [];
-    updateSpinner();
-    setOpen(false);
-    input.focus();
-  });
-  clearAllButton.addEventListener("click", clearSelections);
-  document.addEventListener("pointerdown", event => {
-    if (!root.contains(event.target)) setOpen(false);
-  });
-  map.on("style.load", () => {
-    if (selectedRegions.size) drawSelectedBoundary();
-  });
-  map.on("idle", () => {
-    if (boundaryRenderPending) drawSelectedBoundary();
-  });
+    runSearchIfClosed();
+    choose(matches[activeIndex >= 0 ? activeIndex : 0]);
+  };
+  const clear = () => { reset(); input.focus(); };
+  const outside = event => { if (!root.contains(event.target)) setOpen(false); };
+  const listeners = [
+    [input, "input", runSearch], [input, "focus", runSearch], [input, "keydown", keydown],
+    [form, "submit", submit], [clearButton, "click", clear], [document, "pointerdown", outside]
+  ];
+  listeners.forEach(([element, event, handler]) => element.addEventListener(event, handler));
+  root.hidden = true;
+  input.disabled = true;
+  reset();
 
-  if (!apiKey) input.title = "Tìm trong dữ liệu ranh giới Việt Nam (VNM)";
-  return () => {
-    clearTimeout(debounceTimer);
-    requestController?.abort();
-    detailControllers.forEach(controller => controller.abort());
-    detailControllers.clear();
-    selectedRegions.clear();
-    boundaryRenderPending = false;
-    renderSearchBoundary(map, null);
+  return {
+    setData(next = {}) {
+      if (snapshot && snapshot.data === next.data && snapshot.columns === next.columns && snapshot.titleField === next.titleField) return;
+      snapshot = next;
+      index = buildDataSearchIndex(next);
+      reset();
+      root.hidden = index.entries.length === 0;
+      input.disabled = root.hidden;
+      input.placeholder = index.placeholder;
+      input.setAttribute("aria-label", index.placeholder.replace(/\.\.\.$/, ""));
+    },
+    destroy() {
+      listeners.forEach(([element, event, handler]) => element.removeEventListener(event, handler));
+      index = { entries: [] };
+      reset();
+      root.hidden = true;
+      input.disabled = true;
+    }
   };
 }

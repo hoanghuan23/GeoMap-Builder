@@ -291,6 +291,7 @@ export const COUNTRY_BOUNDARY_SOURCES = {
   SGP: {
     name: "Singapore",
     aliases: ["Xin-ga-po", "SG"],
+    cityState: true,
     files: {
       0: new URL("../administrative_division/SGP/SGP_ADM0.geojson", import.meta.url),
       1: new URL("../administrative_division/SGP/SGP_ADM1.geojson", import.meta.url)
@@ -334,6 +335,25 @@ export const COUNTRY_BOUNDARY_SOURCES = {
       1: new URL("../administrative_division/PHL/PHL_ADM1.geojson", import.meta.url),
       2: new URL("../administrative_division/PHL/PHL_ADM2.geojson", import.meta.url),
       3: new URL("../administrative_division/PHL/PHL_ADM3.geojson", import.meta.url)
+    }
+  },
+  BRN: {
+    name: "Brunei",
+    aliases: ["Brunei Darussalam", "BN"],
+    files: {
+      0: new URL("../administrative_division/BRN/BRN_ADM0.geojson", import.meta.url),
+      1: new URL("../administrative_division/BRN/BRN_ADM1.geojson", import.meta.url),
+      2: new URL("../administrative_division/BRN/BRN_ADM2.geojson", import.meta.url)
+    }
+  },
+  TLS: {
+    name: "Timor-Leste",
+    aliases: ["Timor Leste", "East Timor", "Đông Timor", "TL"],
+    files: {
+      0: new URL("../administrative_division/TLS/TLS_ADM0.geojson", import.meta.url),
+      1: new URL("../administrative_division/TLS/TLS_ADM1.geojson", import.meta.url),
+      2: new URL("../administrative_division/TLS/TLS_ADM2.geojson", import.meta.url),
+      3: new URL("../administrative_division/TLS/TLS_ADM3.geojson", import.meta.url)
     }
   },
   KHM: {

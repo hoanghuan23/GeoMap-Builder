@@ -4,6 +4,7 @@ import { filterTimeRange, timeValueInfo, timeValuesAreComparable, uniqueTimeValu
 import { roadAreaField, roadNetworkForArea, roadRefField } from "./road-map-data.js";
 import { normalizeRoadText } from "./congestion-data.js";
 import { isCoordinateLine, pointIdentity, pointTitleField } from "./coordinate-data.js";
+import { administrativeContextFields } from "./geographic-grain.js";
 
 export function mapDisplaySuggestions(suggestions = [], selectedSuggestionId = null) {
   return suggestions.filter(item => ["choropleth", "map_line", "point"].includes(item.chartType));
@@ -51,7 +52,9 @@ export function popupFeaturesMatch(feature, other, regionField, { chartType = "c
   if (chartType === "point") return pointIdentity(feature?.properties, columns, bindings) === pointIdentity(other?.properties, columns, bindings);
   if (isCoordinateLine({ chartType, bindings })) return !bindings.region || String(feature?.properties?.[bindings.region] ?? "").trim() === String(other?.properties?.[bindings.region] ?? "").trim();
   if (chartType === "map_line") return roadIdentity(feature?.properties, regionField, columns) === roadIdentity(other?.properties, regionField, columns);
-  return regionKey(popupRegionValue(feature, regionField)) === regionKey(popupRegionValue(other, regionField));
+  if (regionKey(popupRegionValue(feature, regionField)) !== regionKey(popupRegionValue(other, regionField))) return false;
+  const fields = administrativeContextFields(columns, regionField);
+  return fields.every(field => regionKey(feature?.properties?.[field]) === regionKey(other?.properties?.[field]));
 }
 
 export function popupRegionRecords(records, feature, regionField, options = {}) {

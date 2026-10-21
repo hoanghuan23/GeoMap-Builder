@@ -8,9 +8,23 @@ import { latLngToCell } from "h3-js";
 import { roadAreaField, roadNameField, roadValueColumns } from "./road-map-data.js";
 import { normalizeRoadText } from "./congestion-data.js";
 import { buildCoordinateLines, coordinateBindings, inferCoordinateLine, isCoordinateLine, stationaryEntities } from "./coordinate-data.js";
+import { administrativeContextFields, geographicLocationName, preferredAdministrativeColumn } from "./geographic-grain.js";
+export { administrativeContextFields, geographicLocationName, preferredAdministrativeColumn } from "./geographic-grain.js";
 
 const AGGREGATIONS = new Set(AGGREGATION_VALUES);
 const TOTAL_HINT = /(tổng|total)/i;
+
+function administrativeGroups(records, columns, field) {
+  const geometry = { field, contextFields: administrativeContextFields(columns, field) };
+  const groups = new Map();
+  for (const record of records) {
+    const key = geographicLocationName(record, geometry);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, { records: [] });
+    groups.get(key).records.push(record);
+  }
+  return [...groups.values()];
+}
 
 function columnMap(columns) {
   return new Map((columns || []).map(column => [column.name, column]));
@@ -362,7 +376,7 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
     const groups = groupRecords(records, suggestion.bindings.region).length;
     if (!groups) { available = false; unavailableReason = "Không có tên tuyến hợp lệ để ghép với mạng đường."; }
   } else if (suggestion.chartType === "choropleth") {
-    const groups = groupRecords(records, suggestion.bindings.region).length;
+    const groups = administrativeGroups(records, columns, suggestion.bindings.region).length;
     feasibilityScore = Math.min(feasibilityScore, Math.min(1, groups / 2));
     if (groups < 2) { available = false; unavailableReason = "Cần ít nhất hai địa danh hợp lệ."; }
   } else if (suggestion.chartType === "point") {
@@ -458,9 +472,11 @@ export function prepareSuggestions(analysis, records, validRowRate, options = {}
         reason: "Dữ liệu có khu vực, tên tuyến và chỉ số quan sát; có thể ghép mạng đường để xem phân bố và biểu đồ riêng của từng tuyến." }, ...suggestions];
     }
   }
-  const region = analysis.columns.find(column => column.role === "geo" && ["country", "admin1", "admin2"].includes(column.geoLevel));
+  const region = preferredAdministrativeColumn(analysis.columns, { columns: analysis.columns.map(column => ({
+    name: column.name, uniqueCount: records.some(record => record?.[column.name] != null && String(record[column.name]).trim() !== "") ? 1 : 0
+  })) });
   if (!latitude && !longitude && !roadField && region && !suggestions.some(suggestion => suggestion.chartType === "choropleth")) {
-    const groups = groupRecords(records, region.name);
+    const groups = administrativeGroups(records, analysis.columns, region.name);
     const measure = analysis.columns.find(column => column.role === "measure"
       && groups.filter(group => group.records.some(record => isFiniteValue(record?.[column.name]))).length >= 2);
     if (measure) {

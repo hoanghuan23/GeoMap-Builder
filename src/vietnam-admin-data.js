@@ -1,12 +1,13 @@
 import { summarizeFeatureProperties } from "./feature-properties.js";
+import { geographicLocationName } from "./geographic-grain.js";
 
 function normalizedName(value) {
-  return String(value ?? "")
+  return String(value ?? "").split(",").map(part => part
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/gi, "d")
     .replace(/[^a-z0-9]/gi, "")
-    .toLowerCase();
+    .toLowerCase()).join("\u001f");
 }
 
 function comparableValue(value) {
@@ -41,13 +42,13 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
   ));
   const aggregation = recommendation.aggregation || recommendation.agg;
   const groups = aggregation ? [...selected.reduce((groups, record) => {
-    const location = String(record?.[locationField] ?? "").trim();
+    const location = geographicLocationName(record, recommendation.geometry);
     if (!location) return groups;
     const group = groups.get(location) || [];
     group.push(record); groups.set(location, group);
     return groups;
   }, new Map())].map(([location, records]) => ({ location, records }))
-    : selected.map(record => ({ location: String(record?.[locationField] ?? "").trim(), records: [record] }));
+    : selected.map(record => ({ location: geographicLocationName(record, recommendation.geometry), records: [record] }));
   const features = groups.flatMap(group => {
     const locationName = group.location;
     const boundary = byLocation.get(normalizedName(locationName));
@@ -63,7 +64,8 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
     const properties = {
       ...boundaryProperties,
       ...recordProperties,
-      __location: locationName,
+      __location: String(group.records[0]?.[locationField] ?? "").trim(),
+      ...(recommendation.geometry.contextFields?.length ? { __location_context: recommendation.geometry.contextFields } : {}),
       __metric: Number(recordProperties[metricField]),
       __record_count: group.records.length,
       boundary_source: boundary.properties?.boundary_source || "MapTiler"

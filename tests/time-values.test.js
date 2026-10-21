@@ -73,7 +73,7 @@ test("từ chối thời gian không hợp lệ và không tự bịa thứ tự
 test("profile không cần gửi samples vẫn nhận diện được kỳ và giữ đúng granularity qua contract", () => {
   for (const [granularity, input] of recurring) {
     const records = input.map(period => ({ [granularity]: period, metric: 40_000 }));
-    const profile = profileTabularData(records);
+    const profile = profileTabularData(records, { includeSamples: false });
     assert.equal(profile.samplesIncluded, false);
     const column = profile.columns.find(item => item.name === granularity);
     assert.equal(column.dateHint, "text");

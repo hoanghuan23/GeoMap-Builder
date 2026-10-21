@@ -16,7 +16,7 @@ import { createRoadTrafficWorkbook, trafficAiAnalysis, trafficRecords, TRAFFIC_S
 function uploadHarness() {
   const context = vm.createContext({
     CONFIG: { DEFAULT_RESOLUTION: 6 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
-    document: { getElementById: () => ({ checked: false }) },
+    document: { getElementById: () => ({ checked: true }) },
     parseSpreadsheetFile, profileRecordsInWorker, requestAiDataAnalysis, readMetroData,
     recordsToPointGeoJSON() { throw new Error("No coordinates"); }
   });
@@ -67,8 +67,8 @@ test("traffic XLSX và JSON chỉ đề xuất bản đồ Line, popup cột/đ�
     assert.equal(calls.length, 2);
     assert.equal(calls[0].source.sheetName, "Ùn tắc");
     assert.equal(calls[0].profile.rowCount, trafficRecords.length);
-    assert.equal(calls[0].profile.samplesIncluded, false);
-    assert.ok(!("head" in calls[0].profile));
+    assert.equal(calls[0].profile.samplesIncluded, true);
+    assert.equal(calls[0].profile.head.length, 8);
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -145,6 +145,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
 
 test("AI semantic/auto legends lock palette controls, follow metrics and filters, and match regional hex fill", async () => {
   const h = harness({ thematic: true });
+  h.get("weather-legend").clientWidth = 330;
   h.run(`
     for (const column of dataset.analysis.columns.filter(column => column.role === 'measure')) {
       column.semanticType='air_temperature'; column.legend=legendFixture({field:column.name,aggregation:column.aggDefault});
@@ -158,7 +159,7 @@ test("AI semantic/auto legends lock palette controls, follow metrics and filters
   `);
   await h.run("filteredAiBoundary()");
   const labels = () => h.get("weather-legend-labels").children.map(child => child.textContent);
-  assert.deepEqual(labels(), ["-20", "-10", "0", "10", "20", "40"]);
+  assert.deepEqual(labels(), ["-20", "-10", "0", "10", "20", "30", "40"]);
   assert.equal(h.get("weather-legend-title").textContent, "Nhiệt độ quan sát (°C)");
   assert.equal(h.get("weather-legend-mode").textContent, "Theo ngữ nghĩa");
   assert.equal(h.get("weather-legend-mode").title, legendFixture().reason);
@@ -174,7 +175,7 @@ test("AI semantic/auto legends lock palette controls, follow metrics and filters
   assert.equal(JSON.stringify(h.layers.get("polygon-fill").paint["fill-color"]), original);
   const time = h.all(".ai-generated-filter")[0]; time.value = "2026-09-01T00:00:00.000Z";
   await h.change(time);
-  assert.deepEqual(labels(), ["-20", "-10", "0", "10", "20", "40"]);
+  assert.deepEqual(labels(), ["-20", "-10", "0", "10", "20", "30", "40"]);
   assert.equal(JSON.stringify(h.layers.get("polygon-fill").paint["fill-color"]), original);
   h.run("state.regionHexEnabled=true; applyStyle()");
   assert.deepEqual(h.layers.get("h3-fill").paint["fill-color"], h.layers.get("polygon-fill").paint["fill-color"]);
@@ -195,7 +196,7 @@ test("AI semantic/auto legends lock palette controls, follow metrics and filters
   assert.notEqual(h.run("activePolygonLegendScale().min"), firstMin);
   metric.value = "temperature"; await h.change(metric);
   assert.equal(h.get("weather-legend-mode").textContent, "Theo ngữ nghĩa");
-  assert.deepEqual(labels(), ["-20", "-10", "0", "10", "20", "40"]);
+  assert.deepEqual(labels(), ["-20", "-10", "0", "10", "20", "30", "40"]);
   h.get("show-map-layers").checked = false; h.run("applyMapLayerVisibility()");
   assert.equal(h.get("weather-legend").hidden, true);
 });
@@ -205,7 +206,7 @@ test("one upload analysis supplies legends before polygon activation and subsequ
   const h = harness({ thematic: true, boundaryLoader: async () => ({
     features: h.dataset.boundaries.features, matched: ["A", "B"], unmatched: [], matchRate: 1, candidates: {}
   }) });
-  const profile = profileTabularData(h.dataset.records);
+  const profile = profileTabularData(h.dataset.records, { includeSamples: false });
   const raw = {
     columns: h.dataset.analysis.columns.map(column => ({ ...column,
       geoLevel: column.role === "geo" ? "admin1" : null,
@@ -223,7 +224,7 @@ test("one upload analysis supplies legends before polygon activation and subsequ
   try {
     h.get("ai-include-samples").checked = false;
     await h.run(`(async () => {
-      const result = await analyzeTabularRecords(dataset.records, profileTabularData(dataset.records));
+      const result = await analyzeTabularRecords(dataset.records, profileTabularData(dataset.records, {includeSamples:false}));
       dataset.records = result.pipeline.records; dataset.analysis = result.pipeline.analysis;
       dataset.suggestions = result.pipeline.analysis.suggestions.map(item => ({...item, available:true, feasibilityScore:1}));
       dataset.selectedSuggestionId = dataset.suggestions[0].id;
@@ -279,10 +280,71 @@ test("polygon defaults to information with map controls and accurate map-only su
   assert.equal(h.all(".ai-popup-type").find(button => button.dataset.popupMode === "info").attributes["aria-pressed"], "true");
   assert.equal(h.all(".ai-popup-settings").length, 0);
   assert.equal(h.all(".ai-metric-selector").length, 1);
-  assert.deepEqual(h.all(".ai-generated-filter").map(control => control.dataset.field), ["date"]);
+  assert.deepEqual(h.all(".ai-generated-filter").map(control => control.dataset.field), ["date", "region"]);
   h.run("renderAiSuggestionGrid()");
   assert.match(h.get("map-type-summary").textContent, /1 đề xuất/);
   assert.equal(h.get("map-type-grid").children[1].children[1].textContent, AI_CHART_REGISTRY.choropleth.label);
+});
+
+test("polygon filters geographic and categorical columns with cascading choices regardless of field names", async () => {
+  for (const [country, area, category] of [["nation_code", "division", "channel"], ["Thị trường", "Chi nhánh", "Nhóm khách hàng"]]) {
+    const h = harness();
+    const metricColumns = h.dataset.analysis.columns.filter(column => column.role === "measure");
+    h.dataset.analysis.columns = [
+      { name: area, role: "geo", geoLevel: "admin1" },
+      { name: category, role: "category" },
+      { name: "date", role: "time" }, ...metricColumns,
+      { name: country, role: "geo", geoLevel: "country" },
+      { name: "latitude", role: "geo", geoLevel: "point_lat" },
+      { name: "note", role: "text" }, { name: "row_id", role: "id" }
+    ];
+    h.dataset.records = [1, 3].flatMap(day => [
+      ["A", "Northport", "Retail", 20], ["A", "Northport", "Wholesale", 30],
+      ["A", "Westport", "Retail", 40], ["B", "Southport", "Retail", 10]
+    ].map(([nation, division, channel, temperature], index) => ({
+      [country]: nation, [area]: division, [category]: channel,
+      date: new Date(`2026-09-0${day}`), temperature: temperature + day - 3, minimum: temperature - 5,
+      latitude: 21, note: `Observation ${day}/${index}`, row_id: `${day}/${index}`
+    })));
+    h.dataset.suggestions[1].bindings.region = country;
+    h.run("fitBoundary = () => {}; dataset.recommendation = recommendationForSuggestion(dataset.suggestions[1]); populateAiFilters(dataset);");
+    const control = field => h.all(".ai-generated-filter").find(item => item.dataset.field === field);
+    const options = field => control(field).children.map(option => option.value);
+    assert.deepEqual(h.all(".ai-generated-filter").map(item => item.dataset.field), ["date", country, area, category]);
+    assert.deepEqual(options(country), ["", "A", "B"], "geographic parents precede children even when file columns are reversed");
+    assert.equal(control(country).attributes["aria-label"], `Lọc theo ${country}`);
+    await h.run("filteredAiBoundary()");
+    assert.equal(h.sources.get("polygon-data").data.features.length, 2);
+
+    control(country).value = "A"; await h.change(control(country));
+    assert.deepEqual(options(area), ["", "Northport", "Westport"]);
+    control(area).value = "Northport"; await h.change(control(area));
+    assert.equal(h.sources.get("polygon-data").data.features[0].properties.temperature, 25, "filters apply before aggregation");
+    control(category).value = "Retail"; await h.change(control(category));
+    assert.equal(h.sources.get("polygon-data").data.features[0].properties.temperature, 20);
+    assert.deepEqual(options(country), ["", "A", "B"], "a selected child must not remove other parent choices");
+
+    h.mode("bar");
+    h.run("openMapPopup(state.boundary.features[0], [105,21])");
+    assert.deepEqual(h.rendered.at(-1).config.data.map(row => row.temperature), [18, 20], "popup respects dimension filters and retains its own time range");
+    assert.equal(control(country).value, "A");
+    assert.equal(control(area).value, "Northport");
+    const metric = h.all(".ai-metric-selector")[0]; metric.value = "minimum"; await h.change(metric);
+    assert.equal(h.sources.get("polygon-data").data.features[0].properties.minimum, 15);
+    assert.equal(control(category).value, "Retail");
+
+    control(category).value = "Wholesale"; await h.change(control(category));
+    control(country).value = "B"; await h.change(control(country));
+    assert.deepEqual(options(area), ["", "Southport"]);
+    assert.equal(control(area).value, "", "changing a parent clears an incompatible child");
+    assert.equal(control(category).value, "", "all incompatible downstream dimensions reset");
+    assert.equal(h.sources.get("polygon-data").data.features[0].properties[country], "B");
+    assert.equal(h.popups.at(-1).removed, true, "filtering out an open region closes its popup");
+    assert.equal(control("date").value, "2026-09-03T00:00:00.000Z");
+
+    control(country).value = ""; await h.change(control(country));
+    assert.equal(h.sources.get("polygon-data").data.features.length, 2, "all restores the full dataset");
+  }
 });
 
 test("default bar metric with spreadsheet whitespace keeps visible values after switching away and back", async () => {
@@ -344,6 +406,41 @@ test("country choropleth requests global country boundaries and never forces a V
   assert.equal(clipped.length, 2);
   assert.equal(h.dataset.recommendation.geometry.placeType, "country");
   assert.equal(h.dataset.recommendation.geometry.country, null);
+});
+
+test("regional choropleth qualifies duplicate area names by each row's country throughout activation and filtering", async () => {
+  const clipped = [];
+  const h = harness({
+    boundaryLoader: async (names, options) => {
+      assert.deepEqual([...names], ["Central, Việt Nam", "Central, Thái Lan"]);
+      assert.equal(options.country, null, "a constant country in column metadata must not override row context");
+      assert.equal(options.contexts["Central, Việt Nam"].country, "Việt Nam");
+      assert.equal(options.contexts["Central, Thái Lan"].country, "Thái Lan");
+      return { type: "FeatureCollection", matchRate: 1, matched: names, unmatched: [], candidates: {},
+        features: names.map((name, index) => ({ type: "Feature", id: `region.${index}`, properties: { __data_location: name },
+          geometry: { type: "Polygon", coordinates: [] } })) };
+    },
+    boundaryClipper: async (feature, options) => { clipped.push(options.country); return feature; }
+  });
+  h.dataset.analysis.columns[0].geoLevel = "admin1";
+  h.dataset.analysis.columns[0].country = "VN";
+  h.dataset.analysis.columns.push({ name: "market", role: "geo", geoLevel: "country" });
+  h.dataset.records = ["Việt Nam", "Thái Lan"].flatMap((market, index) => [1, 2].map(day => ({ market, region: "Central",
+    date: new Date(`2026-09-0${day}`), temperature: 20 + index * 10 + day, minimum: 10 + index + day })));
+  h.run(`
+    dataset.suggestions[1].confidence=.9; dataset.suggestions[1].feasibilityScore=1;
+    replaceBoundary=async data=>{state.boundary=data;state.dataProfile=analyzeSpatialData(data);};
+    fitBoundary=()=>{};
+  `);
+  assert.equal(await h.run("activateAiChoropleth(dataset.suggestions[1])"), true);
+  assert.deepEqual(clipped, ["Việt Nam", "Thái Lan"]);
+  assert.deepEqual(h.sources.get("polygon-data").data.features.map(feature => feature.properties.temperature), [22, 32]);
+  h.run("openMapPopup(state.boundary.features[0], [105,21])");
+  const country = h.all(".ai-generated-filter").find(control => control.dataset.field === "market");
+  country.value = "Thái Lan"; await h.change(country);
+  assert.equal(h.sources.get("polygon-data").data.features.length, 1);
+  assert.equal(h.sources.get("polygon-data").data.features[0].properties.temperature, 32);
+  assert.equal(h.popups.at(-1).removed, true, "a same-name region in another country cannot replace the open region");
 });
 
 test("ambiguous geographic names show provinces and retries join exactly the chosen geometry", async () => {
@@ -478,7 +575,7 @@ test("data without a time column keeps bar and information choices and disables 
   const h = harness();
   h.dataset.analysis.columns = h.dataset.analysis.columns.filter(column => column.role !== "time");
   h.run("populateAiFilters(state.aiDataset)");
-  assert.equal(h.all(".ai-generated-filter").length, 0);
+  assert.deepEqual(h.all(".ai-generated-filter").map(control => control.dataset.field), ["region"]);
   assert.equal(h.all(".ai-popup-type").find(button => button.dataset.popupMode === "line").disabled, true);
   h.mode("bar"); h.run("openMapPopup(testFeatures[0], [105,21])");
   assert.equal(h.rendered.at(-1).config.data.length, 1);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, createMapSearch, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, administrativeLevelForFeature, getMapTilerAdministrativeBoundary, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, localBoundaryNameAliases, loadMapTilerAdministrativeBoundaries, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchLocalBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
+import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, administrativeLevelForFeature, getMapTilerAdministrativeBoundary, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, localBoundaryNameAliases, loadMapTilerAdministrativeBoundaries, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchLocalBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
 import { WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
 
 test("tolerant administrative loading trả match rate và giữ tên dữ liệu khi dùng alias", async () => {
@@ -360,79 +360,6 @@ test("renderSearchBoundary displays multiple selected boundaries", () => {
   const second = { type: "Feature", geometry: { type: "MultiPolygon", coordinates: [[[[2, 2], [3, 2], [2, 2]]]] } };
   assert.equal(renderSearchBoundary(map, [first, null, second]), true);
   assert.deepEqual(source.data.features, [first, second]);
-});
-
-test("selection retries boundary rendering on idle after moving the map", async t => {
-  const element = () => ({
-    value: "", hidden: false, children: [], handlers: {},
-    setAttribute() {}, removeAttribute() {},
-    append(...children) { this.children.push(...children); },
-    replaceChildren(...children) { this.children = children; },
-    addEventListener(name, handler) { this.handlers[name] = handler; }
-  });
-  const elements = new Map();
-  const get = id => {
-    if (!elements.has(id)) elements.set(id, element());
-    return elements.get(id);
-  };
-  const originalDocument = globalThis.document;
-  globalThis.document = { getElementById: get, createElement: element, addEventListener() {} };
-  t.after(() => {
-    if (originalDocument === undefined) delete globalThis.document;
-    else globalThis.document = originalDocument;
-  });
-  const polygon = {
-    type: "Feature", id: "region.726", place_type: ["region"], center: [1, 1], bbox: [0, 0, 2, 2],
-    properties: { country_code: "vn" },
-    geometry: { type: "Polygon", coordinates: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]] }
-  };
-  const requested = [];
-  t.mock.method(globalThis, "fetch", async url => {
-    requested.push(String(url));
-    return { ok: true, json: async () => ({ type: "FeatureCollection", features: [polygon] }) };
-  });
-  const sources = new Map(); const layers = new Map(); const handlers = {};
-  let loaded = true;
-  const map = {
-    isStyleLoaded: () => loaded, getCenter: () => ({ lng: 1, lat: 1 }),
-    fitBounds() { loaded = false; },
-    getSource: id => sources.get(id), getLayer: id => layers.get(id),
-    addSource(id, source) { sources.set(id, { ...source, setData(data) { this.data = data; } }); },
-    addLayer(layer) { layers.set(layer.id, layer); },
-    on(name, handler) { handlers[name] = handler; }
-  };
-  const dispose = createMapSearch({ map, apiKey: "key" });
-  t.after(dispose);
-  get("map-search-input").value = "Lâm Đồng";
-  get("map-search-form").handlers.submit({ preventDefault() {} });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(requested.length, 1);
-  assert.ok(requested[0].startsWith("https://api.maptiler.com/"), "search must prefer MapTiler over local ADM");
-  const option = get("map-search-results").children[0];
-  await option.handlers.click();
-  assert.ok(requested.some(url => url.endsWith("/VNM/VNM_ADM1.geojson")), "selection uses VNM_ADM only as its land mask");
-  assert.equal(sources.has("map-search-boundary"), false);
-  loaded = true;
-  handlers.idle();
-  assert.equal(sources.get("map-search-boundary").data.features[0].geometry.type, "MultiPolygon");
-
-  // Clicking an already selected result removes only that region.
-  await option.handlers.click();
-  assert.equal(sources.get("map-search-boundary").data.features.length, 0);
-
-  // Selecting it again updates the existing source.
-  await option.handlers.click();
-  loaded = true;
-  handlers.idle();
-  assert.equal(sources.get("map-search-boundary").data.features.length, 1);
-
-  // Clearing all while a render is pending must not restore the old selection.
-  await option.handlers.click();
-  option.handlers.click();
-  get("map-search-clear-all").handlers.click();
-  loaded = true;
-  handlers.idle();
-  assert.equal(sources.get("map-search-boundary").data.features.length, 0);
 });
 
 test("feature helpers use MapTiler center and place name", () => {

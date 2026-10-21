@@ -99,7 +99,7 @@ function updateSample(state, value, maxSamples) {
   if (pick < maxSamples) state.samples[pick] = value;
 }
 
-export function profileTabularData(records, { includeSamples = false, maxSamples = 5, maxHead = 8, uniqueCap = 10_000 } = {}) {
+export function profileTabularData(records, { includeSamples = true, maxSamples = 5, maxHead = 8, uniqueCap = 10_000 } = {}) {
   if (!Array.isArray(records) || !records.length) throw new Error("File không có bản ghi dữ liệu.");
   const states = new Map();
   const head = [];

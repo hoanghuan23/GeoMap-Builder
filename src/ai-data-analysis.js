@@ -1,7 +1,7 @@
 import { AI_MAP_REGISTRY, fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
 import { normalizeTabularRecords, profileTabularData } from "./tabular-data.js";
+import { administrativeContextFields, preferredAdministrativeColumn } from "./geographic-grain.js";
 
-const LOCATION_HINT = /(quốc gia|quoc gia|country|nation|tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area)/i;
 const TIME_HINT = /(ngày|date|time|tháng|month|năm|year)/i;
 
 function isDate(value) {
@@ -20,7 +20,9 @@ export function summarizeTabularData(records, { maxSamples = 5, maxUnique = 10_0
 
 export function fallbackMapRecommendation(records) {
   const profile = profileTabularData(records, { includeSamples: false });
-  const location = profile.columns.find(column => LOCATION_HINT.test(column.name) && column.inferredType === "text");
+  const metadata = fallbackAnalysis(profile).columns;
+  const region = preferredAdministrativeColumn(metadata, profile);
+  const location = profile.columns.find(column => column.name === region?.name);
   const time = profile.columns.find(column => TIME_HINT.test(column.name) || column.inferredType === "date");
   const metrics = profile.columns.filter(column => column.inferredType === "number" && column.name !== time?.name);
   if (!location || !metrics.length) return null;
@@ -28,8 +30,9 @@ export function fallbackMapRecommendation(records) {
     canRenderMap: true,
     visualization: "polygon",
     geometry: { field: location.name, provider: "maptiler",
-      placeType: /quốc gia|quoc gia|country|nation/i.test(location.name) ? "country" : /quận|huyện|district/i.test(location.name) ? "county" : "region",
-      country: /quốc gia|quoc gia|country|nation/i.test(location.name) ? null : "VNM" },
+      placeType: region.geoLevel === "country" ? "country" : region.geoLevel === "admin2" ? "county" : "region",
+      country: region.geoLevel === "country" || metadata.some(column => column.geoLevel === "country") ? null : "VNM",
+      ...(administrativeContextFields(metadata, location.name).length ? { contextFields: administrativeContextFields(metadata, location.name) } : {}) },
     metricField: metrics[0].name,
     numericFields: metrics.map(column => column.name),
     filters: [
@@ -43,7 +46,7 @@ export function fallbackMapRecommendation(records) {
   };
 }
 
-export async function requestAiDataAnalysis(records, { signal, includeSamples = false, profile: suppliedProfile = null, source = null } = {}) {
+export async function requestAiDataAnalysis(records, { signal, includeSamples = true, profile: suppliedProfile = null, source = null } = {}) {
   const profile = suppliedProfile || profileTabularData(records, { includeSamples });
   let analysis;
   let fallbackReason = "";
@@ -76,12 +79,14 @@ export async function requestAiMapRecommendation(records, options = {}) {
   const columns = new Map(pipeline.analysis.columns.map(column => [column.name, column]));
   const time = pipeline.analysis.columns.find(column => column.role === "time");
   const region = columns.get(suggestion.bindings.region);
+  const contextFields = administrativeContextFields(pipeline.analysis.columns, region?.name);
   return {
     canRenderMap: true,
     visualization: "polygon",
     geometry: { field: suggestion.bindings.region, provider: "maptiler",
       placeType: region?.geoLevel === "country" ? "country" : region?.geoLevel === "admin2" ? "county" : "region",
-      country: region?.geoLevel === "country" ? null : region?.country || null },
+      country: region?.geoLevel === "country" || contextFields.some(field => columns.get(field)?.geoLevel === "country") ? null : region?.country || null,
+      ...(contextFields.length ? { contextFields } : {}) },
     metricField: suggestion.bindings.value,
     numericFields: pipeline.analysis.columns.filter(column => column.role === "measure").map(column => column.name),
     filters: [
