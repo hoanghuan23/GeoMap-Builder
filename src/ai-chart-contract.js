@@ -20,6 +20,28 @@ export function normalizePopupSuggestions(raw) {
   return [...byName.values()].sort((a, b) => b.confidence - a.confidence);
 }
 
+export function normalizeMetricButtons(raw, columns, suggestion, profile) {
+  if (!["choropleth", "map_line", "point", "hex_h3"].includes(suggestion.chartType)) return [];
+  const byName = new Map(columns.map(column => [column.name, column]));
+  const profiles = new Map((profile?.columns || []).map(column => [column.name, column]));
+  const excluded = new Set([suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x, suggestion.bindings.region]);
+  const seen = new Set(); const buttons = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const column = byName.get(item?.field);
+    const category = suggestion.chartType === "map_line" && column?.role === "category"
+      && Number(profiles.get(item.field)?.uniqueCount) > 0 && Number(profiles.get(item.field)?.uniqueCount) <= 12;
+    if (!column || seen.has(item.field) || excluded.has(item.field) || item.field.startsWith("__")
+      || ["point_lat", "point_lng", "h3"].includes(column.geoLevel) || column.role !== "measure" && !category) continue;
+    const clean = value => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim() : "";
+    const label = clean(item.label); const icon = clean(item.icon);
+    if (!label || label.length > 80 || !icon || Array.from(icon).length > 12 || /[<>]/.test(icon)
+      || typeof item.color !== "string" || !/^#[0-9a-f]{6}$/i.test(item.color)) continue;
+    seen.add(item.field);
+    buttons.push({ field: item.field, label, icon, color: item.color.toLowerCase() });
+  }
+  return buttons;
+}
+
 const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area|state)/i;
 const ADMINISTRATIVE_LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|khu vực|region|area|state)/i;
 const TIME_HINT = /(^|[\s_.-])(ngày|ngay|date|datetime|timestamp|time|thời điểm|thoi diem|tháng|thang|month|năm|nam|year|quarter|quý|quy|week|tuần|tuan|period|kỳ|ky)([\s_.-]|$)/i;
@@ -119,7 +141,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend", "popupSuggestions"],
+        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend", "popupSuggestions", "metricButtons"],
         properties: {
           id: { type: "string" },
           chartType: { type: "string", enum: Object.keys(AI_MAP_REGISTRY) },
@@ -142,6 +164,19 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
           confidence: { type: "number", minimum: 0, maximum: 1 },
           reason: { type: "string" },
           legend: LEGEND_SCHEMA,
+          metricButtons: {
+            type: "array",
+            description: "Các nút chọn chỉ số do AI thiết kế riêng cho bản đồ này, theo đúng thứ tự hiển thị; [] nếu không cần chọn nhanh.",
+            items: {
+              type: "object", additionalProperties: false, required: ["field", "label", "icon", "color"],
+              properties: {
+                field: { type: "string", description: "Tên cột gốc có thật, phù hợp để tô màu Polygon/Line hoặc làm kích thước Point." },
+                label: { type: "string", minLength: 1, maxLength: 80, description: "Nhãn tiếng Việt ngắn, giữ đúng ý nghĩa cột; không tự đổi đơn vị." },
+                icon: { type: "string", minLength: 1, maxLength: 12, description: "Một emoji hoặc ký hiệu Unicode phù hợp nội dung chỉ số; không sinh HTML, SVG, URL hay code." },
+                color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$", description: "Màu nền biểu tượng do AI chọn theo ý nghĩa chỉ số." }
+              }
+            }
+          },
           popupSuggestions: {
             type: "array", minItems: 1, maxItems: POPUP_TYPES.length,
             items: {
@@ -298,7 +333,7 @@ export function fallbackAnalysis(profile, { datasetTitle = "Dữ liệu tải l�
   const x = groupingRegion || category || region;
   if (x) suggestions.push({ id: "rule-bar", chartType: "bar", title: measures[0] ? `${measures[0].name} theo ${x.name}` : `Số bản ghi theo ${x.name}`, bindings: { x: x.name, y: measures[0]?.name || "count" }, agg: measures[0] ? measures[0].aggDefault : "count", confidence: .65, reason: "Nhận diện theo quy tắc từ cột phân loại.", source: "rule" });
   return { datasetTitle, grain: "Một dòng tương ứng một bản ghi dữ liệu", columns,
-    suggestions: suggestions.map(suggestion => ({ ...suggestion, popupSuggestions: [] })), source: "rule" };
+    suggestions: suggestions.map(suggestion => ({ ...suggestion, popupSuggestions: [], metricButtons: [] })), source: "rule" };
 }
 
 export function validateAndNormalizeAnalysis(raw, profile) {
@@ -325,6 +360,7 @@ export function validateAndNormalizeAnalysis(raw, profile) {
       errors.push(`Bỏ suggestion không hợp lệ: ${rawSuggestion?.id || rawSuggestion?.chartType || "(trống)"}`);
       continue;
     }
+    suggestion.metricButtons = raw.source === "rule" ? [] : normalizeMetricButtons(rawSuggestion.metricButtons, columns, suggestion, profile);
     const existing = suggestionsByType.get(suggestion.chartType);
     if (!existing || suggestion.confidence > existing.confidence) suggestionsByType.set(suggestion.chartType, suggestion);
   }

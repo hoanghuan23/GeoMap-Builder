@@ -1622,6 +1622,7 @@ input[type=range] {
 
 .map-panel {
     position: relative;
+    container-type: inline-size;
     min-height: 0;
     margin: 7px 7px 0;
     overflow: hidden;
@@ -1762,6 +1763,7 @@ input[type=range] {
 .map-panel.chart-mode .map-toolbar,
 .map-panel.chart-mode .map-controls,
 .map-panel.chart-mode .map-query-panel,
+.map-panel.chart-mode .map-metric-control,
 .map-panel.chart-mode .right-cards,
 .map-panel.chart-mode .map-attribution {
     display: none
@@ -2247,6 +2249,149 @@ input[type=range] {
 .map-controls button+button {
     border-left: 1px solid var(--line);
     border-radius: 0
+}
+
+.map-metric-control {
+    position: absolute;
+    top: 62px;
+    right: 12px;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    max-width: min(280px, calc(100% - 28px));
+    max-height: calc(100% - 142px);
+    pointer-events: none
+}
+
+.map-metric-control[hidden],
+.map-metric-list[hidden] { display: none; }
+
+.map-metric-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    max-width: 100%;
+    min-height: 36px;
+    padding: 7px 12px;
+    border: 1px solid #ffffff30;
+    border-radius: 22px;
+    color: #fff;
+    background: #152c3ee8;
+    box-shadow: 0 3px 14px #0b17252b;
+    pointer-events: auto
+}
+
+.map-metric-toggle svg {
+    width: 17px;
+    height: 17px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round
+}
+
+#map-metric-caption {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600
+}
+
+.map-metric-count {
+    display: grid;
+    place-items: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 4px;
+    border-radius: 50%;
+    color: #d4e4f1;
+    background: #ffffff1f;
+    font-size: 10px
+}
+
+.map-metric-chevron { font-size: 16px; line-height: 1; }
+.map-metric-toggle[aria-expanded="false"] .map-metric-chevron { transform: rotate(180deg); }
+
+.map-metric-list {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    min-height: 0;
+    max-width: 100%;
+    padding: 3px 4px 6px 6px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: #a5b4c8 transparent;
+    pointer-events: auto
+}
+
+.map-metric-button {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 9px;
+    flex: none;
+    max-width: 100%;
+    min-height: 44px;
+    padding: 2px 3px 2px 13px;
+    border: 1px solid #ffffff30;
+    border-radius: 28px;
+    color: #fff;
+    background: #192b3dd9;
+    box-shadow: 0 2px 8px #0b172529;
+    backdrop-filter: blur(10px);
+    text-align: right;
+    transition: background .15s, border-color .15s
+}
+
+.map-metric-button:hover { background: #24445bf5; border-color: #ffffff80; }
+.map-metric-button.active { background: #075d41ed; border-color: #6ee7b7; box-shadow: 0 0 0 1px #6ee7b74d, 0 3px 12px #0b172533; }
+.map-metric-button:focus-visible, .map-metric-toggle:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+.map-metric-label { display: flex; align-items: baseline; justify-content: flex-end; flex-wrap: wrap; gap: 1px 6px; min-width: 0; line-height: 1.4; }
+.map-metric-label > span { overflow-wrap: anywhere; }
+.map-metric-label small { color: #d5e5ee; font-size: 10px; }
+.map-metric-button.active .map-metric-label > span { font-weight: 600; }
+
+.map-metric-preview {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 38px;
+    height: 38px;
+    overflow: hidden;
+    border: 1px solid #ffffff60;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #ffffff55, transparent), var(--metric-color);
+    box-shadow: inset 0 1px 7px #ffffff50;
+    font-size: 22px;
+    line-height: 1
+}
+
+.map-panel:has(.map-metric-control:not([hidden])) .map-toolbar {
+    top: auto;
+    bottom: 34px;
+    transform: none;
+    flex-direction: row
+}
+
+.map-panel:has(.map-metric-control:not([hidden])) .map-toolbar i { width: 0; height: 23px; border-top: 0; border-left: 1px solid var(--line); margin: 0 4px; }
+.map-panel:has(.map-metric-control:not([hidden])) .right-cards { right: auto; left: 12px; top: 70px; }
+
+@media (max-width: 760px) {
+    .map-metric-control { top: 66px; right: 10px; max-width: min(248px, calc(100% - 24px)); }
+}
+
+@container (max-width: 620px) {
+    .map-metric-control { max-height: max(114px, calc(100% - 290px)); }
+    .map-panel:has(.map-metric-control:not([hidden])) .map-legends { bottom: 92px; max-height: 120px; }
 }
 
 .right-cards {

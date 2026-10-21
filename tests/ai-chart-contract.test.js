@@ -46,6 +46,65 @@ test("strict schema requires nullable semantic and legend fields on every AI col
   }
 });
 
+test("AI metric button schema and ordered custom designs survive server/client normalization", () => {
+  const schema = ANALYSIS_RESPONSE_SCHEMA.properties.suggestions.items;
+  assert.ok(schema.required.includes("metricButtons"));
+  assert.deepEqual(schema.properties.metricButtons.items.required, ["field", "label", "icon", "color"]);
+  const metricButtons = [
+    { field: "cost", label: "Chi phí vận hành", icon: "🧾", color: "#be123c" },
+    { field: "profit", label: "Lợi nhuận", icon: "💹", color: "#15803d" }
+  ];
+  const dataProfile = { ...profile, columns: [...profile.columns,
+    { name: "cost", inferredType: "number" }, { name: "profit", inferredType: "number" }] };
+  const raw = { columns: [], suggestions: [{ id: "map", chartType: "choropleth",
+    bindings: { region: "province", value: "profit" }, metricButtons }] };
+  const server = validateAndNormalizeAnalysis(raw, dataProfile);
+  assert.deepEqual(server.suggestions[0].metricButtons, metricButtons);
+  assert.equal(server.suggestions[0].metricButtons.some(button => button.field === "temperature"), false);
+  assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), dataProfile), server);
+  raw.suggestions[0].metricButtons = [...metricButtons, { ...metricButtons[1], label: "Trùng chỉ số" }];
+  assert.deepEqual(validateAndNormalizeAnalysis(raw, dataProfile).suggestions[0].metricButtons, metricButtons);
+});
+
+test("AI metric buttons reject unknown or structural columns and malformed designs without creating presets", () => {
+  const dataProfile = { ...profile, columns: [...profile.columns,
+    { name: "lat", inferredType: "number" }, { name: "lng", inferredType: "number" },
+    { name: "__internal", inferredType: "number" }] };
+  const button = field => ({ field, label: "Chỉ số", icon: "📈", color: "#123456" });
+  const spec = { id: "point", chartType: "point", bindings: { lat: "lat", lng: "lng" } };
+  for (const metricButtons of [undefined, null, {}, [], [
+    ...["missing", "province", "date", "note", "lat", "lng", "__internal"].map(button),
+    { ...button("temperature"), icon: "<svg>" },
+    { ...button("temperature"), color: "url(fake)" },
+    { ...button("temperature"), label: " " },
+    { ...button("temperature"), icon: "" }
+  ]]) {
+    const result = validateAndNormalizeAnalysis({ columns: [], suggestions: [{ ...spec, metricButtons }] }, dataProfile);
+    assert.equal(result.source, "ai");
+    assert.deepEqual(result.suggestions[0].metricButtons, []);
+    assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(result)), dataProfile), result);
+  }
+  assert.ok(fallbackAnalysis(dataProfile).suggestions.every(suggestion => suggestion.metricButtons.length === 0));
+});
+
+test("only Line admits AI buttons for low-cardinality status categories, and never route names or order columns", () => {
+  const dataProfile = { rowCount: 3, columns: [
+    { name: "road", inferredType: "text", uniqueCount: 3 },
+    { name: "status", inferredType: "text", uniqueCount: 2 },
+    { name: "description", inferredType: "text", uniqueCount: 20 },
+    { name: "sequence", inferredType: "number", uniqueCount: 3 },
+    { name: "lat", inferredType: "number" }, { name: "lng", inferredType: "number" }
+  ] };
+  const columns = [{ name: "road", role: "category" }, { name: "status", role: "category" },
+    { name: "description", role: "category" }, { name: "sequence", role: "measure" }];
+  const metricButtons = ["road", "status", "description", "sequence", "lat", "lng"].map(field => ({ field, label: field, icon: "🚦", color: "#123456" }));
+  const line = { id: "line", chartType: "map_line", bindings: { lat: "lat", lng: "lng", region: "road", x: "sequence" }, metricButtons };
+  const result = validateAndNormalizeAnalysis({ columns, suggestions: [line] }, dataProfile);
+  assert.deepEqual(result.suggestions[0].metricButtons, [metricButtons[1]]);
+  const point = { ...line, id: "point", chartType: "point", bindings: { lat: "lat", lng: "lng", region: "road" } };
+  assert.deepEqual(validateAndNormalizeAnalysis({ columns, suggestions: [point] }, dataProfile).suggestions[0].metricButtons.map(button => button.field), ["sequence"]);
+});
+
 test("popup recommendations have a compact per-map schema and survive server/client normalization", () => {
   const suggestionSchema = ANALYSIS_RESPONSE_SCHEMA.properties.suggestions.items;
   assert.ok(suggestionSchema.required.includes("popupSuggestions"));

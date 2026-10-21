@@ -23,6 +23,7 @@ test("middleware forwards per-column temperature semantics and legends without c
   const originalFetch = globalThis.fetch;
   const legend = legendFixture();
   const popupSuggestions = [{ name: "line", confidence: .96 }, { name: "info", confidence: .91 }];
+  const metricButtons = [{ field: "temperature", label: "Nhiệt độ", icon: "🌡️", color: "#f97316" }];
   let calls = 0;
   const profile = { rowCount: 2, columns: [
     { name: "province", inferredType: "text", uniqueCount: 2 },
@@ -56,12 +57,16 @@ test("middleware forwards per-column temperature semantics and legends without c
     const suggestionSchema = payload.text.format.schema.properties.suggestions.items;
     assert.ok(suggestionSchema.required.includes("popupSuggestions"));
     assert.deepEqual(suggestionSchema.properties.popupSuggestions.items.required, ["name", "confidence"]);
+    assert.ok(suggestionSchema.required.includes("metricButtons"));
+    assert.deepEqual(suggestionSchema.properties.metricButtons.items.required, ["field", "label", "icon", "color"]);
+    assert.match(payload.instructions, /AI quyết định các chỉ số cần nút chọn nhanh/);
+    assert.match(payload.instructions, /Trả metricButtons trong cùng request phân tích/);
     assert.match(payload.instructions, /bar\/line được phép trong popupSuggestions/);
     assert.match(payload.instructions, /MỘT đối tượng được bấm/);
     return { ok: true, json: async () => ({ output_text: JSON.stringify({
       search_bar: true, search_fields: ["province", "temperature", "not_in_input", "province"],
       columns: [{ name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", semanticType: "air_temperature", legend }],
-      suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend, popupSuggestions }]
+      suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend, popupSuggestions, metricButtons }]
     }) }) };
   };
   try {
@@ -73,6 +78,7 @@ test("middleware forwards per-column temperature semantics and legends without c
     assert.deepEqual(response.body.columns[1].legend, legend);
     assert.deepEqual(response.body.suggestions[0].legend, legend);
     assert.deepEqual(response.body.suggestions[0].popupSuggestions, popupSuggestions);
+    assert.deepEqual(response.body.suggestions[0].metricButtons, metricButtons);
     assert.equal(response.body.columns[1].semanticType, "air_temperature");
   } finally { globalThis.fetch = originalFetch; }
 });

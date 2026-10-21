@@ -145,6 +145,13 @@
     </aside>
     <section class="content-area table-hidden">
       <div class="map-panel"><div id="map"></div><div id="chart-canvas" class="chart-canvas" hidden></div><div id="status" class="status-pill" hidden></div>
+        <div id="map-metric-control" class="map-metric-control" hidden>
+          <button id="map-metric-toggle" class="map-metric-toggle" type="button" aria-expanded="true" aria-controls="map-metric-list" title="Thu gọn danh sách chỉ số">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></svg>
+            <span id="map-metric-caption">Chỉ số bản đồ</span><span id="map-metric-count" class="map-metric-count"></span><span class="map-metric-chevron" aria-hidden="true">⌃</span>
+          </button>
+          <div id="map-metric-list" class="map-metric-list" role="group" aria-label="Chọn chỉ số hiển thị trên bản đồ"></div>
+        </div>
         <div class="map-legends" role="group" aria-label="Chú giải bản đồ">
           <div id="metro-legend" class="metro-legend" hidden aria-live="polite"></div>
           <div id="ai-line-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ mạng lưới" aria-live="polite"></div>

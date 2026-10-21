@@ -27,7 +27,7 @@ import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 class Element {
   constructor() {
     this.children = []; this.dataset = {}; this.attributes = {}; this.events = {}; this.value = ""; this.checked = true;
-    this.className = ""; this.textContent = ""; this.style = { setProperty() {} }; this.clientWidth = 800; this.clientHeight = 600;
+    this.className = ""; this.textContent = ""; this.style = { setProperty(key, value) { this[key] = value; } }; this.clientWidth = 800; this.clientHeight = 600;
     this.offsetWidth = 520; this.offsetHeight = 500;
     this.classList = { toggle() {}, add() {}, remove() {} };
   }
@@ -48,6 +48,7 @@ class Element {
 }
 
 function harness({ road = false, point = false, path = false, thematic = false, storeNameRole = "category", pointRecords = storeRecords,
+  metricButtons = null,
   popupSuggestions = [{ name: "info", confidence: .95 }, { name: "bar", confidence: .9 }, { name: "line", confidence: .85 }],
   fetchImpl = () => assert.fail("map interactions must not call AI"), boundaryLoader = loadAdministrativeBoundaries,
   boundaryClipper = async boundary => boundary } = {}) {
@@ -120,6 +121,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   }
   if (popupSuggestions !== null) dataset.suggestions = dataset.suggestions.map(suggestion => ({ ...suggestion,
     popupSuggestions: popupSuggestions.map(item => ({ ...item })) }));
+  if (metricButtons !== null) dataset.suggestions.find(suggestion => suggestion.id === dataset.selectedSuggestionId).metricButtons = metricButtons;
   const context = vm.createContext({
     ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract,
     fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
@@ -145,6 +147,138 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   const mode = name => click(all(".ai-popup-type").find(button => button.dataset.popupMode === name));
   return { dataset, get, run, all, click, change, mode, popups, rendered, cleared, sources, features, layers, palettes };
 }
+
+const polygonMetricButtons = [
+  { field: "temperature", label: "Nhiệt độ trung bình", icon: "🌡️", color: "#f59e0b" },
+  { field: "minimum", label: "Nhiệt độ thấp nhất", icon: "❄️", color: "#3b82f6" }
+];
+
+test("map metric buttons update Polygon and sidebar while preserving date, region and popup settings", async () => {
+  const h = harness({ metricButtons: polygonMetricButtons }); h.mode("bar");
+  const controls = h.all(".ai-generated-filter");
+  controls.find(control => control.dataset.field === "date").value = "2026-09-01T00:00:00.000Z";
+  controls.find(control => control.dataset.field === "region").value = "A";
+  await h.run("filteredAiBoundary(); renderMapMetricControls();");
+  const filters = JSON.stringify(h.dataset.filters);
+  const popupSettings = h.run("JSON.stringify(popupSelectionFor())");
+  const list = h.get("map-metric-list"); const buttons = [...list.children];
+  assert.equal(h.get("map-metric-control").hidden, false);
+  assert.deepEqual(buttons.map(button => button.dataset.metricField), ["temperature", "minimum"]);
+  assert.equal(buttons[0].attributes["aria-pressed"], "true");
+  await list.events.click({ target: buttons[1].children[0] });
+  assert.equal(h.dataset.recommendation.metricField, "minimum");
+  assert.equal(h.all(".ai-metric-selector")[0].value, "minimum");
+  assert.equal(buttons[1].attributes["aria-pressed"], "true");
+  assert.equal(buttons[0].attributes["aria-pressed"], "false");
+  assert.equal(list.children[1], buttons[1], "keep the focused button mounted");
+  assert.equal(JSON.stringify(h.dataset.filters), filters);
+  assert.equal(h.run("JSON.stringify(popupSelectionFor())"), popupSettings);
+  assert.equal(h.sources.get("polygon-data").data.features.length, 1);
+  assert.equal(h.sources.get("polygon-data").data.features[0].properties.minimum, 0);
+  const sidebar = h.all(".ai-metric-selector")[0]; sidebar.value = "temperature"; await h.change(sidebar);
+  assert.equal(buttons[0].attributes["aria-pressed"], "true");
+  await h.run("changeAiMapMetric('date')");
+  assert.equal(h.dataset.recommendation.metricField, "temperature");
+});
+
+test("map metric controls collapse, refresh for new data and hide outside maps or with one measure", () => {
+  const h = harness({ metricButtons: polygonMetricButtons }); h.run("renderMapMetricControls()");
+  const toggle = h.get("map-metric-toggle"); const list = h.get("map-metric-list");
+  toggle.events.click();
+  assert.equal(list.hidden, true);
+  assert.equal(toggle.attributes["aria-expanded"], "false");
+  assert.equal(h.get("map-metric-caption").textContent, "Nhiệt độ trung bình");
+  toggle.events.click();
+  assert.equal(list.hidden, false);
+  h.run("state.chartConfig = {}; renderMapMetricControls();");
+  assert.equal(h.get("map-metric-control").hidden, true);
+  h.run("state.chartConfig = null; dataset.analysis.columns = dataset.analysis.columns.filter(column => column.name !== 'minimum'); renderMapMetricControls();");
+  assert.equal(h.get("map-metric-control").hidden, true);
+  h.run(`state.aiDataset = {...dataset, metricControlCollapsed: false,
+    suggestions: dataset.suggestions.map(suggestion => ({...suggestion,metricButtons:[
+      {field:'temperature',label:'Nhiệt độ',icon:'☀️',color:'#ef4444'},
+      {field:'Lượng mưa',label:'Mưa',icon:'🌧️',color:'#2563eb'}]})),
+    analysis: {...dataset.analysis, columns: [...dataset.analysis.columns, {name:'Lượng mưa',role:'measure',unit:'mm'}]}};
+    renderMapMetricControls();`);
+  assert.equal(h.get("map-metric-control").hidden, false);
+  assert.deepEqual(list.children.map(button => button.dataset.metricField), ["temperature", "Lượng mưa"]);
+  assert.equal(list.children[1].children[1].textContent, "🌧️");
+  assert.equal(list.children[1].children[1].style["--metric-color"], "#2563eb");
+  h.run("clearAiMapState()");
+  assert.equal(h.get("map-metric-control").hidden, true);
+  assert.equal(list.children.length, 0);
+});
+
+test("Point metric buttons sync size and sidebar without changing groups, map time or popup metrics", async () => {
+  const h = harness({ point: true, metricButtons: [
+    { field: "doanh_thu_vnd", label: "Doanh thu", icon: "💰", color: "#16a34a" },
+    { field: "chi_phi_vnd", label: "Chi phí", icon: "🧾", color: "#e11d48" }
+  ] }); h.mode("line");
+  const selectionBefore = h.run("JSON.stringify(pointSelectionFor(activePointSuggestion()))");
+  const popupBefore = h.run("JSON.stringify(popupSelectionFor())");
+  const buttons = h.get("map-metric-list").children;
+  assert.deepEqual(buttons.map(button => button.dataset.metricField), ["doanh_thu_vnd", "chi_phi_vnd"]);
+  await h.get("map-metric-list").events.click({ target: buttons[1] });
+  assert.equal(h.all(".ai-point-metric")[0].value, "chi_phi_vnd");
+  assert.equal(h.run("dataset.activePointView.selection.metricField"), "chi_phi_vnd");
+  assert.equal(h.run("JSON.stringify({...pointSelectionFor(activePointSuggestion()), metricField:'doanh_thu_vnd'})"), selectionBefore);
+  assert.equal(h.run("JSON.stringify(popupSelectionFor())"), popupBefore);
+  assert.equal(buttons[1].attributes["aria-pressed"], "true");
+  const sidebar = h.all(".ai-point-metric")[0]; sidebar.value = "doanh_thu_vnd"; await h.change(sidebar);
+  assert.equal(buttons[0].attributes["aria-pressed"], "true");
+});
+
+test("Line metric buttons retain filters and the same eligible fields as the sidebar", async () => {
+  const h = harness({ road: true });
+  h.run(`dataset.suggestions[0].metricButtons = mapMetricColumns(dataset, dataset.suggestions[0]).map(column =>
+    ({field:column.name,label:column.name,icon:'🚗',color:'#6366f1'})); renderMapMetricControls();`);
+  const sidebar = h.all(".ai-metric-selector")[0];
+  const buttons = h.get("map-metric-list").children;
+  assert.deepEqual(buttons.map(button => button.dataset.metricField), sidebar.children.map(option => option.value));
+  const next = buttons.find(button => button.dataset.metricField !== h.dataset.recommendation.metricField);
+  assert.ok(next);
+  const filters = JSON.stringify(h.dataset.filters);
+  await h.get("map-metric-list").events.click({ target: next });
+  assert.equal(sidebar.value, next.dataset.metricField);
+  assert.equal(h.dataset.recommendation.metricField, next.dataset.metricField);
+  assert.equal(next.attributes["aria-pressed"], "true");
+  assert.equal(JSON.stringify(h.dataset.filters), filters);
+  assert.ok(h.sources.get("line-data").data.features.length);
+});
+
+test("AI chooses arbitrary metric subsets, order, labels, symbols and colors without name-based presets", () => {
+  const h = harness();
+  h.run(`dataset.analysis.columns.push({name:'profit',role:'measure',labelVi:'Lợi nhuận'}, {name:'cost',role:'measure',labelVi:'Chi phí'});
+    dataset.suggestions[1].metricButtons = [
+      {field:'cost',label:'Chi phí vận hành',icon:'🧾',color:'#be123c'},
+      {field:'profit',label:'Kết quả kinh doanh',icon:'💹',color:'#15803d'},
+      {field:'date',label:'Ngày',icon:'📅',color:'#111111'}]; renderMapMetricControls();`);
+  const buttons = h.get("map-metric-list").children;
+  assert.deepEqual(buttons.map(button => button.dataset.metricField), ["cost", "profit"]);
+  assert.deepEqual(buttons.map(button => button.children[0].children[0].textContent), ["Chi phí vận hành", "Kết quả kinh doanh"]);
+  assert.deepEqual(buttons.map(button => button.children[1].textContent), ["🧾", "💹"]);
+  assert.deepEqual(buttons.map(button => button.children[1].style["--metric-color"]), ["#be123c", "#15803d"]);
+});
+
+test("missing or empty AI button configuration stays hidden and preserves manual metric selection", async () => {
+  for (const metricButtons of [null, []]) {
+    const h = harness({ metricButtons }); h.run("renderMapMetricControls()");
+    assert.equal(h.get("map-metric-control").hidden, true);
+    const select = h.all(".ai-metric-selector")[0]; select.value = "minimum"; await h.change(select);
+    assert.equal(h.dataset.recommendation.metricField, "minimum");
+    assert.equal(h.get("map-metric-control").hidden, true);
+  }
+});
+
+test("Point initializes its size from the first AI button rather than the first numeric column", () => {
+  const h = harness({ point: true, metricButtons: [
+    { field: "chi_phi_vnd", label: "Chi phí", icon: "🧾", color: "#e11d48" },
+    { field: "doanh_thu_vnd", label: "Doanh thu", icon: "💰", color: "#16a34a" }
+  ] });
+  assert.equal(h.run("pointSelectionFor(activePointSuggestion()).metricField"), "chi_phi_vnd");
+  assert.equal(h.all(".ai-point-metric")[0].value, "chi_phi_vnd");
+  assert.equal(h.get("map-metric-list").children[0].attributes["aria-pressed"], "true");
+});
 
 test("AI semantic/auto legends lock palette controls, follow metrics and filters, and match regional hex fill", async () => {
   const h = harness({ thematic: true });

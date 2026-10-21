@@ -87,6 +87,7 @@ let tabularLoadRevision = 0;
 let aiBoundaryRevision = 0;
 let dataSearchProfile;
 let dataSearchColumns = [];
+let mapMetricControlView = null;
 
 function createAbortController() {
   return typeof AbortController === "function" ? new AbortController() : { signal: undefined, abort() {} };
@@ -247,6 +248,7 @@ function updateModelSections() {
   if (!activePointSuggestion()) { pointPopup?.remove(); pointPopup = null; }
   if (!activeMapPopupSuggestion()) closeMapPopup();
   syncDataSearch();
+  renderMapMetricControls();
 }
 
 function fillExpression() {
@@ -1531,6 +1533,7 @@ function clearAiMapState() {
   cancelAiBoundaryLoad();
   pointPopup?.remove(); pointPopup = null;
   state.aiDataset = null;
+  renderMapMetricControls();
   mapSearch?.setData();
   $("ai-line-legend").hidden = true;
   $("point-legend").hidden = true;
@@ -1662,6 +1665,93 @@ function aiLineRegionField(dataset, suggestion) {
   return (geo || columns.find(column => column.role === "category"))?.name || null;
 }
 
+function mapMetricColumns(dataset, suggestion) {
+  if (!dataset || !suggestion) return [];
+  if (suggestion.chartType === "point") return pointModelFor(suggestion).measures;
+  const columns = dataset.analysis.columns.filter(column =>
+    !["point_lat", "point_lng", "h3"].includes(column.geoLevel)
+    && (!isCoordinateLine(suggestion) || ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name)));
+  return suggestion.chartType === "map_line" ? roadValueColumns(columns, dataset.records, suggestion.bindings.region)
+    : columns.filter(column => column.role === "measure");
+}
+
+function mapMetricButtons(dataset, suggestion) {
+  const columns = new Map(mapMetricColumns(dataset, suggestion).map(column => [column.name, column]));
+  return (Array.isArray(suggestion?.metricButtons) ? suggestion.metricButtons : []).flatMap(button => {
+    const column = columns.get(button?.field);
+    if (!column || typeof button.label !== "string" || !button.label.trim() || typeof button.icon !== "string"
+      || !button.icon.trim() || !/^#[0-9a-f]{6}$/i.test(button.color || "")) return [];
+    return [{ ...button, unit: column.unit }];
+  });
+}
+
+function renderMapMetricControls() {
+  const control = $("map-metric-control");
+  if (!control) return;
+  const dataset = state.aiDataset;
+  const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+  const mapTypes = { choropleth: ["polygon", "h3"], hex_h3: ["h3"], map_line: ["line"], point: ["point"] };
+  const buttons = !state.chartConfig && mapTypes[suggestion?.chartType]?.includes(state.mapType) ? mapMetricButtons(dataset, suggestion) : [];
+  control.hidden = buttons.length < 2;
+  if (control.hidden) {
+    $("map-metric-list").replaceChildren();
+    mapMetricControlView = null;
+    return;
+  }
+  const field = suggestion.chartType === "point" ? pointSelectionFor(suggestion).metricField : dataset.recommendation?.metricField;
+  const key = JSON.stringify(buttons);
+  if (mapMetricControlView?.dataset !== dataset || mapMetricControlView.suggestionId !== suggestion.id || mapMetricControlView.key !== key) {
+    const elements = buttons.map(item => {
+      const { field, label, unit, icon, color } = item;
+      const button = document.createElement("button"); button.type = "button"; button.className = "map-metric-button";
+      button.dataset.metricField = field; button.title = unit ? `${label} (${unit})` : label;
+      const copy = document.createElement("span"); copy.className = "map-metric-label";
+      const title = document.createElement("span"); title.textContent = label; copy.append(title);
+      if (unit) {
+        const unitText = document.createElement("small"); unitText.textContent = unit; copy.append(unitText);
+      }
+      const preview = document.createElement("span"); preview.className = "map-metric-preview"; preview.setAttribute("aria-hidden", "true");
+      preview.textContent = icon; preview.style.setProperty("--metric-color", color);
+      button.append(copy, preview);
+      return button;
+    });
+    $("map-metric-list").replaceChildren(...elements);
+    mapMetricControlView = { dataset, suggestionId: suggestion.id, key, buttons: elements };
+  }
+  for (const button of mapMetricControlView.buttons) {
+    const selected = button.dataset.metricField === field;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  }
+  const collapsed = dataset.metricControlCollapsed === true;
+  $("map-metric-list").hidden = collapsed;
+  $("map-metric-toggle").setAttribute("aria-expanded", String(!collapsed));
+  $("map-metric-toggle").title = collapsed ? "Mở danh sách chỉ số" : "Thu gọn danh sách chỉ số";
+  const selected = buttons.find(button => button.field === field);
+  const column = dataset.analysis.columns.find(column => column.name === field);
+  $("map-metric-caption").textContent = collapsed ? selected?.label || column?.labelVi || column?.name || "Chỉ số bản đồ" : "Chỉ số bản đồ";
+  $("map-metric-count").textContent = String(buttons.length);
+}
+
+async function changeAiMapMetric(field) {
+  const dataset = state.aiDataset;
+  const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+  if (!suggestion || !["choropleth", "hex_h3", "map_line", "point"].includes(suggestion.chartType)
+    || !mapMetricColumns(dataset, suggestion).some(column => column.name === field)) return;
+  if (suggestion.chartType === "point") {
+    pointSelectionFor(suggestion).metricField = field;
+    for (const select of document.querySelectorAll("#ai-filter-controls .ai-point-metric")) select.value = field;
+    refreshPointView(suggestion);
+  } else {
+    Object.assign(suggestion, withSuggestionMetric(suggestion, field, dataset.analysis.columns));
+    dataset.recommendation = recommendationForSuggestion(suggestion);
+    for (const select of document.querySelectorAll("#ai-filter-controls .ai-metric-selector")) select.value = field;
+    renderMapMetricControls();
+    if (suggestion.chartType === "hex_h3") await refreshAiH3();
+    else await filteredAiBoundary();
+  }
+}
+
 function populateAiFilters(dataset) {
   const selected = dataset.suggestions.find(item => item.id === dataset.selectedSuggestionId);
   if (selected?.chartType === "choropleth") return populatePolygonFilters(dataset, selected);
@@ -1671,11 +1761,7 @@ function populateAiFilters(dataset) {
   const savedFilters = dataset.filters || {};
   const metricControls = [];
   const suggestion = dataset.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-  const mapColumns = isCoordinateLine(suggestion) ? dataset.analysis.columns.filter(column =>
-    ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name)) : dataset.analysis.columns;
-  const measureColumns = suggestion?.chartType === "map_line"
-    ? roadValueColumns(mapColumns, records, suggestion.bindings.region)
-    : dataset.analysis?.columns?.filter(column => column.role === "measure") || [];
+  const measureColumns = mapMetricColumns(dataset, suggestion);
   if (recommendation.metricField && (measureColumns.length > 1 || suggestion?.chartType === "map_line" && measureColumns.length)) {
     const label = document.createElement("label"); const caption = document.createElement("span"); const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
     caption.textContent = suggestion?.chartType === "map_line" ? "Chỉ số tô màu bản đồ" : "Chỉ số";
@@ -1951,7 +2037,7 @@ function populatePolygonFilters(dataset, suggestion) {
   const time = popupTimeColumn(columns);
   const nodes = buildMapPopupControls(dataset, suggestion);
   const mapControls = document.createElement("div"); mapControls.className = "ai-popup-map-controls";
-  const measures = columns.filter(column => column.role === "measure");
+  const measures = mapMetricColumns(dataset, suggestion);
   mapControls.append(aiField("Chỉ số tô màu bản đồ", aiSelect("ai-metric-selector",
     measures.map(column => [column.name, column.labelVi || humanizeField(column.name)]), dataset.recommendation.metricField)));
   const filters = {};
@@ -2295,7 +2381,9 @@ function pointModelFor(suggestion) {
 function pointSelectionFor(suggestion) {
   const dataset = state.aiDataset;
   dataset.pointSelections ||= Object.create(null);
-  return dataset.pointSelections[suggestion.id] ||= normalizePointSelection(pointModelFor(suggestion));
+  return dataset.pointSelections[suggestion.id] ||= normalizePointSelection(pointModelFor(suggestion), {
+    metricField: mapMetricButtons(dataset, suggestion)[0]?.field
+  });
 }
 
 function populatePointControls(suggestion) {
@@ -3216,6 +3304,15 @@ function bindFileDropZone() {
 }
 
 function bindUI() {
+  $("map-metric-toggle").addEventListener("click", () => {
+    if (!state.aiDataset) return;
+    state.aiDataset.metricControlCollapsed = !state.aiDataset.metricControlCollapsed;
+    renderMapMetricControls();
+  });
+  $("map-metric-list").addEventListener("click", async event => {
+    const button = event.target.closest(".map-metric-button");
+    if (button) await changeAiMapMetric(button.dataset.metricField);
+  });
   $("basemap-options").addEventListener("click", event => {
     const option = event.target.closest(".basemap-option");
     if (option) selectMapStyle(option.dataset.mapStyle);
@@ -3274,7 +3371,7 @@ function bindUI() {
       const selection = pointSelectionFor(suggestion);
       const control = event.target;
       let rebuildControls = false;
-      if (control.matches(".ai-point-metric")) selection.metricField = control.value;
+      if (control.matches(".ai-point-metric")) { await changeAiMapMetric(control.value); return; }
       else if (control.matches(".ai-point-group")) {
         selection.groupField = control.value;
         selection.selectedValues = [];
@@ -3332,12 +3429,7 @@ function bindUI() {
       return;
     }
     if (event.target.matches(".ai-metric-selector")) {
-      const dataset = state.aiDataset; const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-      if (!suggestion || !["choropleth", "hex_h3", "map_line"].includes(suggestion.chartType)) return;
-      Object.assign(suggestion, withSuggestionMetric(suggestion, event.target.value, dataset.analysis.columns));
-      dataset.recommendation = recommendationForSuggestion(suggestion);
-      if (suggestion.chartType === "hex_h3") await refreshAiH3();
-      else await filteredAiBoundary();
+      await changeAiMapMetric(event.target.value);
       return;
     }
     if (event.target.matches(".ai-line-measure-selector")) {

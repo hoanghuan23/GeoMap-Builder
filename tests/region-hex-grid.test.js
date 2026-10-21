@@ -57,7 +57,7 @@ test("MultiPolygon and polygon holes retain H3 center containment", () => {
 function harness() {
   const elements = new Map();
   const get = id => {
-    if (!elements.has(id)) elements.set(id, { checked: true, value: "", textContent: "", hidden: false });
+    if (!elements.has(id)) elements.set(id, { checked: true, value: "", textContent: "", hidden: false, replaceChildren() {} });
     return elements.get(id);
   };
   const sources = new Map(["h3-grid", "polygon-data", "vietnam-boundary"].map(id => [id, { setData(data) { this.data = data; } }]));
