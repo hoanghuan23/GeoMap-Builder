@@ -49,11 +49,53 @@ const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
 const DEFAULT_ROAD_DISPLAY_STYLE = Object.freeze({ width: 3, opacity: 1, showLegend: true });
 const MAP_STYLES = Object.freeze({
+  map4d: {
+    version: 8,
+    glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+    sources: {
+      "iotlink-map4d": {
+        type: "raster",
+        tiles: ["https://rtile.map4d.vn/all/2d/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: '<a href="https://map4d.vn/">© Map4D · IOTLink</a>'
+      }
+    },
+    layers: [
+      { id: "map4d-background", type: "background", paint: { "background-color": "#91d6e9" } },
+      { id: "map4d-basemap", type: "raster", source: "iotlink-map4d" }
+    ]
+  },
+  satellite: {
+    version: 8,
+    glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+    sources: {
+      "esri-imagery": {
+        type: "raster",
+        tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community"
+      },
+      "esri-labels": {
+        type: "raster",
+        tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: "Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS user community"
+      }
+    },
+    layers: [
+      { id: "satellite-background", type: "background", paint: { "background-color": "#172b3d" } },
+      { id: "satellite-imagery", type: "raster", source: "esri-imagery" },
+      { id: "satellite-labels", type: "raster", source: "esri-labels" }
+    ]
+  },
   liberty: "https://tiles.openfreemap.org/styles/liberty",
   bright: "https://tiles.openfreemap.org/styles/bright",
   dark: "https://tiles.openfreemap.org/styles/dark"
 });
-const MAP_STYLE_LABELS = Object.freeze({ liberty: "Liberty", bright: "Sáng", dark: "Tối" });
+const MAP_STYLE_LABELS = Object.freeze({ map4d: "Map4D · IOTLink", satellite: "Vệ tinh", liberty: "Liberty", bright: "Sáng", dark: "Tối" });
 const SUPPORTED_VIEW_TYPES = Object.freeze([
   { label: "Bản đồ Polygon", icon: "polygon", kind: "map" },
   { label: "Bản đồ Line", icon: "line", kind: "map" },
@@ -73,7 +115,7 @@ const state = {
   uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0, primaryUploadId: null,
   metroParts: {}, separateMetroActive: false,
   aiDataset: null, pendingSheet: null,
-  mapStyle: "liberty"
+  mapStyle: "map4d"
 };
 let map; let mapSearch; let toastTimer; let statusTimer; let cellPopup; let pointPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
 let mapPopupView = null;
@@ -778,9 +820,13 @@ function syncMapStyleControls(loading = false) {
     button.disabled = loading;
   });
   $("basemap-selection").replaceChildren(
-    loading ? "Đang chuyển nền: " : "Minh họa lựa chọn nền: ",
+    loading ? "Đang chuyển nền: " : "Nền đang dùng: ",
     Object.assign(document.createElement("b"), { textContent: MAP_STYLE_LABELS[selectedStyle] })
   );
+  // Keep attribution tied to the loaded style while another style is loading.
+  $("satellite-attribution").hidden = state.mapStyle !== "satellite";
+  $("map4d-attribution").hidden = state.mapStyle !== "map4d";
+  $("vector-attribution").hidden = !["liberty", "bright", "dark"].includes(state.mapStyle);
 }
 
 function selectMapStyle(styleKey) {

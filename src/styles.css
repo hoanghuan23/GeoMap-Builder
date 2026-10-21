@@ -249,7 +249,7 @@ button {
 
 .basemap-options {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px
 }
 
@@ -321,6 +321,30 @@ button {
         radial-gradient(circle at 82% 73%, #bdd7ae 0 17%, transparent 18%),
         linear-gradient(145deg, transparent 0 43%, #add7e7 44% 49%, transparent 50%),
         #e8e2d6
+}
+
+.basemap-preview-map4d {
+    background:
+        radial-gradient(ellipse at 76% 70%, #f4f5ed 0 3%, transparent 4%),
+        radial-gradient(ellipse at 68% 37%, #f4f5ed 0 2%, transparent 3%),
+        linear-gradient(120deg, #f4f5ed 0 38%, #d3dfc3 39% 42%, #91d6e9 43%);
+}
+
+.basemap-preview-map4d::before,
+.basemap-preview-map4d::after {
+    display: none;
+}
+
+.basemap-preview-satellite {
+    background:
+        radial-gradient(ellipse at 18% 34%, #72815c 0 15%, transparent 45%),
+        radial-gradient(ellipse at 57% 8%, #a19a75 0 10%, transparent 38%),
+        linear-gradient(125deg, #374d35 0 50%, #58775b 51% 57%, #244e70 58% 70%, #173b60 85%);
+}
+
+.basemap-preview-satellite::before,
+.basemap-preview-satellite::after {
+    display: none;
 }
 
 .basemap-preview-bright {
@@ -2543,6 +2567,8 @@ input[type=range] {
     position: absolute;
     bottom: 4px;
     right: 6px;
+    max-width: calc(100% - 12px);
+    text-align: right;
     color: #c8d1da;
     background: #162638a8;
     padding: 3px 5px;
