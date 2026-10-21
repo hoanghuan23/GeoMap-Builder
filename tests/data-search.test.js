@@ -52,8 +52,17 @@ function harness(t) {
   t.mock.method(globalThis, "fetch", () => assert.fail("data search must never request geocoding or weather"));
   const camera = [];
   const selected = [];
+  const sources = new Map();
+  const layers = new Map();
+  const map = {
+    fitBounds: (...args) => camera.push(args), flyTo: (...args) => camera.push(args),
+    isStyleLoaded: () => true,
+    getSource: id => sources.get(id), getLayer: id => layers.get(id),
+    addSource(id, source) { sources.set(id, { ...source, setData(data) { this.data = data; } }); },
+    addLayer(layer) { layers.set(layer.id, layer); }
+  };
   const controller = createMapSearch({
-    map: { fitBounds: (...args) => camera.push(args), flyTo: (...args) => camera.push(args) },
+    map,
     onSelect: (...args) => selected.push(args)
   });
   t.after(() => controller.destroy());
@@ -62,8 +71,27 @@ function harness(t) {
     get("map-search-input").handlers.input();
     return get("map-search-results").children;
   };
-  return { controller, get, search, camera, selected };
+  return { controller, get, search, camera, selected, sources, layers };
 }
+
+test("selected boundary highlight follows search selection, survives style reload and clears with search", t => {
+  const { controller, get, search, sources, layers } = harness(t);
+  const snapshot = countryData();
+  controller.setData(snapshot);
+  search("Vietnam")[0].handlers.click();
+  const highlighted = () => sources.get("map-search-boundary").data.features;
+  assert.deepEqual(highlighted(), [snapshot.data.features[0]]);
+  search("Nga")[0].handlers.click();
+  assert.deepEqual(highlighted(), [snapshot.data.features[1]]);
+  sources.clear(); layers.clear();
+  controller.refreshHighlight();
+  assert.deepEqual(highlighted(), [snapshot.data.features[1]]);
+  get("map-search-clear").handlers.click();
+  assert.deepEqual(highlighted(), []);
+  search("Vietnam")[0].handlers.click();
+  controller.setData({ ...snapshot, data: { type: "FeatureCollection", features: [] } });
+  assert.deepEqual(highlighted(), []);
+});
 
 test("country spreadsheet searches only uploaded countries, including accents, aliases and codes", () => {
   const index = buildDataSearchIndex(countryData());

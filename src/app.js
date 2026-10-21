@@ -676,6 +676,7 @@ function applyUploadLayerOrder(orderedLayerIds) {
   for (const mapLayerId of mapLayerIdsInOrder(layers, orderedLayerIds)) {
     if (map?.getLayer(mapLayerId)) map.moveLayer(mapLayerId);
   }
+  mapSearch?.refreshHighlight();
 }
 
 function scheduleUploadLayerOrder() {
@@ -3730,14 +3731,7 @@ async function init() {
   bindUI(); syncMapStyleControls();
   map = new maplibregl.Map({ container: "map", style: MAP_STYLES[state.mapStyle], center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
   observeMapSize();
-  mapSearch = createMapSearch({ map, minFilteredObjects: CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS, onSelect(feature, center) {
-    if (!activeMapPopupSuggestion()) return;
-    openMapPopup(feature, center);
-    const view = mapPopupView;
-    map.once("moveend", () => {
-      if (view === mapPopupView) sizeMapPopup(view);
-    });
-  } });
+  mapSearch = createMapSearch({ map, minFilteredObjects: CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS });
   map.on("style.load", () => {
     const switchedStyle = pendingMapStyle;
     if (switchedStyle) state.mapStyle = switchedStyle;
@@ -3748,6 +3742,7 @@ async function init() {
       addMapLayers();
       restoreUploadedLayers();
       applyStyle();
+      mapSearch?.refreshHighlight();
     } catch (error) {
       console.error("Không thể phục hồi lớp dữ liệu sau khi đổi nền:", error);
       setStatus("Nền đã đổi nhưng một số lớp dữ liệu chưa thể phục hồi.", true);

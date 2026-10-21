@@ -450,13 +450,15 @@ export function renderSearchBoundary(map, feature) {
       id: SEARCH_BOUNDARY_LINE,
       type: "line",
       source: SEARCH_BOUNDARY_SOURCE,
+      layout: { "line-join": "round", "line-cap": "round" },
       paint: {
-        "line-color": "#38bdf8",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.5, 10, 3],
-        "line-opacity": .95
+        "line-color": "#ffffff",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 5],
+        "line-opacity": 1
       }
     });
   }
+  if (hasBoundary) map.moveLayer?.(SEARCH_BOUNDARY_LINE);
   return hasBoundary;
 }
 
@@ -584,6 +586,7 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
   let matches = [];
   let activeIndex = -1;
   let snapshot;
+  let selectedFeature = null;
 
   const setOpen = open => {
     results.hidden = !open;
@@ -591,6 +594,8 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
     if (!open) input.removeAttribute("aria-activedescendant");
   };
   const reset = () => {
+    selectedFeature = null;
+    renderSearchBoundary(map, null);
     input.value = "";
     clearButton.hidden = true;
     matches = [];
@@ -615,6 +620,8 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
     input.value = entry.label;
     clearButton.hidden = false;
     setOpen(false);
+    selectedFeature = entry.feature;
+    renderSearchBoundary(map, selectedFeature);
     focusMapOnFeature(map, entry.feature);
     onSelect?.(entry.feature, featureCenter(entry.feature));
   };
@@ -689,6 +696,7 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
   reset();
 
   return {
+    refreshHighlight() { renderSearchBoundary(map, selectedFeature); },
     setData(next = {}) {
       const keys = ["data", "columns", "titleField", "chartType", "search_bar", "search_fields", "filtered", "sourceRecords"];
       if (snapshot && keys.every(key => snapshot[key] === next[key])) return;
