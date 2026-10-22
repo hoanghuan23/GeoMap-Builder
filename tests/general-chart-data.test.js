@@ -113,7 +113,8 @@ test("giao diện dùng đúng cột thời gian đã bind và giữ aggregation
     keepSelectOpenAfterMouseClick: value => value, humanizeField: value => value
   });
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
-    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/\binit\(\);\s*$/, "");
+    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = {};\n")
+    .replace(/\/\/ Runtime public API[\s\S]*$/, "");
   vm.runInContext(source, context);
   const columns = [{ name: "otherDate", role: "time" }, time, { name: "score", role: "measure", aggDefault: "mean" }];
   context.dataset = {

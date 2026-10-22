@@ -1,4 +1,6 @@
 import { AI_MAP_REGISTRY, ANALYSIS_RESPONSE_SCHEMA, supportedChartsForPrompt, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { analyzeMapComposition } from "./map-composition.js";
+import { normalizeCompositionInput } from "../src/map-composition-contract.js";
 
 const LAYER_ORDER_SCHEMA = {
   type: "object",
@@ -36,12 +38,18 @@ export function aiMapRecommendationPlugin(env) {
   const baseUrl = (env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
   const middleware = async (request, response, next) => {
     const path = request.url?.split("?")[0];
-    if (!["/api/ai/analyze-map-data", "/api/ai/analyze-layer-order"].includes(path)) return next();
+    if (!["/api/ai/analyze-map-data", "/api/ai/analyze-layer-order", "/api/ai/analyze-map-composition"].includes(path)) return next();
     if (request.method !== "POST") return sendJson(response, 405, { error: "Chỉ hỗ trợ POST." });
     const apiKey = env.OPENAI_API_KEY;
     if (!apiKey) return sendJson(response, 503, { error: "Chưa cấu hình OPENAI_API_KEY trong .env." });
     try {
       const body = await readJson(request);
+      if (path === "/api/ai/analyze-map-composition") {
+        let input;
+        try { input = normalizeCompositionInput(body); }
+        catch (error) { return sendJson(response, 400, { error: error.message }); }
+        return sendJson(response, 200, await analyzeMapComposition(input, env));
+      }
       const isLayerOrder = path === "/api/ai/analyze-layer-order";
       if (isLayerOrder) {
         if (!Array.isArray(body.layers) || body.layers.length < 2 || body.layers.length > 50 || body.layers.some(layer => !layer?.id)) {
@@ -88,7 +96,8 @@ title dùng tên Bản đồ Polygon, Bản đồ Line hoặc Bản đồ Point.
       const instructions = isLayerOrder
         ? baseInstructions
         : `${baseInstructions}\n\nChỉ trả về một JSON object đúng schema sau, không bọc trong Markdown. Dùng chính xác tên field, kiểu dữ liệu và giá trị enum trong schema:\n${JSON.stringify(schema)}`;
-      const aiInput = isLayerOrder ? body.layers : { profile: body.profile, supportedCharts: supportedChartsForPrompt() };
+      const aiInput = isLayerOrder ? body.layers : { profile: body.profile, supportedCharts: supportedChartsForPrompt(),
+        ...(body.profile.spatial?.nativeGeometry === true ? { spatialContext: "Geometry có sẵn trong file; phân tích properties để đặt datasetTitle/grain/metadata và cấu hình popup/tìm kiếm. Không bịa tên cột tọa độ/địa danh; suggestions có thể rỗng nếu bindings bảng không đủ, ứng dụng vẫn vẽ geometry gốc." } : {}) };
       const startedAt = Date.now();
       const upstream = await fetch(`${baseUrl}/responses`, {
         method: "POST",

@@ -4,6 +4,6 @@
 .builder-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:11px; }
 .builder-actions button { height:35px; border:1px solid #d4deeb; border-radius:6px; background:#fff; font-weight:600; }
 .builder-actions button:first-child { background:var(--blue); border-color:var(--blue); color:#fff; }
-#resolution-section:not([hidden]) { display:grid; grid-template-columns:1fr; }
+:is(#resolution-section,[data-control-id="resolution-section"]):not([hidden]) { display:grid; grid-template-columns:1fr; }
 .style-controls > .field { margin-top:6px; margin-bottom:6px; }
 .style-controls .toggle-row { margin:7px 0; }

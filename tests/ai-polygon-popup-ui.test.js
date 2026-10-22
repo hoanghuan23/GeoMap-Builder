@@ -134,7 +134,8 @@ function harness({ road = false, point = false, path = false, thematic = false, 
     maplibregl: { Popup }, AbortController, Date, console, setTimeout() {}, clearTimeout() {}, dataset, testMap: map, testFeatures: features
   });
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
-    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/\binit\(\);\s*$/, "");
+    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = {};\n")
+    .replace(/\/\/ Runtime public API[\s\S]*$/, "");
   vm.runInContext(source, context);
   const run = code => vm.runInContext(code, context);
   run("map = testMap; state.aiDataset = dataset; state.mapType = 'polygon'; state.boundary = {features: testFeatures}; bindUI(); populateAiFilters(dataset);");

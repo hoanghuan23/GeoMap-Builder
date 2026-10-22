@@ -574,6 +574,23 @@ export function searchDataIndex(index, query, limit = 8) {
     .slice(0, limit);
 }
 
+export function buildGroupDataSearchIndex(layers = [], options = {}) {
+  const indexes = layers.map(layer => ({ layer, index: buildDataSearchIndex({ ...layer, ...options }) }));
+  const entries = indexes.flatMap(({ layer, index }) => index.enabled ? index.entries.map(entry => ({ ...entry,
+    layerId: layer.layerId, groupId: layer.groupId, entityKey: JSON.stringify([layer.layerId, entry.entityKey]),
+    subtitle: `${layer.layerTitle || layer.layerId} · ${entry.subtitle}` })) : []);
+  return { entries, enabled: entries.length > 0, uniqueCount: new Set(entries.map(entry => entry.entityKey)).size,
+    fields: [], placeholder: indexes.length === 1 ? indexes[0].index.placeholder : 'Tìm trong các lớp dữ liệu...' };
+}
+
+function sameSearchData(previous, next) {
+  if (!previous || previous.groupId !== next.groupId) return false;
+  const keys = ['data', 'columns', 'titleField', 'chartType', 'search_bar', 'search_fields', 'filtered', 'sourceRecords', 'layerId', 'groupId', 'layerTitle'];
+  if (Array.isArray(next.layers)) return Array.isArray(previous.layers) && previous.layers.length === next.layers.length
+    && next.layers.every((layer, index) => keys.every(key => previous.layers[index][key] === layer[key]));
+  return !previous.layers && keys.every(key => previous[key] === next[key]);
+}
+
 export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }) {
   const root = document.getElementById("map-search");
   const form = document.getElementById("map-search-form");
@@ -623,7 +640,7 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
     selectedFeature = entry.feature;
     renderSearchBoundary(map, selectedFeature);
     focusMapOnFeature(map, entry.feature);
-    onSelect?.(entry.feature, featureCenter(entry.feature));
+    onSelect?.(entry.feature, featureCenter(entry.feature), entry);
   };
   const runSearch = () => {
     if (root.hidden) return;
@@ -697,11 +714,15 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
 
   return {
     refreshHighlight() { renderSearchBoundary(map, selectedFeature); },
+    getState() { return { query: input.value }; },
+    restoreState(state) {
+      if (!state?.query || !index.enabled) return;
+      input.value = state.query; clearButton.hidden = false; runSearch();
+    },
     setData(next = {}) {
-      const keys = ["data", "columns", "titleField", "chartType", "search_bar", "search_fields", "filtered", "sourceRecords"];
-      if (snapshot && keys.every(key => snapshot[key] === next[key])) return;
+      if (sameSearchData(snapshot, next)) return;
       snapshot = { ...next };
-      index = buildDataSearchIndex({ ...next, minFilteredObjects });
+      index = Array.isArray(next.layers) ? buildGroupDataSearchIndex(next.layers, { minFilteredObjects }) : buildDataSearchIndex({ ...next, minFilteredObjects });
       reset();
       root.hidden = !index.enabled;
       input.disabled = root.hidden;

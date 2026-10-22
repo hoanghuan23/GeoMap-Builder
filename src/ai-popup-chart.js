@@ -63,6 +63,7 @@ function roadIdentity(properties, regionField, columns) {
 }
 
 export function popupFeaturesMatch(feature, other, regionField, { chartType = "choropleth", columns = [], bindings = {} } = {}) {
+  if (bindings.nativeIdentity) return feature?.properties?.[bindings.nativeIdentity] === other?.properties?.[bindings.nativeIdentity];
   if (chartType === "point") return pointIdentity(feature?.properties, columns, bindings) === pointIdentity(other?.properties, columns, bindings);
   if (isCoordinateLine({ chartType, bindings })) return !bindings.region || String(feature?.properties?.[bindings.region] ?? "").trim() === String(other?.properties?.[bindings.region] ?? "").trim();
   if (chartType === "map_line") return roadIdentity(feature?.properties, regionField, columns) === roadIdentity(other?.properties, regionField, columns);
