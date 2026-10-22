@@ -29,7 +29,7 @@ import { polygonLegendKey, polygonLegendTarget } from "./polygon-legend-contract
 import { createMapSearch, focusMapOnFeature, landOnlyBoundary } from "./map-search.js";
 import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "./administrative-boundaries.js";
 import { readMetroData, metroCellsAtTime, travelFillExpression, travelLegendColors } from "./metro-data.js";
-import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON } from "./geojson-layers.js";
+import { clipGeoJSONToPolygon, featureCount, geometryKinds, isHexagonGeoJSON, pointGeoJSONToRecords } from "./geojson-layers.js";
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
 import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
@@ -1666,7 +1666,33 @@ async function readSpatialFile(file, { sheetName = null, signal } = {}) {
   if (travelRecords) {
     return { kind: "metro-part", role: "travel_times", data: travelRecords };
   }
-  if (typeof parsed?.type === "string") return { data: parsed, profile: analyzeSpatialData(parsed) };
+  if (typeof parsed?.type === "string") {
+    // Metro and transport files retain their independent overlay behavior.
+    const points = !metroPartRole(parsed, file.name) && !transportGeometryKind(file.name, parsed)
+      ? pointGeoJSONToRecords(parsed) : null;
+    if (points) {
+      const profiled = await profileRecordsInWorker(points.records, { includeSamples: Boolean($("ai-include-samples")?.checked), signal });
+      setStatus(`Đang phân tích ${file.name} bằng AI…`);
+      const result = await analyzeTabularRecords(points.records, profiled.profile, {
+        signal,
+        source: { fileName: file.name, extension }
+      });
+      if (result.kind === "ai-pipeline") {
+        for (const column of result.pipeline.analysis.columns) {
+          if (column.name === points.bindings.lat || column.name === points.bindings.lng) {
+            column.role = "geo";
+            column.geoLevel = column.name === points.bindings.lat ? "point_lat" : "point_lng";
+          }
+        }
+        for (const suggestion of result.pipeline.analysis.suggestions) {
+          if (suggestion.chartType === "point") Object.assign(suggestion.bindings, points.bindings);
+        }
+        result.pipeline.pointSelectionDefaults = { mode: "all" };
+      }
+      return { ...result, data: parsed };
+    }
+    return { data: parsed, profile: analyzeSpatialData(parsed) };
+  }
   const records = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : null;
   if (records) {
     const profiled = await profileRecordsInWorker(records, { includeSamples: Boolean($("ai-include-samples")?.checked), signal });
@@ -2429,6 +2455,7 @@ function pointSelectionFor(suggestion) {
   const dataset = state.aiDataset;
   dataset.pointSelections ||= Object.create(null);
   return dataset.pointSelections[suggestion.id] ||= normalizePointSelection(pointModelFor(suggestion), {
+    ...dataset.pointSelectionDefaults,
     metricField: mapMetricButtons(dataset, suggestion)[0]?.field
   });
 }
@@ -3257,9 +3284,10 @@ async function processSpatialFiles(files) {
     return;
   }
 
-  const spatial = valid.filter(item => !item.result.kind && item.result.data);
-  const metroParts = valid.filter(item => item.result.kind === "metro-part");
   const primary = valid.find(item => ["metro", "ai-pipeline", "ai-map", "chart"].includes(item.result.kind));
+  const spatial = valid.filter(item => item.result.data && (!item.result.kind
+    || item !== primary && item.result.kind === "ai-pipeline"));
+  const metroParts = valid.filter(item => item.result.kind === "metro-part");
   if (primary) await applyReadResult(primary.result, primary.file);
   if (primary && !spatial.length && !metroParts.length) {
     if (duplicates.length) showToast(`Đã bỏ qua file trùng: ${duplicates.map(file => file.name).join(", ")}`);

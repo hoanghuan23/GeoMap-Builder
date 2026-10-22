@@ -35,6 +35,40 @@ export function geometryKinds(data) {
   return [...kinds];
 }
 
+/** Expose Point properties and geometry as rows for the existing AI pipeline. */
+export function pointGeoJSONToRecords(data) {
+  const kinds = geometryKinds(data);
+  if (kinds.length !== 1 || kinds[0] !== "point") return null;
+  const features = featuresFrom(data);
+  const names = new Set(features.flatMap(feature => Object.keys(feature.properties || {})));
+  const unusedField = base => {
+    let name = base;
+    for (let suffix = 2; names.has(name); suffix++) name = `${base}_${suffix}`;
+    names.add(name);
+    return name;
+  };
+  // Separate fields ensure geometry stays authoritative without overwriting properties.
+  const lat = unusedField("__geojson_latitude");
+  const lng = unusedField("__geojson_longitude");
+  const id = features.some(feature => feature.id != null) ? unusedField("__geojson_feature_id") : null;
+  const rowsFrom = (geometry, properties) => {
+    if (geometry?.type === "GeometryCollection") return geometry.geometries?.flatMap(item => rowsFrom(item, properties)) || [];
+    const positions = geometry?.type === "Point" ? [geometry.coordinates]
+      : geometry?.type === "MultiPoint" ? geometry.coordinates : [];
+    return (positions || []).map(position => {
+      const valid = Array.isArray(position) && position.length >= 2
+        && position.slice(0, 2).every(value => typeof value === "number" && Number.isFinite(value))
+        && Math.abs(position[0]) <= 180 && Math.abs(position[1]) <= 90;
+      return { [lat]: valid ? position[1] : null, [lng]: valid ? position[0] : null, ...properties };
+    });
+  };
+  const records = features.flatMap(feature => rowsFrom(feature.geometry, {
+    ...feature.properties,
+    ...(id ? { [id]: feature.id ?? null } : {})
+  }));
+  return records.length ? { records, bindings: { lat, lng } } : null;
+}
+
 export function isHexagonGeoJSON(data, name = "") {
   const features = featuresFrom(data);
   if (!features.length || !geometryKinds(data).includes("area")) return false;

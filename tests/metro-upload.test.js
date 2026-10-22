@@ -18,8 +18,8 @@ import * as coordinates from "../src/coordinate-data.js";
 import * as roadMap from "../src/road-map-data.js";
 import * as timeValues from "../src/time-values.js";
 import { AI_CHART_REGISTRY } from "../src/ai-chart-contract.js";
-import { displayFilterValue, comparableFilterValue } from "../src/ai-data-analysis.js";
-import { parseSpreadsheetFile } from "../src/tabular-worker-client.js";
+import { displayFilterValue, comparableFilterValue, requestAiDataAnalysis } from "../src/ai-data-analysis.js";
+import { parseSpreadsheetFile, profileRecordsInWorker } from "../src/tabular-worker-client.js";
 import { metroFixture } from "./fixtures/metro-fixture.js";
 import { createRoadTrafficWorkbook, trafficAiAnalysis } from "./fixtures/road-traffic-fixture.js";
 import { fallbackAnalysis } from "../src/ai-chart-contract.js";
@@ -60,7 +60,7 @@ function createHarness() {
   const context = vm.createContext({
     ...metro, ...capabilities, ...polygonStyle, ...pointStyle, ...geojsonLayers, ...congestion, ...transport, ...layerOrder, PointRenderer, PolygonRenderer,
     ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, ...polygonLegend, ...legendContract,
-    AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue,
+    AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue, profileRecordsInWorker,
     requestAiDataAnalysis: async records => ({ analysis: { ...trafficAiAnalysis, source: "ai" }, records, validRowRate: 1 }),
     roadNetworkUrl: () => "/roads/hanoi_roads.json",
     fetch: async () => ({ ok: true, json: async () => ({ type: "FeatureCollection", features: [{
@@ -307,6 +307,7 @@ test("Point style panel applies appearance and resets it without rebuilding H3 o
 
 test("skips a file uploaded more than once and allows it again after removal", async () => {
   const { context } = createHarness();
+  context.requestAiDataAnalysis = async (records, { profile }) => ({ analysis: fallbackAnalysis(profile), records, validRowRate: {} });
   const data = JSON.stringify({
     type: "FeatureCollection",
     features: [{ type: "Feature", properties: { name: "A" }, geometry: { type: "Point", coordinates: [106.7, 10.8] } }]
@@ -315,7 +316,8 @@ test("skips a file uploaded more than once and allows it again after removal", a
 
   await vm.runInContext("processSpatialFiles([file, file])", context);
   assert.equal(vm.runInContext("state.uploadedFiles.length", context), 1);
-  assert.equal(vm.runInContext("state.uploadLayers.length", context), 1);
+  assert.equal(vm.runInContext("state.uploadLayers.length", context), 0);
+  assert.equal(vm.runInContext("state.mapType", context), "point");
   assert.equal(vm.runInContext("state.uploadedFileKeys.size", context), 1);
 
   await vm.runInContext("processSpatialFiles([file])", context);
@@ -326,7 +328,80 @@ test("skips a file uploaded more than once and allows it again after removal", a
   assert.equal(vm.runInContext("state.uploadedFileKeys.size", context), 0);
   await vm.runInContext("processSpatialFiles([file])", context);
   assert.equal(vm.runInContext("state.uploadedFiles.length", context), 1);
-  assert.equal(vm.runInContext("state.uploadLayers.length", context), 1);
+  assert.equal(vm.runInContext("state.uploadLayers.length", context), 0);
+  assert.equal(vm.runInContext("state.mapType", context), "point");
+});
+
+const weatherStations = { type: "FeatureCollection", features: Array.from({ length: 25 }, (_, index) => ({
+  type: "Feature", properties: { station_id: `KT${String(index + 1).padStart(3, "0")}`,
+    ten_tram: `Trạm khí tượng ${index + 1}`, nhiet_do_c: 19.6 + index / 10, do_am_phan_tram: 65 + index },
+  geometry: { type: "Point", coordinates: [105.935752 + index / 100, 21.079462 + index / 100] }
+})) };
+
+test("weather station GeoJSON calls AI with properties and bounded samples, then exposes Point metrics", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const includeSamples of [true, false]) {
+      const { context, get, sources } = createHarness();
+      context.requestAiDataAnalysis = requestAiDataAnalysis;
+      get("ai-include-samples").checked = includeSamples;
+      let calls = 0;
+      globalThis.fetch = async (url, options) => {
+        calls++;
+        assert.equal(url, "/api/ai/analyze-map-data");
+        const { profile, source } = JSON.parse(options.body);
+        assert.equal(source.fileName, "tram_khi_tuong_mien_bac.geojson");
+        assert.equal(profile.rowCount, 25);
+        assert.equal(profile.samplesIncluded, includeSamples);
+        assert.equal(profile.head?.length || 0, includeSamples ? 8 : 0);
+        for (const column of profile.columns) {
+          assert.equal("samples" in column, includeSamples);
+          if (includeSamples) assert.ok(column.samples.length <= 5);
+        }
+        assert.equal(profile.columns.find(column => column.name === "nhiet_do_c").inferredType, "number");
+        const analysis = fallbackAnalysis(profile, { datasetTitle: "Trạm khí tượng miền Bắc" });
+        return { ok: true, json: async () => ({ ...analysis, source: "ai", columns: analysis.columns.map(column => ({
+          ...column, ...(column.name === "nhiet_do_c" ? { labelVi: "Nhiệt độ", unit: "°C" }
+            : column.name === "do_am_phan_tram" ? { labelVi: "Độ ẩm", unit: "%" } : {})
+        })) }) };
+      };
+      context.weatherFile = { name: "tram_khi_tuong_mien_bac.geojson", text: async () => JSON.stringify(weatherStations) };
+      await vm.runInContext("processSpatialFiles([weatherFile])", context);
+      assert.equal(calls, 1);
+      assert.equal(vm.runInContext("state.aiDataset.analysis.source", context), "ai");
+      assert.equal(vm.runInContext("state.aiDataset.records.length", context), 25);
+      assert.equal(vm.runInContext("state.mapType", context), "point");
+      assert.equal(vm.runInContext("state.uploadLayers.length", context), 0, "no duplicate raw overlay obscures analyzed points");
+      assert.ok(get("map-type-grid").children.some(node => node.dataset.type === "rule-point"));
+      assert.match(get("map-type-summary").textContent, /Trạm khí tượng miền Bắc.*AI/);
+      assert.equal(sources.get("point-data").data.features.length, 25);
+      assert.deepEqual(sources.get("point-data").data.features[0].geometry.coordinates, weatherStations.features[0].geometry.coordinates);
+      const mapControls = get("ai-filter-controls").children.find(node => node.className === "ai-popup-map-controls");
+      const metricSelect = mapControls.children.find(node => node.children[1]?.className === "ai-point-metric").children[1];
+      assert.deepEqual(metricSelect.children.map(option => option.textContent), ["Nhiệt độ", "Độ ẩm"]);
+      vm.runInContext(`
+        const suggestion = activePointSuggestion();
+        state.aiDataset.pointSelections[suggestion.id].metricField = "do_am_phan_tram";
+        refreshPointView(suggestion);
+      `, context);
+      assert.equal(vm.runInContext("state.aiDataset.activePointView.metric.field", context), "do_am_phan_tram");
+      assert.equal(calls, 1, "switching metrics reuses the same AI analysis");
+      await vm.runInContext("removeUploadedFile(state.primaryUploadId)", context);
+      assert.equal(vm.runInContext("state.aiDataset", context), null);
+      assert.equal(sources.get("point-data").data.features.length, 0);
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("additional analyzed GeoJSON files remain visible when uploaded together", async () => {
+  const { context, sources } = createHarness();
+  context.requestAiDataAnalysis = async (records, { profile }) => ({ analysis: fallbackAnalysis(profile), records, validRowRate: {} });
+  context.pointFiles = ["north.geojson", "south.geojson"].map(name => ({ name, text: async () => JSON.stringify(weatherStations) }));
+  await vm.runInContext("processSpatialFiles(pointFiles)", context);
+  assert.equal(vm.runInContext("state.uploadedFiles.length", context), 2);
+  assert.equal(sources.get("point-data").data.features.length, 25);
+  const source = vm.runInContext("state.uploadLayers[0].sourceId", context);
+  assert.equal(sources.get(source).data.features.length, 25);
 });
 
 function trafficUploadFiles() {
