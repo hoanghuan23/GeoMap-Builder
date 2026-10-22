@@ -1,5 +1,17 @@
 # GeoMap Builder
 
+Ứng dụng hỗ trợ nhiều dataset trong cùng phiên làm việc. Sau mỗi đợt import, mỗi file/sheet được phân tích và giữ cấu hình riêng; AI đánh giá các lớp mới với toàn bộ nhóm hiện có qua `/api/ai/analyze-map-composition`. Các lớp phù hợp được hiển thị chung, lớp chưa phù hợp hoặc chưa đánh giá được trở thành bản đồ riêng. Dữ liệu không bị thay thế khi thêm file mới. Khi AI không khả dụng, ứng dụng giữ các bản đồ riêng và cho phép thử đánh giá lại.
+
+Trong mục 1, **Bản đồ đang hiển thị** chọn nhóm bản đồ. Mục 3 có tab riêng cho từng lớp khi nhóm có nhiều lớp; đổi tab chỉ đổi cấu hình đang chỉnh. Mục 2, style, bảng dữ liệu và export đi theo lớp được chọn. Bộ lọc, chỉ số, ngày, biểu đồ popup và lưới Polygon được giữ riêng; công tắc hiển thị tại mục 4 áp dụng toàn nhóm. Chú giải và nút chỉ số được trình bày theo lớp; thanh tìm kiếm tổng hợp các lớp được đề xuất tìm kiếm và mở đúng popup của đối tượng được chọn.
+
+Mỗi lớp có runtime, DOM control và source/layer MapLibre riêng. Chuyển nhóm tháo resource của nhóm cũ khỏi canvas và giữ dữ liệu/cấu hình trong bộ nhớ; đổi basemap phục hồi lại nhóm đang hiển thị. GeoJSON có geometry sẵn giữ geometry gốc; chỉ metadata thuộc tính được phân tích để đặt tên và cấu hình. Các file cấu thành một bộ Metro vẫn được ghép theo luồng chuyên biệt.
+
+Composition chỉ gửi metadata đã giới hạn: ID, tên, grain, loại geometry, extent, metadata cột và tóm tắt thời gian/tìm kiếm. Không gửi records, file hoặc toàn bộ geometry. Tắt **Gửi giá trị mẫu cho AI** tiếp tục loại mẫu khỏi bước phân tích; composition không bổ sung giá trị mẫu. Chuyển nhóm/tab, đổi bộ lọc/style/chỉ số, tìm kiếm và popup không gọi lại AI. Kết quả composition chỉ được áp dụng cho đúng revision dữ liệu; lỗi hoặc kết quả sai giữ dữ liệu thành nhóm riêng. Giới hạn một request composition là 50 lớp; workspace lớn hơn dùng bản đồ riêng cho các lớp mới.
+
+Luồng ghép lớp dùng chung cho mọi lĩnh vực, tên file và tổ hợp Polygon/Line/Point/lục giác; không có danh sách cặp dữ liệu được ghép sẵn. AI quyết định dựa trên hồ sơ, ứng dụng kiểm tra hợp đồng JSON và quyền sở hữu lớp/nhóm. Schema được gửi cả qua `text.format` và trong instructions để các gateway không thực thi structured output vẫn nhận đủ cấu trúc. Các lớp mới được đề xuất cùng nhóm dùng chung `newGroupKey`; `append_to_group` chỉ tham chiếu nhóm đã có. `AI_DEBUG=true` ghi phản hồi composition gốc và kết quả chuẩn hóa ra console để kiểm tra lỗi hợp đồng.
+
+Trạng thái được giữ trong phiên hiện tại, chưa lưu sau reload. Xem [kế hoạch triển khai](src/quan_ly_hien_thi_da_lop_bando.PLAN.md) để biết các quyết định hành vi và giới hạn phạm vi.
+
 ## Chạy dự án
 
 ```bash
@@ -36,7 +48,7 @@ Excel/CSV được parse và profile trong Web Worker bằng package SheetJS đi
 
 Tùy chọn **“Gửi giá trị mẫu cho AI”** mặc định bật. Request AI chứa tên cột, kiểu suy luận, thống kê như tỷ lệ null, số giá trị phân biệt, min/max cùng tối đa 5 mẫu cho mỗi cột và 8 dòng đầu; chuỗi được loại control character và cắt ở 160 ký tự. AI dùng các dòng mẫu để nhận diện cấp quan sát và quan hệ địa lý giữa các cột. Khi tắt tùy chọn này, request không có trường `samples` hoặc `head`.
 
-Mỗi dataset chỉ tạo đúng một request OpenAI. Server tự đưa registry được phép vào prompt, coi tên cột và mẫu là dữ liệu không tin cậy, rồi kiểm tra structured output trước khi trả về client. Đầu vào chỉ hỗ trợ ba kiểu bản đồ:
+Mỗi dataset tạo một request phân tích nội dung OpenAI; đánh giá tổ hợp giữa các dataset là bước riêng theo từng đợt import. Server tự đưa registry được phép vào prompt, coi tên cột và mẫu là dữ liệu không tin cậy, rồi kiểm tra structured output trước khi trả về client. Đầu vào chỉ hỗ trợ ba kiểu bản đồ:
 
 - `choropleth`: **Bản đồ Polygon**, theo khu vực hành chính như tỉnh/thành phố.
 - `map_line`: **Bản đồ Line**, theo tên đường hoặc chuỗi tọa độ.
@@ -54,11 +66,13 @@ Danh sách thiếu, rỗng, lỗi hoặc không còn kiểu khả dụng chỉ h
 
 Thanh tìm kiếm trên bản đồ mặc định ẩn khi chưa có dữ liệu. Trong cùng request phân tích file, AI trả thêm `search_bar` (boolean bật/tắt mặc định) và `search_fields` (mảng tên cột gốc theo thứ tự: định danh chính trước, ngữ cảnh hỗ trợ sau). AI đánh giá số đối tượng duy nhất và lợi ích tìm nhanh, không áp ngưỡng `uniqueCount >= 30` cứng hoặc dựa vào số dòng/ngày/cột đo lường. Ví dụ thời tiết theo khu vực dùng `["Khu vực", "Quốc gia"]`, tuyến dùng `["Tên đường"]`, cửa hàng dùng `["Tên cửa hàng", "Thành phố"]`; thiếu tên có thể dùng mã đối tượng.
 
+Khi ghép nhiều lớp, tìm kiếm giữ cấu hình hợp lệ của từng file và gộp kết quả của các lớp đang hiển thị. Composition không tắt tìm kiếm của một lớp chỉ vì bỏ sót ID trong `searchLayerIds`; ứng dụng bổ sung các lớp có cấu hình tìm kiếm hợp lệ từ hồ sơ đầu vào. `search_bar: false` và các trường không hợp lệ vẫn được tôn trọng. Kết quả kèm tên lớp; chọn kết quả sẽ chuyển tới đối tượng và tab của lớp sở hữu, đóng popup đang mở.
+
 Backend và frontend chỉ chấp nhận các tên cột có thật, không trùng nhau, thuộc role địa danh/tên/phân loại/mã/văn bản; loại cột đo lường, thời gian, tọa độ và metadata nội bộ. Trường đầu tiên xác định nhãn chính; khi đổi bản đồ, ứng dụng điều chỉnh theo cột địa lý/tuyến đang vẽ bằng metadata hiện có. Không có trường hoặc đối tượng hợp lệ thì ẩn. `search_bar: false` giữ thanh tìm kiếm ẩn ngay cả khi danh sách trường hợp lệ. Output cũ thiếu `search_fields` tiếp tục dùng các trường tìm kiếm hiện có; thiếu `search_bar` giữ hành vi cũ là hiện khi có dữ liệu tìm được. Giao diện hiện chưa có công tắc ghi đè bật/tắt thủ công.
 
 Số đối tượng được đếm theo giá trị định danh đã bỏ khoảng trắng đầu/cuối, bỏ trống/null; không nhân số đếm vì nhiều quan sát hoặc đoạn đường. Các cột địa lý ngữ cảnh được dùng cùng tên để phân biệt đối tượng trùng tên. Tìm không dấu và bí danh chỉ phục vụ so khớp truy vấn, không gộp đối tượng khi đếm. Nếu bộ lọc làm giảm tập đối tượng và còn dưới 5 đối tượng duy nhất, thanh tìm kiếm tạm ẩn, vô hiệu hóa ô nhập và xóa truy vấn/kết quả cũ; bỏ lọc đủ điều kiện thì hiện lại theo đề xuất ban đầu. Ngưỡng này cấu hình bằng `CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS` trong `src/config.js`.
 
-Kết quả chỉ gồm đối tượng phù hợp với bộ lọc bản đồ hiện tại; chọn kết quả để chuyển đến đối tượng và mở popup dữ liệu. Có thể tìm tên có dấu, không dấu hoặc bí danh/mã quốc gia đã cấu hình trên các trường được chọn. Thay file, đổi kiểu bản đồ hoặc bộ lọc cập nhật chỉ mục; đổi màu, zoom hoặc mở popup không gọi lại AI và không làm mất truy vấn khi dữ liệu không đổi. Xóa dữ liệu sẽ ẩn thanh tìm kiếm. Tìm kiếm chạy tại trình duyệt, không gọi geocoding hay tải thời tiết cho khu vực ngoài dữ liệu. Công tắc thời tiết OpenWeather theo vùng đã được bỏ; dữ liệu thời tiết tải lên vẫn hiển thị như các chỉ số thông thường.
+Kết quả chỉ gồm đối tượng phù hợp với bộ lọc bản đồ hiện tại; chọn kết quả chỉ di chuyển bản đồ tới đối tượng và đánh dấu ranh giới vùng. Popup dữ liệu mở khi bấm trực tiếp lên đối tượng trên bản đồ. Có thể tìm tên có dấu, không dấu hoặc bí danh/mã quốc gia đã cấu hình trên các trường được chọn. Thay file, đổi kiểu bản đồ hoặc bộ lọc cập nhật chỉ mục; đổi màu, zoom hoặc mở popup không gọi lại AI và không làm mất truy vấn khi dữ liệu không đổi. Xóa dữ liệu sẽ ẩn thanh tìm kiếm. Tìm kiếm chạy tại trình duyệt, không gọi geocoding hay tải thời tiết cho khu vực ngoài dữ liệu. Công tắc thời tiết OpenWeather theo vùng đã được bỏ; dữ liệu thời tiết tải lên vẫn hiển thị như các chỉ số thông thường.
 
 Trong luồng **Bản đồ Polygon**, bấm một vùng hoặc ô lục giác thuộc polygon để xem thông tin hoặc biểu đồ riêng của vùng đó. Ngày tô màu bản đồ độc lập với khoảng ngày biểu đồ. Chọn địa phương bằng cách bấm trên bản đồ.
 
@@ -92,9 +106,7 @@ Các file ADM dùng cấu trúc thuộc tính `GID_0`, `COUNTRY`, `GID_1/2`, `NA
 
 ADM1 cục bộ hiện chứa 63 tỉnh/thành theo bộ ranh giới nguồn. Khi MapTiler trả ranh giới mới cho tập dữ liệu 34 tỉnh/thành, ứng dụng ưu tiên ranh giới đó. Nếu phải dùng file dự phòng thì polygon giữ nguyên theo file; việc khớp tên không tự hợp nhất các tỉnh.
 
-Riêng tên `TP. Hồ Chí Minh` khi tra cấp `region` tại Việt Nam được gửi tới MapTiler dưới tên `Hồ Chí Minh` để lấy polygon mở rộng, bao gồm Bình Dương và Bà Rịa–Vũng Tàu cũ. Tên dòng dữ liệu gốc được giữ nguyên để ghép chỉ số; alias do người dùng chọn vẫn được ưu tiên.
-
-Các file GeoJSON độc lập cũng được xếp lớp theo nội dung thay vì thứ tự upload. Rule nền luôn đặt polygon/hexagon dưới line/route và đặt point/station trên cùng; AI nhận metadata của các lớp để đề xuất thứ tự chi tiết giữa những lớp cùng nhóm. Nếu chưa cấu hình OpenAI hoặc API lỗi, thứ tự hình học này vẫn được áp dụng ngay ở trình duyệt.
+Các file GeoJSON thuộc cùng nhóm bản đồ được xếp lớp theo geometry thay vì thứ tự upload: polygon/hexagon dưới line/route và point/station trên cùng. Luồng overlay chuyên biệt tiếp tục dùng metadata để đề xuất thứ tự chi tiết giữa những lớp cùng nhóm geometry. Nếu chưa cấu hình OpenAI hoặc API lỗi, thứ tự hình học vẫn được áp dụng ở trình duyệt; các dataset chưa xác định khả năng kết hợp được giữ thành bản đồ riêng.
 
 Ranh giới từ MapTiler được cắt bằng GeoJSON của quốc gia tương ứng khi đã cấu hình nguồn cục bộ: ADM0 cho quốc gia, ADM1 cho tỉnh/thành, ADM2 cho quận/huyện; ADM0 dự phòng khi cấp chi tiết không giao nhau. Với polygon cấp quốc gia, chọn mặt nạ theo chính quốc gia trong kết quả. Nước chưa có mặt nạ cục bộ giữ polygon MapTiler; không dùng VNM để cắt nước khác. Polygon đã đọc từ thư mục quốc gia được dùng trực tiếp. File ranh giới nằm trong `administrative_division/` (được gitignore) và cần có trên máy build.
 
