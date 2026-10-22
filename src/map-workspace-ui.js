@@ -11,7 +11,7 @@ import { matchingMetroBundle } from './metro-upload-group.js';
 const fileKey = file => `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
 
-export async function startMapWorkspace(createRuntime, { styles, styleLabels }) {
+export async function startMapWorkspace(createRuntime, { styles, styleLabels, renderCatalog }) {
   const workspace = createMapWorkspace();
   const uploads = new Map(); const keys = new Set(); const runtimes = new Map();
   const requestComposition = createCompositionClient();
@@ -21,22 +21,26 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
   const legendOriginal = document.querySelector('.map-legends');
   const tableOriginal = $('data-panel');
   const templates = [sidebar.cloneNode(true), metricOriginal.cloneNode(true), legendOriginal.cloneNode(true), tableOriginal.cloneNode(true), $('chart-canvas').cloneNode(true)];
+  const empty = $('map-type-grid').closest('.panel-section');
   const sidebars = textNode('div', '', 'layer-sidebars');
-  sidebar.append(sidebar.querySelector('.builder-actions'));
+  const actions = sidebar.querySelector('.builder-actions');
+  actions.hidden = true; sidebar.append(actions);
   const configSections = [...sidebar.children].slice(2).filter(element => !element.classList.contains('builder-actions'));
   configSections.forEach(element => element.remove());
-  sidebar.insertBefore(sidebars, sidebar.querySelector('.builder-actions'));
-  const empty = textNode('p', 'Tải dữ liệu để bắt đầu. AI sẽ đề xuất các lớp có thể xem chung.', 'workspace-empty'); sidebars.append(empty);
+  sidebar.insertBefore(sidebars, actions);
+  sidebars.append(empty); renderCatalog(document);
   const metrics = textNode('div', '', 'workspace-metrics'); metricOriginal.replaceWith(metrics);
   legendOriginal.replaceChildren();
   const tables = textNode('div', '', 'workspace-tables'); tableOriginal.replaceWith(tables);
   const selector = document.createElement('select'); selector.id = 'displayed-map'; selector.disabled = true;
   selector.setAttribute('aria-label', 'Bản đồ đang hiển thị');
   const groupField = textNode('label', '', 'field map-group-field');
+  groupField.hidden = true;
   groupField.append(textNode('span', 'Bản đồ đang hiển thị'), selector);
   const compositionNote = textNode('p', '', 'composition-note'); compositionNote.setAttribute('role', 'status');
+  compositionNote.hidden = true;
   const retry = textNode('button', 'Thử đánh giá kết hợp lại', 'secondary-button'); retry.type = 'button'; retry.hidden = true;
-  const showTable = textNode('button', 'Xem dữ liệu lớp đang chọn', 'secondary-button'); showTable.type = 'button'; showTable.disabled = true;
+  const showTable = textNode('button', 'Xem dữ liệu lớp đang chọn', 'secondary-button'); showTable.type = 'button'; showTable.disabled = true; showTable.hidden = true;
   sidebar.children[1].append(groupField, compositionNote, retry, showTable);
   $('sheet-selector-field').hidden = true;
   document.querySelector('.drop-zone small').textContent = 'CSV, Excel, JSON, GeoJSON · AI đánh giá hiển thị nhiều lớp';
@@ -137,7 +141,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
 
   function sync() {
     const group = activeMapGroup(workspace);
-    empty.hidden = Boolean(group); showTable.disabled = !group;
+    empty.hidden = Boolean(group);
+    groupField.hidden = !group; compositionNote.hidden = !group; actions.hidden = !group;
+    showTable.hidden = !group; showTable.disabled = !group;
+    if (!group) { tableShown = false; showTable.textContent = 'Xem dữ liệu lớp đang chọn'; }
     const signature = JSON.stringify(workspace.groupOrder.map(id => [id, workspace.groupsById[id].title, workspace.groupsById[id].layerIds.length]));
     if (signature !== selectedSignature) {
       selector.replaceChildren(...workspace.groupOrder.map(id => {

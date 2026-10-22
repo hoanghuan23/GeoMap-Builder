@@ -102,6 +102,23 @@ const SUPPORTED_VIEW_TYPES = Object.freeze([
   { label: "Bản đồ Line", icon: "line", kind: "map" },
   { label: "Bản đồ Point", icon: "point", kind: "map" }
 ]);
+
+function renderSupportedMapCatalog(document) {
+  const grid = document.getElementById("supported-chart-grid");
+  grid.replaceChildren(...SUPPORTED_VIEW_TYPES.map(type => {
+    const item = document.createElement("div");
+    const icon = document.createElement("span");
+    const label = document.createElement("span");
+    item.className = "supported-chart-type";
+    item.setAttribute("role", "listitem");
+    if (type.kind === "map") renderMapIcon(icon, type.icon);
+    else renderChartIcon(icon, type.icon);
+    label.textContent = type.label;
+    item.append(icon, label);
+    return item;
+  }));
+}
+
 export function createMapLayerRuntime(options) {
 const document = options.document;
 const maplibregl = options.maplibregl || globalThis.maplibregl;
@@ -221,19 +238,7 @@ function setDataPanelVisible(visible) { $("data-panel").hidden = !visible; docum
 function fmt(value, digits = 1) { return Number.isFinite(value) ? value.toFixed(digits) : "--"; }
 
 function renderSupportedChartCatalog() {
-  const grid = $("supported-chart-grid");
-  grid.replaceChildren(...SUPPORTED_VIEW_TYPES.map(type => {
-    const item = document.createElement("div");
-    const icon = document.createElement("span");
-    const label = document.createElement("span");
-    item.className = "supported-chart-type";
-    item.setAttribute("role", "listitem");
-    if (type.kind === "map") renderMapIcon(icon, type.icon);
-    else renderChartIcon(icon, type.icon);
-    label.textContent = type.label;
-    item.append(icon, label);
-    return item;
-  }));
+  renderSupportedMapCatalog(document);
 }
 
 function showSupportedChartCatalog(visible) {
@@ -3935,4 +3940,4 @@ return {
 };
 }
 
-if (typeof document !== "undefined") startMapWorkspace(createMapLayerRuntime, { styles: MAP_STYLES, styleLabels: MAP_STYLE_LABELS });
+if (typeof document !== "undefined") startMapWorkspace(createMapLayerRuntime, { styles: MAP_STYLES, styleLabels: MAP_STYLE_LABELS, renderCatalog: renderSupportedMapCatalog });

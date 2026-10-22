@@ -3132,8 +3132,7 @@ th:last-child {
 .layer-sidebar { min-width: 0; }
 .map-group-field { margin-top: 18px; }
 .map-group-field select { width: 100%; text-overflow: ellipsis; }
-.composition-note, .workspace-empty { color: #74849b; font-size: 12px; line-height: 1.6; margin: 10px 0; }
-.workspace-empty { padding: 8px 16px; }
+.composition-note { color: #74849b; font-size: 12px; line-height: 1.6; margin: 10px 0; }
 .map-group-field ~ .secondary-button { margin: 8px 8px 0 0; font-size: 12px; }
 .map-layer-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
 .map-layer-tab { flex: 1 0 110px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid #dce3ed; border-radius: 8px; padding: 9px 12px; background: #f6f8fc; color: #6b7890; text-align: left; cursor: pointer; font: inherit; font-size: 12px; }
