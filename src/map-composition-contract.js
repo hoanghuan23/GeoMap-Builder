@@ -91,6 +91,9 @@ export function normalizeCompositionResult(raw, input) {
       groupTitle: clean(item.groupTitle, 160), confidence: item.confidence, reason: clean(item.reason, 800) };
   });
   const searchable = new Set(fallback.searchLayerIds);
+  // Composition can recommend search layers, but omission must not disable
+  // the valid search configuration already produced for an individual file.
+  const recommended = Array.isArray(raw.searchLayerIds) ? raw.searchLayerIds.filter(id => searchable.has(id)) : [];
   return { schemaVersion: 1, source: raw.source === 'rule' ? 'rule' : 'ai', decisions,
-    searchLayerIds: Array.isArray(raw.searchLayerIds) ? [...new Set(raw.searchLayerIds.filter(id => searchable.has(id)))] : fallback.searchLayerIds };
+    searchLayerIds: [...new Set([...recommended, ...searchable])] };
 }

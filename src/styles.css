@@ -3140,6 +3140,7 @@ th:last-child {
 .map-layer-tab[aria-selected=true] { border-color: #0068ff; background: #edf4ff; color: #064eb4; font-weight: 600; }
 .map-layer-tab:focus-visible { outline: 2px solid #0068ff; outline-offset: 2px; }
 .map-layer-hint { margin: 7px 0 15px; color: #78869a; font-size: 11px; line-height: 1.6; }
+.map-layer-count { display: inline-block; background: #edf2f8; border-radius: 12px; color: #4c607b; padding: 2px 8px; margin-bottom: 8px; font-size: 11px; }
 .workspace-metrics { position: absolute; top: 62px; right: 16px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; max-height: calc(100% - 90px); max-width: min(290px, 45%); overflow-y: auto; scrollbar-width: thin; pointer-events: none; }
 .workspace-metrics .map-metric-control { position: static; top: auto; right: auto; transform: none; max-width: 100%; flex-shrink: 0; pointer-events: auto; }
 .layer-overlay-title { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 11px; line-height: 1.5; margin: 0 0 6px; padding: 0 6px; }

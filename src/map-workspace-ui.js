@@ -1,10 +1,12 @@
 import { createMapWorkspace, activeMapGroup, addWorkspaceLayer, createWorkspaceGroup, applyWorkspaceComposition, removeWorkspaceLayer } from './map-workspace.js';
 import { createCompositionClient } from './map-composition.js';
+import { fallbackComposition } from './map-composition-contract.js';
 import { createMapLayerManager, orderWorkspaceMapLayers } from './map-layer-manager.js';
 import { createLayerDocument } from './map-layer-document.js';
 import { describeWorkspaceLayer, geometryExtent, layerData, tableRecords, csvForRecords } from './map-layer-data.js';
 import { createMapSearch } from './map-search.js';
 import { CONFIG } from './config.js';
+import { matchingMetroBundle } from './metro-upload-group.js';
 
 const fileKey = file => `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
@@ -44,9 +46,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
   let selectedSignature = ''; let compositionController; let currentStyle = 'map4d'; let statusTimer; let styleReady = false;
   const mounted = new Set();
   const search = createMapSearch({ map, minFilteredObjects: CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS,
-    onSelect(feature, center, entry) {
-      const item = runtimes.get(entry?.layerId);
-      if (item) { selectLayer(entry.layerId); item.api.openPopup(feature, center); }
+    onSelect(_feature, _center, entry) {
+      if (!runtimes.has(entry?.layerId)) return;
+      closePopups();
+      selectLayer(entry.layerId);
     }
   });
   const status = (message, hide = false) => {
@@ -69,12 +72,14 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
     const actions = panel.querySelector('.builder-actions'); if (actions) actions.hidden = true;
     const province = dom.elements.get('province-filter-field'); if (province) panel.insertBefore(province, panel.children[2]);
     const heading = textNode('div', '', 'layer-tabs-heading');
+    const layerCount = textNode('span', '', 'map-layer-count');
     const tabs = textNode('div', '', 'map-layer-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', 'Lớp dữ liệu');
     const hint = textNode('p', 'Các lớp cùng hiển thị trên bản đồ; chọn tab để chỉnh cấu hình từng lớp.', 'map-layer-hint');
     const section = dom.elements.get('ai-data-filters'); section.insertBefore(heading, dom.elements.get('ai-filter-controls'));
-    heading.append(tabs, hint); heading.hidden = true;
+    heading.append(layerCount, tabs, hint); heading.hidden = true;
     const metricHeading = textNode('b', '', 'layer-overlay-title'); metric.prepend(metricHeading);
     const legendHeading = textNode('b', '', 'layer-overlay-title'); legends.prepend(legendHeading); legends.className = 'layer-legends';
+    const genericLegend = textNode('div', '', 'point-legend'); genericLegend.hidden = true; legends.append(genericLegend);
     const manager = createMapLayerManager(map, id, { onChange: schedule, onInteract: selectLayer, onPopup: owner => closePopups(owner) });
     metric.dataset.layerId = id;
     const api = createRuntime({ id, document: dom.document, map: manager.map, nativeMap: map, maplibregl: manager.popupLibrary(globalThis.maplibregl), preparsedResults,
@@ -82,7 +87,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
       onChange: schedule, onVisibility(value) {
         const group = activeMapGroup(workspace); if (!group) return;
         group.visible = value;
-        for (const key of group.layerIds) runtimes.get(key)?.manager.setVisible(value);
+        for (const key of group.layerIds) {
+          runtimes.get(key)?.api.setVisible(value);
+          runtimes.get(key)?.manager.setVisible(value);
+        }
         if (!value) closePopups();
         schedule();
       },
@@ -90,7 +98,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
       exportData(state) { downloadRecords(state, workspace.layersById[id]?.title || 'Dữ liệu'); return true; }
     });
     api.initialize();
-    const item = { id, api, manager, dom, panel, metric, legends, table, chart, heading, tabs, metricHeading, legendHeading, tableSnapshot: null, preparsedResults };
+    const item = { id, api, manager, dom, panel, metric, legends, table, chart, heading, tabs, layerCount, metricHeading, legendHeading, genericLegend, tableSnapshot: null, preparsedResults };
     for (const node of [panel, metric, legends, table, chart]) node.hidden = true;
     return item;
   }
@@ -133,7 +141,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
     const signature = JSON.stringify(workspace.groupOrder.map(id => [id, workspace.groupsById[id].title, workspace.groupsById[id].layerIds.length]));
     if (signature !== selectedSignature) {
       selector.replaceChildren(...workspace.groupOrder.map(id => {
-        const value = workspace.groupsById[id]; return Object.assign(document.createElement('option'), { value: id, textContent: `${value.title}${value.layerIds.length > 1 ? ` · ${value.layerIds.length} lớp` : ''}` });
+        const value = workspace.groupsById[id];
+        const duplicate = workspace.groupOrder.some(key => key !== id && workspace.groupsById[key].title === value.title);
+        const suffix = duplicate ? ` (${runtimes.get(value.layerIds[0]).api.state.fileName || workspace.groupOrder.indexOf(id) + 1})` : '';
+        return Object.assign(document.createElement('option'), { value: id, textContent: `${value.title}${suffix}${value.layerIds.length > 1 ? ` · ${value.layerIds.length} lớp` : ''}` });
       }));
       if (!workspace.groupOrder.length) selector.append(Object.assign(document.createElement('option'), { textContent: 'Chưa có bản đồ', value: '' }));
       selectedSignature = signature;
@@ -161,6 +172,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
       item.legendHeading.hidden = (group?.layerIds.length || 0) < 2;
       item.metricHeading.textContent = workspace.layersById[id]?.title || '';
       item.legendHeading.textContent = workspace.layersById[id]?.title || '';
+      const otherLegend = [...item.legends.children].some(node => node !== item.genericLegend && node.tagName === 'DIV' && !node.hidden);
+      const count = layerData(item.api.state)?.features?.length || 0;
+      item.genericLegend.hidden = otherLegend || !count;
+      if (!item.genericLegend.hidden) item.genericLegend.textContent = `${workspace.layersById[id]?.title} · ${count.toLocaleString('vi-VN')} đối tượng`;
       item.chart.hidden = true;
       item.table.hidden = !active || !tableShown;
       const toggle = item.dom.elements.get('show-map-layers'); toggle.checked = group?.visible ?? true;
@@ -189,9 +204,13 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
     const key = JSON.stringify([group.id, group.layerIds, group.activeLayerId, group.layerIds.map(id => runtimes.get(id).api.state.mapType)]);
     if (item.tabs.dataset.signature === key) return;
     item.tabs.dataset.signature = key;
+    item.layerCount.textContent = `${group.layerIds.length} lớp`;
     item.tabs.replaceChildren(...group.layerIds.map(id => {
       const member = workspace.layersById[id]; const type = runtimes.get(id).api.state.mapType;
-      const button = textNode('button', `${type === 'point' ? '●' : type === 'line' ? '╱' : '▧'} ${member.title}`, 'map-layer-tab');
+      const duplicateTitle = group.layerIds.some(key => key !== id && workspace.layersById[key].title === member.title);
+      const label = `${member.title}${duplicateTitle ? ` · ${runtimes.get(id).api.state.fileName || id}` : ''}`;
+      const button = textNode('button', `${type === 'point' ? '●' : type === 'line' ? '╱' : '▧'} ${label}`, 'map-layer-tab');
+      button.title = label;
       button.type = 'button'; button.id = `${item.id}-tab-${id}`; button.dataset.layerId = id;
       button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(group.activeLayerId === id));
       button.setAttribute('aria-controls', `${id}--ai-filter-controls`); button.tabIndex = group.activeLayerId === id ? 0 : -1;
@@ -267,7 +286,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
       const result = await parser.readSpatialFile(upload.file, { sheetName, signal: upload.controller.signal });
       return { ...result, metroRole: result.kind === 'metro-part' ? result.role : result.data ? parser.metroPartRole(result.data, upload.file.name) : null };
     }
-    finally { dom.dispose(); }
+    finally { parser.dispose(); dom.dispose(); }
   }
 
   async function processUploads(entries) {
@@ -284,8 +303,9 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
       }
     }));
     const newIds = [];
-    const structuralMetro = results.some(entry => ['hexagons', 'travel_times'].includes(entry?.result?.metroRole));
-    for (const entry of results.filter(Boolean)) {
+    const registrationOrder = results.filter(Boolean).sort((a, b) =>
+      Number(['hexagons', 'travel_times'].includes(b.result?.metroRole)) - Number(['hexagons', 'travel_times'].includes(a.result?.metroRole)));
+    for (const entry of registrationOrder) {
       const { id, upload, result, error } = entry;
       if (!uploads.has(id)) continue;
       if (error) {
@@ -295,14 +315,16 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
       let item;
       let reusedMetro = false;
       try {
-        const metro = result.metroRole && (structuralMetro || [...runtimes.values()].some(value => value.metroBundle));
+        const matchedBundle = result.metroRole ? matchingMetroBundle([...runtimes.values()], result) : null;
+        const metro = result.metroRole && (['hexagons', 'travel_times'].includes(result.metroRole) || matchedBundle);
         if (metro) {
-          item = [...runtimes.values()].find(value => value.metroBundle);
+          item = matchedBundle;
           if (item) {
             reusedMetro = true; item.preparsedResults.set(upload.file, result);
             await item.api.processSpatialFiles([upload.file]);
             const layer = workspace.layersById[item.id];
             layer.descriptor = describeWorkspaceLayer(item.id, item.api.state, layer.title);
+            workspace.datasetsById[layer.datasetId] = { kind: 'metro-bundle', parts: item.api.state.metroParts, data: item.api.state.metroData };
             workspace.revision++;
             upload.layerId = item.id; upload.status = 'Sẵn sàng'; upload.message = layer.title;
             renderUploads(); continue;
@@ -310,13 +332,15 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
         }
         const runtimeId = `layer-${workspace.sequence + 1}`;
         item = makeRuntime(runtimeId, new Map([[upload.file, result]]));
+        item.api.state.fileName = upload.file.name;
         if (metro) { item.metroBundle = true; await item.api.processSpatialFiles([upload.file]); }
         else await item.api.load(result, upload.file);
         if (!uploads.has(id)) { item.api.dispose(); item.manager.dispose(); item.dom.dispose(); continue; }
         const state = item.api.state;
         state.spatialAnalysis = result.spatialAnalysis || null;
-        const title = metro ? 'Giao thông Metro' : state.aiDataset?.analysis.datasetTitle || result.spatialAnalysis?.datasetTitle || upload.file.name.replace(/\.[^.]+$/, '');
-        const layer = addWorkspaceLayer(workspace, { dataset: state.aiDataset || result, runtime: item.api, title, fileKey: upload.key,
+        const analysis = state.aiDataset?.analysis || result.spatialAnalysis;
+        const title = metro ? 'Giao thông Metro' : analysis?.source === 'ai' && analysis.datasetTitle ? analysis.datasetTitle : upload.file.name.replace(/\.[^.]+$/, '');
+        const layer = addWorkspaceLayer(workspace, { dataset: metro ? { kind: 'metro-bundle', parts: state.metroParts, data: state.metroData } : state.aiDataset || result, runtime: item.api, title, fileKey: upload.key,
           descriptor: describeWorkspaceLayer(runtimeId, state, title) });
         runtimes.set(layer.id, item);
         sidebars.append(item.panel); metrics.append(item.metric); legendOriginal.append(item.legends); tables.append(item.table);
@@ -337,7 +361,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
     }
     if (pendingIds.length) await compose(pendingIds);
     sync();
-    status(newIds.length ? `Đã thêm ${newIds.length} lớp dữ liệu. Chọn bản đồ hoặc tab để chỉnh cấu hình.` : 'Đã xử lý các file. Kiểm tra trạng thái từng file trong danh sách.');
+    const addedCount = pendingIds.filter(id => workspace.layersById[id]).length;
+    status(addedCount ? `Đã thêm ${addedCount} lớp dữ liệu. Chọn bản đồ hoặc tab để chỉnh cấu hình.` : uploads.size ? 'Đã xử lý các file. Kiểm tra trạng thái từng file trong danh sách.' : 'Đã xóa dữ liệu.');
   }
 
   async function compose(newIds) {
@@ -355,7 +380,9 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
       compositionController?.abort(); compositionController = new AbortController();
       let result;
       try { result = await requestComposition(input, { signal: compositionController.signal }); }
-      catch (error) { if (error.name !== 'AbortError') throw error; }
+      catch (error) {
+        if (error.name !== 'AbortError') result = fallbackComposition(input, `Chưa xác định khả năng kết hợp: ${error.message}. Dữ liệu được giữ thành bản đồ riêng.`);
+      }
       if (!result || !applyWorkspaceComposition(workspace, result, newIds, revision)) {
         const remaining = newIds.filter(id => workspace.layersById[id] && !Object.values(workspace.groupsById).some(group => group.layerIds.includes(id)));
         if (remaining.length) return compose(remaining);
@@ -373,7 +400,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
       keys.add(key);
       const id = `import-${++uploadSequence}`;
       const upload = { id, file, key, controller: new AbortController(), status: 'Đang chờ' };
-      uploads.set(id, upload); entries.push({ id, upload });
+      uploads.set(id, upload); workspace.importsById[id] = upload; entries.push({ id, upload });
     }
     renderUploads(); if (entries.length) enqueue(() => processUploads(entries));
   }
@@ -381,7 +408,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
   async function removeUpload(id) {
     const upload = uploads.get(id); if (!upload) return;
     const previousGroup = workspace.activeGroupId;
-    upload.controller.abort(); uploads.delete(id); keys.delete(upload.key);
+    upload.controller.abort(); uploads.delete(id); delete workspace.importsById[id]; keys.delete(upload.key);
     if (upload.layerId) {
       const item = runtimes.get(upload.layerId);
       if (item.metroBundle && [...uploads.values()].some(other => other.layerId === upload.layerId)) {
@@ -389,12 +416,14 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
         if (file) await item.api.removeUploadedFile(file.id);
         item.preparsedResults.delete(upload.file);
         const layer = workspace.layersById[item.id]; layer.descriptor = describeWorkspaceLayer(item.id, item.api.state, layer.title);
+        workspace.datasetsById[layer.datasetId] = { kind: 'metro-bundle', parts: item.api.state.metroParts, data: item.api.state.metroData };
         workspace.revision++; renderUploads(); sync(); return;
       }
       item.api.dispose(); item.manager.dispose(); item.dom.dispose();
       runtimes.delete(upload.layerId); mounted.delete(upload.layerId); removeWorkspaceLayer(workspace, upload.layerId);
     }
     renderUploads(); sync();
+    if (!Object.keys(workspace.layersById).length) compositionController?.abort();
     if (workspace.activeGroupId !== previousGroup && activeMapGroup(workspace)) {
       const group = activeMapGroup(workspace);
       if (group.viewport) map.jumpTo(group.viewport); else fitGroup(group);
@@ -447,7 +476,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
   });
   $('basemap-options').addEventListener('click', event => {
     const option = event.target.closest('.basemap-option'); if (!option || !styles[option.dataset.mapStyle]) return;
-    if (!styleReady || currentStyle === option.dataset.mapStyle) return;
+    if (styleReady && currentStyle === option.dataset.mapStyle) return;
     currentStyle = option.dataset.mapStyle; styleReady = false; map.setStyle(styles[currentStyle], { diff: false });
     document.querySelectorAll('.basemap-option').forEach(button => { button.classList.toggle('active', button.dataset.mapStyle === currentStyle); button.setAttribute('aria-pressed', String(button.dataset.mapStyle === currentStyle)); });
     $('basemap-selection').replaceChildren(document.createTextNode('Nền đang dùng: '), textNode('b', styleLabels[currentStyle]));
@@ -456,7 +485,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels }) 
   $('zoom-in').addEventListener('click', () => map.zoomIn()); $('zoom-out').addEventListener('click', () => map.zoomOut());
   $('fullscreen').addEventListener('click', () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector('.map-panel').requestFullscreen());
   map.on('style.load', () => { styleReady = true; mounted.clear(); readyResolve(); sync(); search.refreshHighlight(); });
-  map.on('error', event => console.warn('MapLibre:', event.error?.message));
+  map.on('error', event => {
+    console.warn('MapLibre:', event.error?.message);
+    if (!styleReady) status('Chưa tải được nền bản đồ. Bạn có thể chọn nền khác để thử lại.');
+  });
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => map.resize()).observe($('map'));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) map.resize(); });
   sync();

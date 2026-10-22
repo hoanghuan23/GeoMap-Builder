@@ -35,6 +35,8 @@ test('extent and composition descriptors avoid raw values; CSV exports real fiel
   assert.equal(geometryExtent({ type: 'Point', coordinates: [999, 21] }), null);
   const descriptor = describeWorkspaceLayer('layer', { mapType: 'polygon', sourceBoundary: data, boundary: data, spatialAnalysis: pipeline.analysis }, 'Thời tiết');
   assert.equal(descriptor.available, true);
+  assert.equal(describeWorkspaceLayer('invalid', { mapType: null, aiDataset: { analysis: pipeline.analysis,
+    suggestions: [{ id: 'broken', available: false, chartType: 'choropleth' }], selectedSuggestionId: 'broken', boundaries: data } }, 'Chưa ghép được').available, false);
   assert.equal(descriptor.geometry, undefined);
   assert.equal(descriptor.records, undefined);
   assert.equal(descriptor.columns.some(column => 'samples' in column), false);

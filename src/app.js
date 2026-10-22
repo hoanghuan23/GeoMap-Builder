@@ -498,6 +498,7 @@ function addMapLayers() {
   map.on("click", "polygon-fill", event => {
     if (state.metroData) showMetroComparison(event);
     else if (state.aiDataset) showAiPolygonDetails(event);
+    else if (event.features?.[0]) showUploadedFeaturePopup(event.features[0], { name: state.fileName || "Vùng dữ liệu", role: "area" }, event.lngLat);
   });
   map.on("click", "metro-stations", event => {
     const feature = event.features?.[0]; if (!feature) return;
@@ -506,7 +507,8 @@ function addMapLayers() {
   });
   map.on("click", "data-lines", event => {
     const suggestion = activeRoadSuggestion(); const feature = event.features?.[0];
-    if (!suggestion || !feature) return;
+    if (!feature) return;
+    if (!suggestion) { showUploadedFeaturePopup(feature, { name: state.fileName || "Tuyến dữ liệu", role: "line" }, event.lngLat); return; }
     openMapPopup(feature, event.lngLat, "data-lines");
   });
   for (const id of ["polygon-fill", "metro-stations", "data-lines"]) {
@@ -536,8 +538,7 @@ function addMapLayers() {
       openMapPopup(feature, event.lngLat, "point-marker");
       return;
     }
-    const rows = Object.entries(feature.properties || {}).map(([key, value]) => `<b>${key}:</b> ${String(value)}`).join("<br>");
-    new maplibregl.Popup({ offset: 7 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
+    showUploadedFeaturePopup(feature, { name: state.fileName || "Điểm dữ liệu", role: "point" }, event.lngLat || feature.geometry.coordinates);
   });
   map.on("mouseenter", "point-marker", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "point-marker", () => map.getCanvas().style.cursor = "");
   map.on("click", event => {
@@ -949,14 +950,15 @@ function aiWeatherPopupContent(feature) {
   const { recommendation } = state.aiDataset;
   const columns = state.aiDataset.analysis?.columns || [];
   const scale = activePolygonLegendScale();
-  const displayedColumns = columns.filter(column => column.name !== state.aiDataset.nativeGeometry?.identityField).map(column => {
+  const displayedColumns = columns.filter(column => !column.name.startsWith("__")).map(column => {
     if (column.name === scale?.field) return { ...column, unit: scale.unit,
       labelVi: scale.aggregation === "count" ? "Số bản ghi" : column.labelVi };
     return column.role === "time" && recommendation.filters?.some(filter => filter.field === column.name && filter.control === "datetime-select")
       ? { ...column, granularity: "datetime" } : column;
   });
   return createAiPopupContent(document, feature, displayedColumns,
-    state.aiDataset.nativeTitleField || (activeMapPopupSuggestion()?.chartType === "point" ? pointTitleField(columns) : recommendation.geometry?.field));
+    state.aiDataset.nativeTitleField || (activeMapPopupSuggestion()?.chartType === "point"
+      ? pointTitleField(displayedColumns) || state.aiDataset.analysis.search_fields?.[0] : recommendation.geometry?.field));
 }
 
 function showAiPolygonDetails(event) {

@@ -6,6 +6,8 @@ import { fallbackMapRecommendation } from "../src/ai-data-analysis.js";
 import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
 import { normalizeTabularRecords } from "../src/tabular-data.js";
 import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { normalizeCompositionInput, normalizeCompositionResult } from "../src/map-composition-contract.js";
+import { createMapWorkspace, addWorkspaceLayer, createWorkspaceGroup, applyWorkspaceComposition } from "../src/map-workspace.js";
 import { countryFeature, createCountryWeatherWorkbook, WEATHER_COUNTRIES } from "./fixtures/country-weather-fixture.js";
 
 function countryData() {
@@ -106,7 +108,7 @@ test("country spreadsheet searches only uploaded countries, including accents, a
   assert.deepEqual(searchDataIndex(index, "01/09/2026"), [], "dates are not place names");
 });
 
-test("search stays hidden until searchable analyzed data exists and opens the uploaded feature", t => {
+test("search stays hidden until searchable analyzed data exists and focuses the uploaded feature", t => {
   const { controller, get, search, camera, selected } = harness(t);
   assert.equal(get("map-search").hidden, true);
   assert.equal(get("map-search-input").disabled, true);
@@ -195,6 +197,45 @@ function storeData(count = 6) {
     titleField: "name", chartType: "point", sourceRecords: records,
     search_bar: true, search_fields: ["name", "city"]
   };
+}
+
+for (const sequential of [false, true]) {
+  test(`composition preserves searchable regions alongside points (${sequential ? 'sequential' : 'batch'} import)`, t => {
+    const { controller, search, selected } = harness(t);
+    const workspace = createMapWorkspace();
+    const areas = addWorkspaceLayer(workspace, { title: 'Dữ liệu theo vùng', dataset: {} });
+    const oldGroup = sequential ? createWorkspaceGroup(workspace, [areas.id], areas.title) : null;
+    const points = addWorkspaceLayer(workspace, { title: 'Dữ liệu điểm', dataset: {} });
+    const names = ['Hà Nội', 'Hải Phòng', 'Hà Tĩnh', 'Hưng Yên', 'Ninh Bình', 'Cà Mau'];
+    const polygon = countryData().data.features[0].geometry;
+    const areaSearch = { data: { type: 'FeatureCollection', features: names.map(region => ({ type: 'Feature', geometry: polygon, properties: { region } })) },
+      columns: [{ name: 'region', role: 'geo', geoLevel: 'admin1' }], titleField: 'region', chartType: 'choropleth',
+      search_bar: true, search_fields: ['region'] };
+    const pointSearch = storeData();
+    const layerSearch = [[areas, areaSearch], [points, pointSearch]];
+    const snapshot = normalizeCompositionInput({ workspaceRevision: workspace.revision,
+      groups: oldGroup ? [{ id: oldGroup.id, title: oldGroup.title, layerIds: oldGroup.layerIds }] : [],
+      newLayerIds: oldGroup ? [points.id] : [areas.id, points.id],
+      layers: layerSearch.map(([layer, config]) => ({ ...config, id: layer.id, title: layer.title, available: true })) });
+    // The composition model omits the area layer, despite its valid analysis.
+    const output = normalizeCompositionResult({ schemaVersion: 1, searchLayerIds: [points.id],
+      decisions: snapshot.newLayerIds.map(layerId => ({ layerId, action: oldGroup ? 'append_to_group' : 'create_group',
+        targetGroupId: oldGroup?.id || null, newGroupKey: oldGroup ? null : 'combined',
+        groupTitle: 'Vùng và điểm', confidence: .9, reason: 'Có ích khi xem chung.' })) }, snapshot);
+    applyWorkspaceComposition(workspace, output, snapshot.newLayerIds, snapshot.workspaceRevision);
+    controller.setData({ layers: layerSearch.filter(([layer]) => workspace.layersById[layer.id].searchEnabled)
+      .map(([layer, config]) => ({ ...config, layerId: layer.id, layerTitle: layer.title })) });
+    const matches = search('ha noi');
+    const areaOption = matches.find(option => option.children[1].children[0].textContent === 'Hà Nội');
+    assert.ok(areaOption, 'an enabled area layer must remain searchable after composition');
+    areaOption.handlers.click();
+    assert.equal(selected.at(-1)[2].layerId, areas.id);
+    assert.equal(selected.at(-1)[0].geometry.type, 'Polygon');
+    const pointOption = search('Cửa hàng 1')[0];
+    pointOption.handlers.click();
+    assert.equal(selected.at(-1)[2].layerId, points.id);
+    assert.equal(selected.at(-1)[0].geometry.type, 'Point');
+  });
 }
 
 test("AI selects the searchable columns and can enable fewer than 30 objects or disable valid fields", t => {

@@ -26,7 +26,8 @@ export function layerData(state) {
   if (state.mapType === 'point' || state.mapType === 'heatmap') return state.pointData;
   if (state.mapType === 'line') return state.lineData;
   if (state.mapType === 'h3' || state.regionHexEnabled) return state.h3Data;
-  return state.boundary || state.sourceBoundary;
+  return state.boundary || state.sourceBoundary || (state.uploadLayers?.length ? { type: 'FeatureCollection',
+    features: state.uploadLayers.flatMap(layer => asFeatureCollection(layer.data).features) } : null);
 }
 
 export function describeWorkspaceLayer(id, state, title) {
@@ -41,7 +42,8 @@ export function describeWorkspaceLayer(id, state, title) {
   ];
   const time = columns.find(column => column.role === 'time');
   return { id, title, grain: analysis?.grain || 'Đối tượng không gian từ geometry có sẵn', chartType: suggestion?.chartType || state.mapType,
-    available: Boolean(geometryExtent(data)), geometryKinds: geometryKinds(data), extent: geometryExtent(data), columns,
+    available: Boolean(geometryExtent(data)) && (!dataset || suggestion?.available === true) && Boolean(state.mapType || state.uploadLayers?.length),
+    geometryKinds: geometryKinds(data), extent: geometryExtent(data), columns,
     time: time ? { field: time.name, granularity: time.granularity || '', count: dataset?.profile?.columns?.find(column => column.name === time.name)?.uniqueCount || 0 } : null,
     search_bar: analysis?.search_bar !== false, search_fields: analysis?.search_fields || columns.filter(column => ['text', 'geo', 'id', 'category'].includes(column.role)).slice(0, 3).map(column => column.name) };
 }

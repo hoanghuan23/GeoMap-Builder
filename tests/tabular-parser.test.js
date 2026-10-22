@@ -5,6 +5,18 @@ import * as XLSX from "xlsx";
 import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
 import { createWeather34Workbook, WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
 
+test("CSV UTF-8 không BOM giữ đúng header và tên địa danh tiếng Việt", () => {
+  const buffer = new TextEncoder().encode('Tỉnh/thành phố,Nhiệt độ\nHà Nội,25\nBắc Ninh,26').buffer;
+  const parsed = parseSpreadsheetBuffer(buffer, { extension: 'csv', includeSamples: false });
+  assert.deepEqual(parsed.records, [{ 'Tỉnh/thành phố': 'Hà Nội', 'Nhiệt độ': '25' }, { 'Tỉnh/thành phố': 'Bắc Ninh', 'Nhiệt độ': '26' }]);
+});
+
+test("CSV có BOM UTF-16 tiếp tục được đọc từ byte gốc", () => {
+  const buffer = Buffer.from('\ufeffTỉnh,Nhiệt độ\r\nHà Nội,25', 'utf16le');
+  const parsed = parseSpreadsheetBuffer(buffer, { extension: 'csv', includeSamples: false });
+  assert.deepEqual(parsed.records, [{ 'Tỉnh': 'Hà Nội', 'Nhiệt độ': '25' }]);
+});
+
 test("workbook nhiều sheet yêu cầu chọn trước khi trả records", () => {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([{ region: "A", value: 1 }]), "Data");
