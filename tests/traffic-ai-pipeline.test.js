@@ -22,7 +22,8 @@ function uploadHarness() {
   });
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
     .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "")
-    .replace(/\binit\(\);\s*$/, "");
+    .replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = {};\n")
+    .replace(/\/\/ Runtime public API[\s\S]*$/, "");
   vm.runInContext(source, context);
   return context;
 }

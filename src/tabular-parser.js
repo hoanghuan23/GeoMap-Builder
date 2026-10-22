@@ -11,7 +11,14 @@ function assertStandardHeaders(records) {
 export function parseSpreadsheetBuffer(buffer, { extension = "xlsx", sheetName = null, includeSamples = true } = {}) {
   // Keep spreadsheet dates as serials so normalization uses the documented
   // 1899-12-30 epoch consistently across browser time zones.
-  const workbook = XLSX.read(buffer, { type: "array", cellDates: false, raw: true });
+  let input = buffer; let inputType = "array";
+  if (extension.toLowerCase() === "csv") {
+    // UTF-8 CSVs without a BOM otherwise fall back to a single-byte encoding.
+    // Keep SheetJS's BOM/legacy handling for byte sequences that are not UTF-8.
+    try { input = new TextDecoder("utf-8", { fatal: true }).decode(buffer); inputType = "string"; }
+    catch { /* Use the original bytes, including UTF-16 BOMs. */ }
+  }
+  const workbook = XLSX.read(input, { type: inputType, cellDates: false, raw: true });
   const sheetNames = workbook.SheetNames || [];
   if (!sheetNames.length) throw new Error("Workbook không có sheet dữ liệu.");
   if (!sheetName && sheetNames.length > 1) return { needsSheet: true, sheetNames };

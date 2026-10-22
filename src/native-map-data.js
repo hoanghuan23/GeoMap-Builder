@@ -1,0 +1,40 @@
+import { asFeatureCollection } from './map-layer-data.js';
+import { geometryKinds } from './geojson-layers.js';
+import { applyPipelineFilters } from './ai-chart-pipeline.js';
+
+/** Supplied geometry is authoritative. Internal identities are added only after AI analysis. */
+export function nativeMapDataset(data, pipeline, fileName) {
+  const kinds = geometryKinds(data);
+  if (kinds.length !== 1 || !['area', 'line'].includes(kinds[0])) return null;
+  const features = asFeatureCollection(data).features;
+  const fields = new Set(pipeline.analysis.columns.map(column => column.name));
+  let identityField = '__native_feature_key'; while (fields.has(identityField)) identityField += '_';
+  const titleField = pipeline.analysis.search_fields?.[0] || pipeline.analysis.columns.find(column => ['geo', 'text', 'category'].includes(column.role))?.name;
+  const columns = [...pipeline.analysis.columns, { name: identityField, role: 'id', source: 'rule' }];
+  const identities = new Map();
+  const records = pipeline.records.map((record, index) => {
+    const feature = features[index];
+    const key = feature.id != null ? `id:${feature.id}` : JSON.stringify([feature.geometry, titleField ? record[titleField] : null]);
+    if (!identities.has(key)) identities.set(key, String(identities.size + 1));
+    return { ...record, [identityField]: identities.get(key) };
+  });
+  const chartType = kinds[0] === 'area' ? 'choropleth' : 'map_line';
+  const supplied = pipeline.analysis.suggestions.find(suggestion => suggestion.chartType === chartType);
+  const measure = columns.find(column => column.role === 'measure');
+  const suggestion = { ...(supplied || { id: 'native-geometry', chartType, title: chartType === 'choropleth' ? 'Bản đồ Polygon' : 'Bản đồ Line',
+    agg: measure?.aggDefault || null, confidence: 0, reason: 'Sử dụng geometry có sẵn trong dữ liệu.', source: 'rule', popupSuggestions: [], metricButtons: [], legend: null }),
+    bindings: { ...supplied?.bindings, lat: null, lng: null, region: identityField, nativeIdentity: identityField, value: supplied?.bindings.value || measure?.name || null },
+    available: true, feasibilityScore: 1, effectiveConfidence: supplied?.confidence || 0, nativeGeometry: true };
+  return { ...pipeline, records, analysis: { ...pipeline.analysis, columns }, fileName, suggestions: [suggestion], selectedSuggestionId: suggestion.id,
+    nativeGeometry: { features, records, identityField, titleField }, nativeTitleField: titleField,
+    popupSelections: {}, filters: {}, geoAliases: {}, geoSelections: {}, roadColorOverrides: {}, recommendation: null };
+}
+
+export function nativeMapView(dataset, filters) {
+  const { features, records, titleField, identityField } = dataset.nativeGeometry;
+  const selected = new Set(applyPipelineFilters(records, filters));
+  return { type: 'FeatureCollection', features: features.flatMap((feature, index) => selected.has(records[index]) ? [{ ...feature,
+    id: records[index][identityField], properties: { ...records[index], __data_location: records[index][identityField],
+      __location: String(records[index][titleField] || feature.id || index + 1) } }] : []),
+    stats: { totalRows: records.length, matchedRows: selected.size } };
+}

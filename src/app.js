@@ -1,3 +1,5 @@
+import { startMapWorkspace } from "./map-workspace-ui.js";
+import { nativeMapDataset, nativeMapView } from "./native-map-data.js";
 import { CONFIG } from "./config.js";
 import { geoJSONToCells, geoJSONToH3FeatureCollection, recordsToAggregatedH3, recordsToPointGeoJSON } from "./h3-utils.js";
 import { buildRegionHexGrid } from "./region-hex-grid.js";
@@ -45,7 +47,6 @@ import { joinRoadRecordsByArea, roadAreaField, ROAD_NETWORKS, roadMapStyle, road
 import { roadNetworkUrl } from "./road-network-assets.js";
 import { buildCoordinateLines, isCoordinateLine, pointTitleField } from "./coordinate-data.js";
 
-const $ = id => document.getElementById(id);
 const EMPTY_FEATURE_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
 const DEFAULT_ROAD_DISPLAY_STYLE = Object.freeze({ width: 3, opacity: 1, showLegend: true });
 const MAP_STYLES = Object.freeze({
@@ -101,6 +102,28 @@ const SUPPORTED_VIEW_TYPES = Object.freeze([
   { label: "Bản đồ Line", icon: "line", kind: "map" },
   { label: "Bản đồ Point", icon: "point", kind: "map" }
 ]);
+
+function renderSupportedMapCatalog(document) {
+  const grid = document.getElementById("supported-chart-grid");
+  grid.replaceChildren(...SUPPORTED_VIEW_TYPES.map(type => {
+    const item = document.createElement("div");
+    const icon = document.createElement("span");
+    const label = document.createElement("span");
+    item.className = "supported-chart-type";
+    item.setAttribute("role", "listitem");
+    if (type.kind === "map") renderMapIcon(icon, type.icon);
+    else renderChartIcon(icon, type.icon);
+    label.textContent = type.label;
+    item.append(icon, label);
+    return item;
+  }));
+}
+
+export function createMapLayerRuntime(options) {
+const document = options.document;
+const maplibregl = options.maplibregl || globalThis.maplibregl;
+const $ = id => document.getElementById(id);
+const controlId = control => control.dataset?.controlId || control.id;
 const state = {
   resolution: CONFIG.DEFAULT_RESOLUTION, boundary: null, sourceBoundary: null, h3Data: { type: "FeatureCollection", features: [] },
   page: 1, pageSize: 10, query: "", baselineCount: null,
@@ -204,6 +227,7 @@ function clearChartCanvas() {
 
 function showToast(message) { const el = $("toast"); el.textContent = message; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2800); }
 function setStatus(message, hide = false) {
+  if (options.onStatus) { options.onStatus(message, hide); return; }
   const el = $("status");
   clearTimeout(statusTimer);
   el.textContent = message;
@@ -214,19 +238,7 @@ function setDataPanelVisible(visible) { $("data-panel").hidden = !visible; docum
 function fmt(value, digits = 1) { return Number.isFinite(value) ? value.toFixed(digits) : "--"; }
 
 function renderSupportedChartCatalog() {
-  const grid = $("supported-chart-grid");
-  grid.replaceChildren(...SUPPORTED_VIEW_TYPES.map(type => {
-    const item = document.createElement("div");
-    const icon = document.createElement("span");
-    const label = document.createElement("span");
-    item.className = "supported-chart-type";
-    item.setAttribute("role", "listitem");
-    if (type.kind === "map") renderMapIcon(icon, type.icon);
-    else renderChartIcon(icon, type.icon);
-    label.textContent = type.label;
-    item.append(icon, label);
-    return item;
-  }));
+  renderSupportedMapCatalog(document);
 }
 
 function showSupportedChartCatalog(visible) {
@@ -374,7 +386,9 @@ function renderWeatherLegend(resolvedScale = activePolygonLegendScale()) {
     if (item.position != null) { label.style.left = `${item.position}%`; label.style.top = `${item.row * 14}px`; }
     return label;
   }));
-  $("weather-legend-note").textContent = isRegionHexMode() ? `Dữ liệu tải lên · H3 res ${state.regionHexResolution}` : state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon";
+  const time = state.aiDataset.analysis.columns.find(item => item.role === "time");
+  const period = time && state.aiDataset.filters?.[time.name] ? formatTimeValue(state.aiDataset.filters[time.name], time) : "";
+  $("weather-legend-note").textContent = [period, isRegionHexMode() ? `Dữ liệu tải lên · H3 res ${state.regionHexResolution}` : state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon"].filter(Boolean).join(" · ");
 }
 
 function applyStyle() {
@@ -416,6 +430,7 @@ function applyStyle() {
   }
   applyMapLayerVisibility(resolvedScale);
   renderMetroLegend();
+  options.onChange?.();
 }
 
 function applyMapLayerVisibility(resolvedScale = activePolygonLegendScale()) {
@@ -449,6 +464,7 @@ function applyMapLayerVisibility(resolvedScale = activePolygonLegendScale()) {
   renderPointLegend();
   renderRoadLegend();
   if (state.mapType !== "point" || !showLayers) { pointPopup?.remove(); pointPopup = null; }
+  options.onChange?.();
 }
 
 function addMapLayers() {
@@ -487,6 +503,7 @@ function addMapLayers() {
   map.on("click", "polygon-fill", event => {
     if (state.metroData) showMetroComparison(event);
     else if (state.aiDataset) showAiPolygonDetails(event);
+    else if (event.features?.[0]) showUploadedFeaturePopup(event.features[0], { name: state.fileName || "Vùng dữ liệu", role: "area" }, event.lngLat);
   });
   map.on("click", "metro-stations", event => {
     const feature = event.features?.[0]; if (!feature) return;
@@ -495,7 +512,8 @@ function addMapLayers() {
   });
   map.on("click", "data-lines", event => {
     const suggestion = activeRoadSuggestion(); const feature = event.features?.[0];
-    if (!suggestion || !feature) return;
+    if (!feature) return;
+    if (!suggestion) { showUploadedFeaturePopup(feature, { name: state.fileName || "Tuyến dữ liệu", role: "line" }, event.lngLat); return; }
     openMapPopup(feature, event.lngLat, "data-lines");
   });
   for (const id of ["polygon-fill", "metro-stations", "data-lines"]) {
@@ -525,8 +543,7 @@ function addMapLayers() {
       openMapPopup(feature, event.lngLat, "point-marker");
       return;
     }
-    const rows = Object.entries(feature.properties || {}).map(([key, value]) => `<b>${key}:</b> ${String(value)}`).join("<br>");
-    new maplibregl.Popup({ offset: 7 }).setLngLat(feature.geometry.coordinates).setHTML(`<div style="font:12px Inter;line-height:1.8">${rows || "Điểm dữ liệu"}</div>`).addTo(map);
+    showUploadedFeaturePopup(feature, { name: state.fileName || "Điểm dữ liệu", role: "point" }, event.lngLat || feature.geometry.coordinates);
   });
   map.on("mouseenter", "point-marker", () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", "point-marker", () => map.getCanvas().style.cursor = "");
   map.on("click", event => {
@@ -938,14 +955,15 @@ function aiWeatherPopupContent(feature) {
   const { recommendation } = state.aiDataset;
   const columns = state.aiDataset.analysis?.columns || [];
   const scale = activePolygonLegendScale();
-  const displayedColumns = columns.map(column => {
+  const displayedColumns = columns.filter(column => !column.name.startsWith("__")).map(column => {
     if (column.name === scale?.field) return { ...column, unit: scale.unit,
       labelVi: scale.aggregation === "count" ? "Số bản ghi" : column.labelVi };
     return column.role === "time" && recommendation.filters?.some(filter => filter.field === column.name && filter.control === "datetime-select")
       ? { ...column, granularity: "datetime" } : column;
   });
   return createAiPopupContent(document, feature, displayedColumns,
-    activeMapPopupSuggestion()?.chartType === "point" ? pointTitleField(columns) : recommendation.geometry?.field);
+    state.aiDataset.nativeTitleField || (activeMapPopupSuggestion()?.chartType === "point"
+      ? pointTitleField(displayedColumns) || state.aiDataset.analysis.search_fields?.[0] : recommendation.geometry?.field));
 }
 
 function showAiPolygonDetails(event) {
@@ -1053,6 +1071,7 @@ function openMapPopup(feature, lngLat, layerId = null) {
     clearMapPopupChart(view);
     if (mapPopupView === view) mapPopupView = null;
   });
+  view.ownerId = options.id;
   if (layerId === "h3-fill") openCellPopup(popup, feature, layerId);
   else popup.setLngLat(lngLat).addTo(map);
   renderMapPopup(view);
@@ -1187,6 +1206,7 @@ function updateDashboard() { renderTable(); }
 
 function filteredFeatures() { const q = state.query.trim().toLowerCase(); return q ? state.h3Data.features.filter(f => f.properties.h3.toLowerCase().includes(q)) : state.h3Data.features; }
 function renderTable() {
+  if (options.renderTable?.(state)) return;
   const all = filteredFeatures(); const pages = Math.max(1, Math.ceil(all.length / state.pageSize)); state.page = Math.min(state.page, pages); const start = (state.page - 1) * state.pageSize; const rows = all.slice(start, start + state.pageSize);
   $("data-body").innerHTML = rows.length ? rows.map((f, i) => { const p = f.properties; return `<tr><td>${start + i + 1}</td><td><b>${p.h3}</b></td><td>${fmt(p.center_lat, 5)}, ${fmt(p.center_lng, 5)}</td><td>•••</td></tr>`; }).join("") : `<tr><td colspan="4" class="empty-row">Không tìm thấy dữ liệu.</td></tr>`;
   const end = Math.min(start + state.pageSize, all.length); $("table-summary").textContent = `Hiển thị ${rows.length} / ${all.length.toLocaleString("vi-VN")} bản ghi`; $("pagination-info").textContent = `${all.length ? start + 1 : 0}–${end} của ${all.length.toLocaleString("vi-VN")}`;
@@ -1639,6 +1659,7 @@ async function parseSpreadsheetUpload(file, options) {
 }
 
 async function readSpatialFile(file, { sheetName = null, signal } = {}) {
+  if (options.preparsedResults?.has(file)) return options.preparsedResults.get(file);
   const extension = file.name.toLowerCase().split(".").pop();
   if (extension === "zip") throw new Error("ZIP/Shapefile sẽ được hỗ trợ ở phiên bản tiếp theo.");
   if (["xlsx", "xls", "csv"].includes(extension)) {
@@ -1668,7 +1689,7 @@ async function readSpatialFile(file, { sheetName = null, signal } = {}) {
   }
   if (typeof parsed?.type === "string") {
     // Metro and transport files retain their independent overlay behavior.
-    const points = !metroPartRole(parsed, file.name) && !transportGeometryKind(file.name, parsed)
+    const points = (options.analyzeSpatialProperties || !metroPartRole(parsed, file.name)) && !transportGeometryKind(file.name, parsed)
       ? pointGeoJSONToRecords(parsed) : null;
     if (points) {
       const profiled = await profileRecordsInWorker(points.records, { includeSamples: Boolean($("ai-include-samples")?.checked), signal });
@@ -1691,7 +1712,20 @@ async function readSpatialFile(file, { sheetName = null, signal } = {}) {
       }
       return { ...result, data: parsed };
     }
-    return { data: parsed, profile: analyzeSpatialData(parsed) };
+    let spatialAnalysis = null; let nativePipeline = null;
+    if (options.analyzeSpatialProperties) {
+      const records = parsed.type === "FeatureCollection" ? parsed.features.map(feature => feature.properties || {}) : parsed.type === "Feature" ? [parsed.properties || {}] : [];
+      if (records.length && records.some(record => Object.keys(record).length)) {
+        const includeSamples = Boolean($("ai-include-samples")?.checked);
+        const profiled = await profileRecordsInWorker(records, { includeSamples, signal });
+        const pipeline = await requestAiDataAnalysis(records, { signal, includeSamples,
+          profile: { ...profiled.profile, spatial: { geometryKinds: geometryKinds(parsed), nativeGeometry: true } },
+          source: { fileName: file.name, extension } });
+        spatialAnalysis = pipeline.analysis;
+        nativePipeline = pipeline;
+      }
+    }
+    return { data: parsed, profile: analyzeSpatialData(parsed), spatialAnalysis, nativePipeline };
   }
   const records = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : null;
   if (records) {
@@ -1742,7 +1776,7 @@ function mapMetricColumns(dataset, suggestion) {
   if (!dataset || !suggestion) return [];
   if (suggestion.chartType === "point") return pointModelFor(suggestion).measures;
   const columns = dataset.analysis.columns.filter(column =>
-    !["point_lat", "point_lng", "h3"].includes(column.geoLevel)
+    !column.name.startsWith("__") && !["point_lat", "point_lng", "h3"].includes(column.geoLevel)
     && (!isCoordinateLine(suggestion) || ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name)));
   return suggestion.chartType === "map_line" ? roadValueColumns(columns, dataset.records, suggestion.bindings.region)
     : columns.filter(column => column.role === "measure");
@@ -1992,6 +2026,7 @@ function createAiSuggestionButton(suggestion) {
   title.className = "ai-suggestion-title"; title.textContent = AI_CHART_REGISTRY[suggestion.chartType].label;
   reason.className = "ai-suggestion-reason"; reason.textContent = suggestion.available ? suggestion.reason : suggestion.unavailableReason;
   score.className = "ai-suggestion-score"; score.textContent = `${Math.round(suggestion.effectiveConfidence * 100)}%${suggestion.effectiveConfidence < .6 ? " ⚠" : ""}`;
+  if (suggestion.nativeGeometry && suggestion.source === "rule") score.hidden = true;
   button.append(icon, title, reason, score);
   return button;
 }
@@ -2090,7 +2125,7 @@ function polygonDimensionChoices(dataset, suggestion) {
   const geoOrder = { country: 0, admin1: 1, admin2: 2 };
   const priority = column => column.role === "geo" ? geoOrder[column.geoLevel] ?? 3 : 4;
   const columns = dataset.analysis.columns.filter(column =>
-    !["point_lat", "point_lng", "h3"].includes(column.geoLevel)
+    !column.name.startsWith("__") && !["point_lat", "point_lng", "h3"].includes(column.geoLevel)
     && (column.role === "geo" || column.role === "category" || column.name === suggestion.bindings.region)
   ).sort((a, b) => priority(a) - priority(b));
   let records = dataset.records;
@@ -2111,7 +2146,7 @@ function populatePolygonFilters(dataset, suggestion) {
   const nodes = buildMapPopupControls(dataset, suggestion);
   const mapControls = document.createElement("div"); mapControls.className = "ai-popup-map-controls";
   const measures = mapMetricColumns(dataset, suggestion);
-  mapControls.append(aiField("Chỉ số tô màu bản đồ", aiSelect("ai-metric-selector",
+  if (measures.length) mapControls.append(aiField("Chỉ số tô màu bản đồ", aiSelect("ai-metric-selector",
     measures.map(column => [column.name, column.labelVi || humanizeField(column.name)]), dataset.recommendation.metricField)));
   const filters = {};
   const times = time ? uniqueTimeValues(dataset.records, time) : [];
@@ -2606,7 +2641,8 @@ function renderPointLegend() {
     row.append(swatch, label, amount); list.append(row);
   }
   const note = document.createElement("small");
-  note.textContent = pointMetricText(view.metric) || "Kích thước điểm thay đổi theo mức thu phóng";
+  note.textContent = [view.selection.time ? formatTimeValue(view.selection.time, popupTimeColumn(state.aiDataset.analysis.columns)) : "",
+    pointMetricText(view.metric) || "Kích thước điểm thay đổi theo mức thu phóng"].filter(Boolean).join(" · ");
   legend.replaceChildren(heading, list, note);
 }
 
@@ -2663,6 +2699,7 @@ function renderRoadLegend() {
 }
 
 function refreshAiRoadMap({ fit = false } = {}) {
+  if (state.aiDataset?.nativeGeometry) return refreshNativeMap({ fit });
   const suggestion = activeRoadSuggestion(); const dataset = state.aiDataset;
   if (isCoordinateLine(suggestion)) return refreshAiCoordinateLine({ fit });
   if (!suggestion || !dataset.roadArea?.field || !dataset.roadArea.networkIds.every(id => dataset.roadGeometries?.[id])) return;
@@ -2844,6 +2881,7 @@ async function selectAiSuggestion(id) {
   }
   if (!suggestion.available) return false;
   state.aiDataset.selectedSuggestionId = id;
+  if (state.aiDataset.nativeGeometry) { activateNativeMap(suggestion); return true; }
   if (["bar", "line"].includes(suggestion.chartType)) {
     cancelAiBoundaryLoad();
     activateAiChartSuggestion(suggestion);
@@ -2857,6 +2895,7 @@ async function selectAiSuggestion(id) {
 
 async function filteredAiBoundary({ fit = false } = {}) {
   if (!state.aiDataset) return;
+  if (state.aiDataset.nativeGeometry) return refreshNativeMap({ fit });
   const selected = state.aiDataset.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
   if (selected?.chartType === "hex_h3") return refreshAiH3({ fit });
   if (selected?.chartType === "map_line") return refreshAiRoadMap({ fit });
@@ -3087,31 +3126,35 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
 }
 
 // Search follows the analyzed fields and the features produced by the active filters.
-function syncDataSearch() {
-  if (!mapSearch) return;
-  if (!state.mapType || state.chartConfig || !state.aiDataset && !state.dataProfile) { mapSearch.setData(); return; }
+function currentDataSearch() {
+  if (!state.mapType || state.chartConfig || !state.aiDataset && !state.dataProfile) { return {}; }
   const suggestion = activeMapPopupSuggestion();
   const data = state.mapType === "point" ? state.pointData
     : state.mapType === "line" ? state.lineData : state.boundary;
-  if (state.aiDataset && !suggestion) { mapSearch.setData(); return; }
+  if (state.aiDataset && !suggestion) { return {}; }
   if (!state.aiDataset && dataSearchProfile !== state.dataProfile) {
     dataSearchProfile = state.dataProfile;
     dataSearchColumns = (state.dataProfile.textFields || [])
       .filter(name => !name.startsWith("__"))
       .map(name => ({ name, role: "text" }));
   }
-  const columns = state.aiDataset?.analysis.columns || dataSearchColumns;
-  const titleField = suggestion?.chartType === "point" ? pointTitleField(columns)
-    : state.aiDataset?.recommendation?.geometry?.field;
+  const columns = state.aiDataset?.analysis.columns || state.spatialAnalysis?.columns || dataSearchColumns;
+  const titleField = state.aiDataset?.nativeTitleField || (suggestion?.chartType === "point" ? pointTitleField(columns)
+    : state.aiDataset?.recommendation?.geometry?.field);
   const dataset = state.aiDataset;
   const pointSelection = dataset?.activePointView?.selection;
   const filtered = dataset ? Object.values(dataset.filters || {}).some(value =>
     Array.isArray(value) ? value.length > 0 : value != null && value !== "")
     || suggestion?.chartType === "point" && Boolean(pointSelection?.mode === "pick" || pointSelection?.time)
     : selectedProvinceNames().length > 0;
-  mapSearch.setData({ data, columns, titleField, chartType: suggestion?.chartType,
-    search_bar: dataset?.analysis.search_bar, search_fields: dataset?.analysis.search_fields,
-    filtered, sourceRecords: dataset?.records });
+  return { data, columns, titleField, chartType: dataset?.nativeGeometry ? undefined : suggestion?.chartType,
+    search_bar: dataset?.analysis.search_bar ?? state.spatialAnalysis?.search_bar, search_fields: dataset?.analysis.search_fields || state.spatialAnalysis?.search_fields,
+    filtered, sourceRecords: dataset?.records };
+}
+
+function syncDataSearch() {
+  const data = currentDataSearch();
+  mapSearch?.setData(data.data ? data : undefined);
 }
 
 function showSheetSelection(file, sheetNames, fileKey = null) {
@@ -3124,12 +3167,47 @@ function showSheetSelection(file, sheetNames, fileKey = null) {
 async function applyReadResult(result, file) {
   if (result.kind === "sheet-selection") return showSheetSelection(file, result.sheetNames);
   registerPrimaryUpload(file, { data: result.data });
+  if (result.nativePipeline) {
+    const dataset = nativeMapDataset(result.data, result.nativePipeline, file.name);
+    if (dataset) {
+      state.aiDataset = dataset; state.dataOrigin = "ai";
+      activateNativeMap(dataset.suggestions[0]); renderUploadedFiles(); return;
+    }
+  }
   if (result.kind === "metro") await replaceMetroData(result.data, file.name);
   else if (result.kind === "ai-pipeline") await replaceAiPipelineData(result.pipeline, file.name);
   else if (result.kind === "ai-map") await replaceAiMapData(result.records, result.recommendation, file.name);
   else if (result.kind === "chart") replaceChartData(result.analysis, file.name);
   else await replaceBoundary(result.data, file.name, result.profile);
   renderUploadedFiles();
+}
+
+function activateNativeMap(suggestion) {
+  const dataset = state.aiDataset;
+  dataset.selectedSuggestionId = suggestion.id;
+  dataset.recommendation = recommendationForSuggestion(suggestion);
+  dataset.recommendation.geometry.provider = "native";
+  dataset.recommendation.filters = dataset.recommendation.filters.filter(filter => !filter.field.startsWith("__"));
+  state.mapType = suggestion.chartType === "choropleth" ? "polygon" : "line";
+  populateAiFilters(dataset); renderAiSuggestionGrid(); refreshNativeMap();
+}
+
+function refreshNativeMap({ fit = false } = {}) {
+  const dataset = state.aiDataset;
+  dataset.filters = selectedAiFilters();
+  const data = nativeMapView(dataset, dataset.filters);
+  state.boundary = data;
+  state.sourceBoundary = { type: "FeatureCollection", features: dataset.nativeGeometry.features };
+  state.dataProfile = analyzeSpatialData(data, { numericFields: [dataset.recommendation.metricField, ...dataset.recommendation.numericFields].filter(Boolean) });
+  if (state.mapType === "line") {
+    state.lineData = data; dataset.roadStyle = aiLineStyle(data, activeRoadSuggestion());
+    map.getSource("line-data")?.setData(data);
+  } else {
+    map.getSource("polygon-data")?.setData(data); map.getSource("vietnam-boundary")?.setData(data);
+  }
+  updateModelSections(); applyStyle(); refreshMapPopup();
+  if (isRegionHexMode()) rebuildRegionHexGrid();
+  if (fit) fitGeoJSON(data);
 }
 
 async function processSpatialFile(file) {
@@ -3400,25 +3478,25 @@ function bindUI() {
       pointColorOverridesFor(suggestion)[control.dataset.value] = control.value;
       control.nextElementSibling.textContent = control.value.toUpperCase();
     } else {
-      const key = { "point-size": "size", "point-opacity": "opacity", "point-border-width": "borderWidth", "point-color": "color", "point-border-color": "borderColor" }[control.id];
+      const key = { "point-size": "size", "point-opacity": "opacity", "point-border-width": "borderWidth", "point-color": "color", "point-border-color": "borderColor" }[controlId(control)];
       if (!key) return;
       state.pointStyle = mergePointStyle({ ...state.pointStyle, [key]: control.type === "color" ? control.value : Number(control.value) });
-      if (control.type === "color") $(`${control.id}-value`).textContent = control.value.toUpperCase();
-      else $(`${control.id}-value`).value = key === "size" ? `${state.pointStyle.size}%` : key === "opacity" ? `${Math.round(state.pointStyle.opacity * 100)}%` : `${state.pointStyle.borderWidth} px`;
+      if (control.type === "color") $(`${controlId(control)}-value`).textContent = control.value.toUpperCase();
+      else $(`${controlId(control)}-value`).value = key === "size" ? `${state.pointStyle.size}%` : key === "opacity" ? `${Math.round(state.pointStyle.opacity * 100)}%` : `${state.pointStyle.borderWidth} px`;
     }
     refreshPointStyle();
   });
   $("point-style-controls").addEventListener("change", event => {
-    const key = { "point-show-border": "showBorder", "point-show-legend": "showLegend" }[event.target.id];
+    const key = { "point-show-border": "showBorder", "point-show-legend": "showLegend" }[controlId(event.target)];
     if (!key) return;
     state.pointStyle = mergePointStyle({ ...state.pointStyle, [key]: event.target.checked });
     refreshPointStyle();
   });
   $("road-style-controls").addEventListener("input", event => {
-    const key = { "road-line-width": "width", "road-line-opacity": "opacity" }[event.target.id];
+    const key = { "road-line-width": "width", "road-line-opacity": "opacity" }[controlId(event.target)];
     if (!key) return;
     state.roadDisplayStyle = { ...state.roadDisplayStyle, [key]: Number(event.target.value) };
-    $(`${event.target.id}-value`).value = key === "width" ? `${event.target.value} px` : `${Math.round(event.target.value * 100)}%`;
+    $(`${controlId(event.target)}-value`).value = key === "width" ? `${event.target.value} px` : `${Math.round(event.target.value * 100)}%`;
     applyStyle();
   });
   $("road-style-controls").addEventListener("change", event => {
@@ -3430,7 +3508,7 @@ function bindUI() {
       applyStyle(); renderRoadStyleControls();
       return;
     }
-    if (event.target.id === "road-show-legend") {
+    if (controlId(event.target) === "road-show-legend") {
       state.roadDisplayStyle = { ...state.roadDisplayStyle, showLegend: event.target.checked };
       renderRoadLegend();
     }
@@ -3757,7 +3835,7 @@ function bindUI() {
     try { await rebuildGrid({ fit: true }); refreshClippedUploadLayers(); } finally { toggle.disabled = false; }
   });
   document.addEventListener("click", event => {
-    if (!event.target.closest("#province-filter")) { $("province-filter-menu").hidden = true; $("province-filter-toggle").setAttribute("aria-expanded", "false"); }
+    if (!event.target.closest("[data-control-id=province-filter], #province-filter")) { $("province-filter-menu").hidden = true; $("province-filter-toggle").setAttribute("aria-expanded", "false"); }
     if (!event.target.closest(".ai-multiselect")) {
       document.querySelectorAll(".ai-multiselect-menu").forEach(menu => { menu.hidden = true; });
       document.querySelectorAll(".ai-multiselect-toggle").forEach(toggle => toggle.setAttribute("aria-expanded", "false"));
@@ -3767,7 +3845,7 @@ function bindUI() {
   for (const [toggleId, controlsId] of [["feature-toggle", "feature-controls"], ["style-toggle", "style-controls"]]) {
     $(toggleId).addEventListener("click", () => { const open = $(toggleId).getAttribute("aria-expanded") === "true"; $(toggleId).setAttribute("aria-expanded", String(!open)); $(controlsId).style.display = open ? "none" : ""; });
   }
-  $("show-map-layers").addEventListener("change", e => { $("show-map-layers-status").textContent = e.target.checked ? "Đang bật" : "Đang tắt"; applyMapLayerVisibility(); });
+  $("show-map-layers").addEventListener("change", e => { options.onVisibility?.(e.target.checked); $("show-map-layers-status").textContent = e.target.checked ? "Đang bật" : "Đang tắt"; applyMapLayerVisibility(); });
   $("reset-config").addEventListener("click", async () => {
     try {
       await resetConfiguration();
@@ -3781,11 +3859,14 @@ function bindUI() {
   $("close-data-panel").addEventListener("click", () => setDataPanelVisible(false));
   $("table-search").addEventListener("input", e => { state.query = e.target.value; state.page = 1; renderTable(); }); $("page-size").addEventListener("change", e => { state.pageSize = Number(e.target.value); state.page = 1; renderTable(); });
   $("prev-page").addEventListener("click", () => { state.page--; renderTable(); }); $("next-page").addEventListener("click", () => { state.page++; renderTable(); }); $("page-buttons").addEventListener("click", e => { if (e.target.dataset.page) { state.page = Number(e.target.dataset.page); renderTable(); } });
-  $("zoom-in").addEventListener("click", () => map.zoomIn()); $("zoom-out").addEventListener("click", () => map.zoomOut()); $("fullscreen").addEventListener("click", () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector(".map-panel").requestFullscreen());
+  if (!options.managedWorkspace) {
+    $("zoom-in").addEventListener("click", () => map.zoomIn()); $("zoom-out").addEventListener("click", () => map.zoomOut()); $("fullscreen").addEventListener("click", () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector(".map-panel").requestFullscreen());
+  }
   $("export-data").addEventListener("click", exportCSV);
 }
 
 function exportCSV() {
+  if (options.exportData?.(state)) return;
   const rows = [["H3 Index", "Latitude", "Longitude"], ...filteredFeatures().map(({ properties: p }) => [p.h3, p.center_lat, p.center_lng])];
   const blob = new Blob(["\ufeff" + rows.map(row => row.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n")], { type: "text/csv;charset=utf-8" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `h3-res-${state.resolution}.csv`; a.click(); URL.revokeObjectURL(a.href);
 }
@@ -3830,4 +3911,33 @@ async function init() {
   });
   map.on("error", event => console.warn("MapLibre:", event.error?.message || event.error));
 }
-init();
+// Runtime public API. Every callback closes over this layer's state and DOM.
+return {
+  state, readSpatialFile, metroPartRole, applyReadResult, processSpatialFiles, removeUploadedFile,
+  closePopup() { closeMapPopup(); cellPopup?.remove(); pointPopup?.remove(); state.metroPopup?.remove(); },
+  openPopup(feature, center) {
+    if (state.aiDataset) openMapPopup(feature, center, state.mapType === "point" ? "point-marker" : state.mapType === "line" ? "data-lines" : "polygon-fill");
+    else if (state.metroData) showMetroComparison({ features: [feature], lngLat: center });
+    else showUploadedFeaturePopup(feature, { name: state.fileName || "Dữ liệu", role: state.mapType }, center);
+  },
+  searchData: currentDataSearch,
+  setVisible(value) { $("show-map-layers").checked = value; $("show-map-layers-status").textContent = value ? "Đang bật" : "Đang tắt"; applyMapLayerVisibility(); },
+  setSamples(value) { $("ai-include-samples").checked = value; },
+  fit() { fitGeoJSON(state.boundary || state.sourceBoundary); },
+  update() { updateModelSections(); applyStyle(); },
+  async load(result, file) { state.fileName = file.name; await applyReadResult(result, file); renderTable(); },
+  initialize() {
+    map = options.map; mapReady = true;
+    mapSearch = { setData() { options.onChange?.(); }, refreshHighlight() {} };
+    renderSupportedChartCatalog(); bindUI(); addMapLayers(); updateDashboard();
+  },
+  dispose() {
+    tabularAbortController?.abort(); cancelAiBoundaryLoad(); regionHexBuildRevision++;
+    clearTimeout(toastTimer); clearTimeout(statusTimer); clearTimeout(layerOrderTimer);
+    closeMapPopup(); cellPopup?.remove(); pointPopup?.remove(); state.metroPopup?.remove(); clearChartCanvas();
+    clearBarStylePanel($("bar-style-controls")); clearPieStylePanel($("bar-style-controls")); clearDataMappingPanel($("data-mapping-controls"));
+  }
+};
+}
+
+if (typeof document !== "undefined") startMapWorkspace(createMapLayerRuntime, { styles: MAP_STYLES, styleLabels: MAP_STYLE_LABELS, renderCatalog: renderSupportedMapCatalog });
