@@ -281,6 +281,25 @@ test("Point initializes its size from the first AI button rather than the first 
   assert.equal(h.get("map-metric-list").children[0].attributes["aria-pressed"], "true");
 });
 
+test("uneven legend labels stay on one row while ticks retain their scale positions", async () => {
+  const h = harness({ thematic: true });
+  h.get("weather-legend").clientWidth = 330;
+  h.run(`
+    const column = dataset.analysis.columns.find(column => column.name === 'temperature');
+    column.unit = 'mm';
+    column.legend = legendFixture({unit:'mm',title:'Lượng mưa',domain:[0,200],
+      stops:[0,10,40,100,200].map((value,index)=>({value,color:['#edf8fb','#b3cde3','#6497b1','#005b96','#03396c'][index]}))});
+    dataset.suggestions[1].legend = column.legend;
+  `);
+  await h.run("filteredAiBoundary()");
+  const labels = h.get("weather-legend-labels").children;
+  assert.deepEqual(labels.map(label => label.textContent), ["0", "10", "40", "100", "200"]);
+  assert.ok(labels.every(label => label.style.top === "0px"));
+  assert.match(labels[1].style.left, /^calc\(5% \+ /);
+  assert.deepEqual(h.get("weather-legend-scale").children.map(tick => tick.style.left), ["0%", "5%", "20%", "50%", "100%"]);
+  assert.deepEqual(Array.from(h.run("activePolygonLegendScale().stops"), stop => stop[0]), [0, 10, 40, 100, 200]);
+});
+
 test("AI semantic/auto legends lock palette controls, follow metrics and filters, and match regional hex fill", async () => {
   const h = harness({ thematic: true });
   h.get("weather-legend").clientWidth = 330;

@@ -1,12 +1,6 @@
-import { normalizeRoadText } from "./congestion-data.js";
+import { normalizeRoadText } from "./text-utils.js";
 import { compareTimeValues, timeValueInfo } from "./time-values.js";
 import { summarizeFeatureProperties } from "./feature-properties.js";
-
-export function coordinateBindings(columns = []) {
-  const lat = columns.find(column => column.geoLevel === "point_lat" || /^(lat|latitude|vi do)$/.test(normalizeRoadText(column.name)));
-  const lng = columns.find(column => column.geoLevel === "point_lng" || /^(lng|lon|longitude|kinh do)$/.test(normalizeRoadText(column.name)));
-  return lat && lng ? { lat: lat.name, lng: lng.name } : null;
-}
 
 export function coordinatePair(record, { lat, lng }) {
   const valid = value => (typeof value === "number" || typeof value === "string" && value.trim() !== "") && Number.isFinite(Number(value));
@@ -33,35 +27,6 @@ export function pointIdentity(properties, columns, bindings) {
 
 export function isCoordinateLine(suggestion) {
   return suggestion?.chartType === "map_line" && Boolean(suggestion.bindings?.lat && suggestion.bindings?.lng);
-}
-
-export function stationaryEntities(records, columns, bindings) {
-  const field = pointEntityField(columns, bindings);
-  if (!field) return false;
-  const groups = new Map();
-  for (const record of records) {
-    const value = record[field]; const pair = coordinatePair(record, bindings);
-    if (value == null || value === "" || !pair) continue;
-    const key = String(value); const group = groups.get(key) || { count: 0, locations: new Set() };
-    group.count++; group.locations.add(JSON.stringify(pair)); groups.set(key, group);
-  }
-  return groups.size > 1 && [...groups.values()].every(group => group.locations.size === 1)
-    && [...groups.values()].some(group => group.count > 1);
-}
-
-export function inferCoordinateLine(records, columns) {
-  const bindings = coordinateBindings(columns);
-  if (!bindings || stationaryEntities(records, columns, bindings)) return null;
-  const group = columns.find(column => ["id", "category", "text"].includes(column.role)
-    && /route|track|trip|tuyen|hanh trinh|vehicle|phuong tien/.test(normalizeRoadText(column.name)));
-  const order = columns.find(column => /^(stt|thu tu|sequence|seq|order|point index|index)$/.test(normalizeRoadText(column.name)))
-    || columns.find(column => column.role === "time");
-  const hasObjects = columns.some(column => ![bindings.lat, bindings.lng, order?.name, group?.name].includes(column.name)
-    && ["id", "category", "text", "geo"].includes(column.role));
-  if (!group && hasObjects) return null;
-  const result = { ...bindings, ...(group ? { region: group.name } : {}), ...(order ? { x: order.name } : {}) };
-  const data = buildCoordinateLines(records, columns, result);
-  return data.features.length && data.stats.coordinateRate >= .7 ? result : null;
 }
 
 export function buildCoordinateLines(records, columns, bindings) {

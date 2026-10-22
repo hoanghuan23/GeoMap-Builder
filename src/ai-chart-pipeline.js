@@ -5,14 +5,11 @@ import { chartTimeValue, compareTimeValues, timeValueInfo, timeValuesAreComparab
 import { AGGREGATION_VALUES, measureAggregation, measureUnit } from "./measure-semantics.js";
 import { normalizePolygonLegendRecommendation, polygonLegendTarget } from "./polygon-legend-contract.js";
 import { latLngToCell } from "h3-js";
-import { roadAreaField, roadNameField, roadValueColumns } from "./road-map-data.js";
-import { normalizeRoadText } from "./congestion-data.js";
-import { buildCoordinateLines, coordinateBindings, inferCoordinateLine, isCoordinateLine, stationaryEntities } from "./coordinate-data.js";
+import { buildCoordinateLines, isCoordinateLine } from "./coordinate-data.js";
 import { administrativeContextFields, geographicLocationName, preferredAdministrativeColumn } from "./geographic-grain.js";
 export { administrativeContextFields, geographicLocationName, preferredAdministrativeColumn } from "./geographic-grain.js";
 
 const AGGREGATIONS = new Set(AGGREGATION_VALUES);
-const TOTAL_HINT = /(tổng|total)/i;
 
 function administrativeGroups(records, columns, field) {
   const geometry = { field, contextFields: administrativeContextFields(columns, field) };
@@ -367,9 +364,7 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
   } else if (isCoordinateLine(suggestion)) {
     const data = buildCoordinateLines(records, columns, suggestion.bindings);
     feasibilityScore = Math.min(feasibilityScore, data.stats.coordinateRate);
-    if (stationaryEntities(records, columns, { lat: suggestion.bindings.lat, lng: suggestion.bindings.lng })) {
-      available = false; unavailableReason = "Các đối tượng cố định lặp lại theo thời gian phù hợp với Bản đồ Point, không tự nối thành tuyến.";
-    } else if (data.stats.coordinateRate < .7 || !data.features.length) {
+    if (data.stats.coordinateRate < .7 || !data.features.length) {
       available = false; unavailableReason = "Cần ít nhất hai tọa độ khác nhau trong cùng chuỗi, với ít nhất 70% tọa độ hợp lệ.";
     }
   } else if (suggestion.chartType === "map_line") {
@@ -406,122 +401,15 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
     if (coordinateRate < .7) { available = false; unavailableReason = "Ít hơn 70% dòng có tọa độ hợp lệ."; }
     else if (cells.size < 2) { available = false; unavailableReason = "Cần ít nhất hai ô H3 có giá trị hợp lệ."; }
   }
-  const effectiveConfidence = Math.min(1, Math.max(0, .6 * suggestion.confidence + .4 * feasibilityScore));
+  const effectiveConfidence = Math.min(1, Math.max(0, suggestion.confidence));
   return { ...suggestion, feasibilityScore, effectiveConfidence, available, unavailableReason };
 }
 
-function complementaryTimeBar(analysis, records) {
-  // A valid line establishes the analysis intent. Do not override an explicit
-  // empty AI decision or silently collapse a series/category/geographic grain.
-  const line = analysis.suggestions?.find(suggestion => suggestion.chartType === "line");
-  if (!line || line.bindings.series) return null;
-  const byName = columnMap(analysis.columns);
-  const time = byName.get(line.bindings.x);
-  if (time?.role !== "time") return null;
-  const groups = groupRecords(records, time.name, time);
-  if (groups.length < 2 || !timeValuesAreComparable(groups.map(group => group.value), time)) return null;
-  if (analysis.columns.some(column => ["category", "geo"].includes(column.role)
-    && groupRecords(records, column.name).length > 1)) return null;
-  const measures = [line.bindings.y].flat().map(name => byName.get(name)).filter(column => column?.role === "measure");
-  if (!measures.length) return null;
-  const primary = measures[0];
-  const components = measures.filter(column => measureUnit(column) === measureUnit(primary));
-  const total = components.length >= 2 ? analysis.columns.find(column => {
-    if (column.role !== "measure" || components.includes(column) || measureUnit(column) !== measureUnit(primary)
-      || !TOTAL_HINT.test(`${column.name} ${column.labelVi || ""}`)) return false;
-    const comparable = records.filter(record => [column, ...components].every(item => isFiniteValue(record?.[item.name])));
-    return comparable.length >= 2 && comparable.every(record => {
-      const sum = components.reduce((value, item) => value + Number(record[item.name]), 0);
-      return Math.abs(Number(record[column.name]) - sum) <= Math.max(1, Math.abs(sum)) * 1e-8;
-    });
-  }) : null;
-  const measure = total || primary;
-  const validGroups = groups.filter(group => group.records.some(record => isFiniteValue(record?.[measure.name])));
-  if (validGroups.length < 2) return null;
-  const agg = measureAggregation(measure) || (measure === primary && AGGREGATIONS.has(line.agg) ? line.agg : null);
-  if (!agg && validGroups.some(group => validMeasureRecords(group.records, measure.name).length > 1)) return null;
-  let id = "time-bar";
-  for (let suffix = 2; analysis.suggestions.some(suggestion => suggestion.id === id); suffix++) id = `time-bar-${suffix}`;
-  return {
-    id,
-    chartType: "bar",
-    title: `${measure.labelVi || humanizeField(measure.name)} theo ${(time.labelVi || humanizeField(time.name)).toLocaleLowerCase("vi")}`,
-    bindings: { x: time.name, y: measure.name },
-    agg,
-    confidence: .82,
-    reason: "Cùng chiều thời gian với biểu đồ đường; có thể so sánh độ lớn giữa các kỳ mà vẫn giữ grain và phép tính của chỉ số.",
-    source: "rule"
-  };
-}
-
+/** Check render feasibility only; every suggestion and its priority come from the analysis. */
 export function prepareSuggestions(analysis, records, validRowRate, options = {}) {
-  const coords = coordinateBindings(analysis.columns);
-  const latitude = analysis.columns.find(column => column.name === coords?.lat);
-  const longitude = analysis.columns.find(column => column.name === coords?.lng);
-  let suggestions = analysis.suggestions || [];
-  const roadField = roadNameField(analysis.columns);
-  if (roadField && roadAreaField(analysis.columns) && !suggestions.some(item => item.chartType === "map_line")) {
-    const values = roadValueColumns(analysis.columns, records, roadField);
-    const value = values.find(column => /muc do un tac|congestion|traffic status/.test(normalizeRoadText(column.name)))
-      || values.find(column => column.role === "measure");
-    if (value) {
-      let id = "road-map";
-      for (let suffix = 2; suggestions.some(item => item.id === id); suffix++) id = `road-map-${suffix}`;
-      suggestions = [{ id, chartType: "map_line", title: "Bản đồ Line", bindings: { region: roadField, value: value.name },
-        agg: value.role === "measure" ? measureAggregation(value) : null, confidence: .85, source: "rule",
-        reason: "Dữ liệu có khu vực, tên tuyến và chỉ số quan sát; có thể ghép mạng đường để xem phân bố và biểu đồ riêng của từng tuyến." }, ...suggestions];
-    }
-  }
-  const region = preferredAdministrativeColumn(analysis.columns, { columns: analysis.columns.map(column => ({
-    name: column.name, uniqueCount: records.some(record => record?.[column.name] != null && String(record[column.name]).trim() !== "") ? 1 : 0
-  })) });
-  if (!latitude && !longitude && !roadField && region && !suggestions.some(suggestion => suggestion.chartType === "choropleth")) {
-    const groups = administrativeGroups(records, analysis.columns, region.name);
-    const measure = analysis.columns.find(column => column.role === "measure"
-      && groups.filter(group => group.records.some(record => isFiniteValue(record?.[column.name]))).length >= 2);
-    if (measure) {
-      const regionLabel = region.labelVi || humanizeField(region.name);
-      suggestions = [{
-        id: "regional-choropleth",
-        chartType: "choropleth",
-        title: `Bản đồ polygon theo ${regionLabel.toLocaleLowerCase("vi")}`,
-        bindings: { region: region.name, value: measure.name },
-        agg: resolveAggregation({ bindings: { value: measure.name } }, analysis.columns),
-        confidence: .85,
-        reason: "Dữ liệu có địa danh hành chính và chỉ số theo từng vùng; có thể so sánh các vùng bằng màu sắc và lọc theo thời gian.",
-        source: "rule"
-      }, ...suggestions];
-    }
-  }
-  if (!suggestions.some(suggestion => suggestion.chartType === "bar")) {
-    const bar = complementaryTimeBar(analysis, records);
-    if (bar) suggestions = [...suggestions, bar];
-  }
-  if (latitude && longitude) {
-    suggestions = suggestions.filter(suggestion => suggestion.chartType !== "hex_h3");
-    if (!suggestions.some(suggestion => suggestion.chartType === "point")) {
-      suggestions = [{
-        id: "coordinate-point",
-        chartType: "point",
-        title: "Vị trí các bản ghi",
-        bindings: { lat: latitude.name, lng: longitude.name },
-        agg: null,
-        confidence: .95,
-        reason: "Mỗi dòng có một cặp kinh độ, vĩ độ nên được hiển thị trực tiếp bằng điểm.",
-        source: "rule"
-      }, ...suggestions];
-    }
-    const path = inferCoordinateLine(records, analysis.columns);
-    if (path && !suggestions.some(suggestion => suggestion.chartType === "map_line")) suggestions = [{
-      id: "coordinate-line", chartType: "map_line", title: "Bản đồ Line", bindings: path, agg: null, confidence: .96, source: "rule",
-      reason: "Các tọa độ tạo thành chuỗi; nối theo cột thứ tự/thời gian hoặc thứ tự dòng trong file, tách riêng từng nhóm tuyến."
-    }, ...suggestions];
-  }
-  if (options.mapOnly) suggestions = suggestions.filter(suggestion => ["choropleth", "map_line", "point"].includes(suggestion.chartType));
+  const suggestions = (analysis.suggestions || []).filter(suggestion => !options.mapOnly || ["choropleth", "map_line", "point"].includes(suggestion.chartType));
   return suggestions.map(suggestion => evaluateSuggestion(suggestion, records, analysis.columns, validRowRate, options))
-    .sort((a, b) => latitude && longitude
-      ? Number(isCoordinateLine(b)) - Number(isCoordinateLine(a)) || Number(b.chartType === "point") - Number(a.chartType === "point") || b.effectiveConfidence - a.effectiveConfidence || a.title.localeCompare(b.title, "vi")
-      : b.effectiveConfidence - a.effectiveConfidence || a.title.localeCompare(b.title, "vi"));
+    .sort((a, b) => b.confidence - a.confidence);
 }
 
 export function chartOptionForSuggestion(suggestion, records, columns, options = {}) {

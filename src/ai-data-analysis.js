@@ -1,8 +1,7 @@
 import { AI_MAP_REGISTRY, fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
 import { normalizeTabularRecords, profileTabularData } from "./tabular-data.js";
-import { administrativeContextFields, preferredAdministrativeColumn } from "./geographic-grain.js";
+import { administrativeContextFields } from "./geographic-grain.js";
 
-const TIME_HINT = /(ngày|date|time|tháng|month|năm|year)/i;
 
 function isDate(value) {
   return Object.prototype.toString.call(value) === "[object Date]" && !Number.isNaN(value.getTime());
@@ -18,32 +17,8 @@ export function summarizeTabularData(records, { maxSamples = 5, maxUnique = 10_0
   };
 }
 
-export function fallbackMapRecommendation(records) {
-  const profile = profileTabularData(records, { includeSamples: false });
-  const metadata = fallbackAnalysis(profile).columns;
-  const region = preferredAdministrativeColumn(metadata, profile);
-  const location = profile.columns.find(column => column.name === region?.name);
-  const time = profile.columns.find(column => TIME_HINT.test(column.name) || column.inferredType === "date");
-  const metrics = profile.columns.filter(column => column.inferredType === "number" && column.name !== time?.name);
-  if (!location || !metrics.length) return null;
-  return {
-    canRenderMap: true,
-    visualization: "polygon",
-    geometry: { field: location.name, provider: "maptiler",
-      placeType: region.geoLevel === "country" ? "country" : region.geoLevel === "admin2" ? "county" : "region",
-      country: region.geoLevel === "country" || metadata.some(column => column.geoLevel === "country") ? null : "VNM",
-      ...(administrativeContextFields(metadata, location.name).length ? { contextFields: administrativeContextFields(metadata, location.name) } : {}) },
-    metricField: metrics[0].name,
-    numericFields: metrics.map(column => column.name),
-    filters: [
-      { field: location.name, label: location.name, control: "select", allowAll: true },
-      ...(time ? [{ field: time.name, label: time.name, control: "date-select", allowAll: false }] : [])
-    ],
-    title: `${metrics[0].name} theo ${location.name}`,
-    explanation: "Nhận diện theo quy tắc dự phòng: dữ liệu có địa phương và các chỉ số số.",
-    confidence: .7,
-    source: "rule"
-  };
+export function fallbackMapRecommendation() {
+  return null;
 }
 
 export async function requestAiDataAnalysis(records, { signal, includeSamples = true, profile: suppliedProfile = null, source = null } = {}) {
@@ -62,7 +37,7 @@ export async function requestAiDataAnalysis(records, { signal, includeSamples = 
     if (analysis.source !== "ai") fallbackReason = analysis.validationErrors?.join("; ") || "AI không có đề xuất hợp lệ.";
   } catch (error) {
     if (error?.name === "AbortError") throw error;
-    console.warn("AI analysis fallback:", error);
+    console.warn("AI analysis unavailable:", error);
     fallbackReason = error?.message || "Không thể gọi AI.";
     analysis = fallbackAnalysis(profile);
   }
@@ -97,7 +72,7 @@ export async function requestAiMapRecommendation(records, options = {}) {
     explanation: suggestion.reason,
     confidence: suggestion.confidence,
     source: pipeline.analysis.source,
-    aggregation: suggestion.agg || columns.get(suggestion.bindings.value)?.aggDefault || "mean",
+    aggregation: suggestion.agg || columns.get(suggestion.bindings.value)?.aggDefault || null,
     pipeline
   };
 }

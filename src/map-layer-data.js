@@ -49,6 +49,7 @@ export function describeWorkspaceLayer(id, state, title) {
 }
 
 export function tableRecords(state) {
+  if (!layerData(state) && state.aiDataset) return state.aiDataset.records;
   return asFeatureCollection(layerData(state)).features.map(feature => feature.properties || {});
 }
 

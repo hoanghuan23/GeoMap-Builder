@@ -1,4 +1,4 @@
-import { CONGESTION_COLORS, congestionLevel, normalizeRoadText } from "./congestion-data.js";
+import { normalizeRoadText } from "./text-utils.js";
 import { BAR_COLORS } from "./charts/data-transformers.js";
 
 export const ROAD_NETWORKS = Object.freeze([
@@ -13,11 +13,6 @@ export const ROAD_NETWORKS = Object.freeze([
   ["tuyen_quang", "Tuyên Quang"], ["vinh_long", "Vĩnh Long"]
 ].map(([id, label]) => Object.freeze({ id, label })));
 
-const ROAD_AREA_FIELD_NAMES = new Set([
-  "khu vuc", "tinh", "tinh thanh", "tinh thanh pho", "thanh pho", "dia phuong",
-  "province", "city", "region", "area"
-]);
-
 function normalizedRoadArea(value) {
   const normalized = normalizeRoadText(value)
     .replace(/^(tinh|thanh pho|tp)\s+/, "")
@@ -29,17 +24,12 @@ function normalizedRoadArea(value) {
 }
 
 export function roadAreaField(columns = []) {
-  const named = columns.find(column => ROAD_AREA_FIELD_NAMES.has(normalizeRoadText(column.name)));
-  return named?.name || columns.find(column => column.role === "geo" && column.geoLevel === "admin1")?.name || null;
+  return columns.find(column => column.role === "geo" && column.geoLevel === "admin1")?.name || null;
 }
 
 export function roadRefField(columns = []) {
-  return columns.find(column => /^(ma duong|ma tuyen|route ref|route code|road code|ref)$/.test(normalizeRoadText(column.name)))?.name || null;
-}
-
-export function roadNameField(columns = []) {
-  return columns.find(column => ["category", "geo"].includes(column.role)
-    && /(^| )(ten duong|ten tuyen|tuyen duong|road name|route name|street name)( |$)/.test(normalizeRoadText(column.name)))?.name || null;
+  const identifiers = columns.filter(column => column.role === "id");
+  return identifiers.length === 1 ? identifiers[0].name : null;
 }
 
 export function roadNetworkForArea(value) {
@@ -73,7 +63,9 @@ function aggregate(values, aggregation) {
   if (aggregation === "min") return Math.min(...numbers);
   if (aggregation === "max") return Math.max(...numbers);
   const sum = numbers.reduce((total, number) => total + number, 0);
-  return aggregation === "sum" ? sum : sum / numbers.length;
+  if (aggregation === "sum") return sum;
+  if (aggregation === "mean") return sum / numbers.length;
+  return numbers.length === 1 ? numbers[0] : null;
 }
 
 function mostFrequent(values) {
@@ -101,7 +93,8 @@ function indexRoads(roads) {
   return indexes;
 }
 
-export function joinRoadRecords(records, roads, { roadField, valueField, columns = [], aggregation = "mean" }) {
+export function joinRoadRecords(records, roads, { roadField, valueField, columns = [], aggregation = null }) {
+  aggregation ||= columns.find(column => column.name === valueField)?.aggDefault;
   if (roads?.type !== "FeatureCollection" || !Array.isArray(roads.features)) throw new Error("Mạng đường không hợp lệ.");
   const refField = roadRefField(columns);
   const { byName, byRef } = indexRoads(roads);
@@ -129,7 +122,7 @@ export function joinRoadRecords(records, roads, { roadField, valueField, columns
     for (const column of columns) {
       const values = group.rows.map(row => row[column.name]);
       properties[column.name] = column.role === "measure"
-        ? aggregate(values, column.name === valueField ? aggregation : column.aggDefault || "mean")
+        ? aggregate(values, column.name === valueField ? aggregation : column.aggDefault)
         : mostFrequent(values);
     }
     for (const feature of matched) features.push({ type: "Feature", geometry: feature.geometry, properties: { ...feature.properties, ...properties } });
@@ -137,7 +130,7 @@ export function joinRoadRecords(records, roads, { roadField, valueField, columns
   return { type: "FeatureCollection", features, stats: { totalRows: records.length, matchedRows, unmatched, segmentCount: features.length } };
 }
 
-export function joinRoadRecordsByArea(records, roadGeometries, { areaField = null, roadField, valueField, columns = [], aggregation = "mean" }) {
+export function joinRoadRecordsByArea(records, roadGeometries, { areaField = null, roadField, valueField, columns = [], aggregation = null }) {
   const field = areaField || roadAreaField(columns);
   if (!field) throw new Error("Thiếu cột Khu vực để xác định mạng đường.");
   const grouped = new Map(); const unresolved = [];
@@ -183,13 +176,10 @@ export function roadMapStyle(data, column, colorOverrides = {}) {
       rows: stops.map(stop => ({ key: stop.key, label: stop.value.toLocaleString("vi-VN", { maximumFractionDigits: 1 }), color: stop.color }))
     };
   }
-  const isCongestion = /muc do un tac|congestion|traffic status/.test(normalizeRoadText(field));
-  const severity = Object.keys(CONGESTION_COLORS);
-  const categories = [...new Set(values.map(String))].sort((a, b) => isCongestion
-    ? severity.indexOf(congestionLevel(a)) - severity.indexOf(congestionLevel(b)) : a.localeCompare(b, "vi"));
+  const categories = [...new Set(values.map(String))].sort((a, b) => a.localeCompare(b, "vi"));
   const rows = categories.map((value, index) => {
     const key = `category:${value}`;
-    const fallback = isCongestion ? CONGESTION_COLORS[congestionLevel(value)] || "#94a3b8" : BAR_COLORS[index % BAR_COLORS.length];
+    const fallback = BAR_COLORS[index % BAR_COLORS.length];
     return { key, label: value, color: colorFor(key, fallback) };
   });
   return { color: rows.length ? ["match", ["to-string", ["get", field]], ...rows.flatMap(row => [row.label, row.color]), "#94a3b8"] : "#94a3b8", rows };

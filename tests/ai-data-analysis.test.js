@@ -14,24 +14,9 @@ test("tóm tắt bảng dữ liệu mà không gửi toàn bộ workbook", () =>
   assert.equal(summary.samples[0]["Ngày"], "2026-09-01");
 });
 
-test("rule fallback nhận diện địa phương, thời gian và metric", () => {
-  const recommendation = fallbackMapRecommendation(records);
-  assert.equal(recommendation.visualization, "polygon");
-  assert.deepEqual(recommendation.geometry, { field: "Tỉnh/thành phố", provider: "maptiler", placeType: "region", country: "VNM" });
-  assert.equal(recommendation.metricField, "Nhiệt độ trung bình");
-  assert.deepEqual(recommendation.numericFields, ["Nhiệt độ trung bình", "Độ ẩm"]);
-  assert.deepEqual(recommendation.filters, [
-    { field: "Tỉnh/thành phố", label: "Tỉnh/thành phố", control: "select", allowAll: true },
-    { field: "Ngày", label: "Ngày", control: "date-select", allowAll: false }
-  ]);
-});
-
-test("không sinh option thời gian khi dataset không có chiều thời gian", () => {
-  const recommendation = fallbackMapRecommendation([
-    { province: "A", population: 10 },
-    { province: "B", population: 20 }
-  ]);
-  assert.deepEqual(recommendation.filters.map(filter => filter.field), ["province"]);
+test("fallback does not infer a map from recognizable column names", () => {
+  assert.equal(fallbackMapRecommendation(records), null);
+  assert.equal(fallbackMapRecommendation([{ province: "A", population: 10 }]), null);
 });
 
 test("định dạng filter thời gian dựa trên spec thay vì tên cột", () => {

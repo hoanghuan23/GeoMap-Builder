@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ANALYSIS_RESPONSE_SCHEMA, fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
 import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 
 const profile = {
@@ -13,24 +14,30 @@ const profile = {
   ]
 };
 
+// These scenarios exercise suggestions/legends with a complete simulated AI response.
+function normalizeFixture(raw, profile) {
+  const declared = new Set((raw.columns || []).map(column => column.name));
+  return validateAndNormalizeAnalysis({ ...raw, columns: [...mockAiAnalysis(profile).columns.filter(column => !declared.has(column.name)), ...(raw.columns || [])] }, profile);
+}
+
 test("AI search defaults survive server/client normalization and reject invalid fields", () => {
   assert.ok(ANALYSIS_RESPONSE_SCHEMA.required.includes("search_bar"));
   assert.ok(ANALYSIS_RESPONSE_SCHEMA.required.includes("search_fields"));
   const raw = { columns: [{ name: "note", role: "text" }], suggestions: [], search_bar: true,
     search_fields: ["note", "province", "note", "temperature", "date", "missing", null] };
-  const normalized = validateAndNormalizeAnalysis(raw, profile);
+  const normalized = normalizeFixture(raw, profile);
   assert.equal(normalized.search_bar, true);
   assert.deepEqual(normalized.search_fields, ["note", "province"]);
-  assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(normalized)), profile), normalized);
-  const disabled = validateAndNormalizeAnalysis({ ...raw, search_bar: false }, profile);
+  assert.deepEqual(normalizeFixture(JSON.parse(JSON.stringify(normalized)), profile), normalized);
+  const disabled = normalizeFixture({ ...raw, search_bar: false }, profile);
   assert.equal(disabled.search_bar, false);
   assert.deepEqual(disabled.search_fields, ["note", "province"]);
   for (const search_fields of [null, {}, "province", [], ["missing", "temperature", "date"]]) {
-    const result = validateAndNormalizeAnalysis({ ...raw, search_fields }, profile);
+    const result = normalizeFixture({ ...raw, search_fields }, profile);
     assert.equal(result.search_bar, false);
     assert.deepEqual(result.search_fields, []);
   }
-  const legacy = validateAndNormalizeAnalysis({ columns: [], suggestions: [] }, profile);
+  const legacy = normalizeFixture({ columns: [], suggestions: [] }, profile);
   assert.equal(Object.hasOwn(legacy, "search_bar"), false);
   assert.equal(Object.hasOwn(legacy, "search_fields"), false);
 });
@@ -58,12 +65,12 @@ test("AI metric button schema and ordered custom designs survive server/client n
     { name: "cost", inferredType: "number" }, { name: "profit", inferredType: "number" }] };
   const raw = { columns: [], suggestions: [{ id: "map", chartType: "choropleth",
     bindings: { region: "province", value: "profit" }, metricButtons }] };
-  const server = validateAndNormalizeAnalysis(raw, dataProfile);
+  const server = normalizeFixture(raw, dataProfile);
   assert.deepEqual(server.suggestions[0].metricButtons, metricButtons);
   assert.equal(server.suggestions[0].metricButtons.some(button => button.field === "temperature"), false);
-  assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), dataProfile), server);
+  assert.deepEqual(normalizeFixture(JSON.parse(JSON.stringify(server)), dataProfile), server);
   raw.suggestions[0].metricButtons = [...metricButtons, { ...metricButtons[1], label: "Trùng chỉ số" }];
-  assert.deepEqual(validateAndNormalizeAnalysis(raw, dataProfile).suggestions[0].metricButtons, metricButtons);
+  assert.deepEqual(normalizeFixture(raw, dataProfile).suggestions[0].metricButtons, metricButtons);
 });
 
 test("AI metric buttons reject unknown or structural columns and malformed designs without creating presets", () => {
@@ -79,10 +86,10 @@ test("AI metric buttons reject unknown or structural columns and malformed desig
     { ...button("temperature"), label: " " },
     { ...button("temperature"), icon: "" }
   ]]) {
-    const result = validateAndNormalizeAnalysis({ columns: [], suggestions: [{ ...spec, metricButtons }] }, dataProfile);
+    const result = normalizeFixture({ columns: [], suggestions: [{ ...spec, metricButtons }] }, dataProfile);
     assert.equal(result.source, "ai");
     assert.deepEqual(result.suggestions[0].metricButtons, []);
-    assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(result)), dataProfile), result);
+    assert.deepEqual(normalizeFixture(JSON.parse(JSON.stringify(result)), dataProfile), result);
   }
   assert.ok(fallbackAnalysis(dataProfile).suggestions.every(suggestion => suggestion.metricButtons.length === 0));
 });
@@ -99,10 +106,10 @@ test("only Line admits AI buttons for low-cardinality status categories, and nev
     { name: "description", role: "category" }, { name: "sequence", role: "measure" }];
   const metricButtons = ["road", "status", "description", "sequence", "lat", "lng"].map(field => ({ field, label: field, icon: "🚦", color: "#123456" }));
   const line = { id: "line", chartType: "map_line", bindings: { lat: "lat", lng: "lng", region: "road", x: "sequence" }, metricButtons };
-  const result = validateAndNormalizeAnalysis({ columns, suggestions: [line] }, dataProfile);
+  const result = normalizeFixture({ columns, suggestions: [line] }, dataProfile);
   assert.deepEqual(result.suggestions[0].metricButtons, [metricButtons[1]]);
   const point = { ...line, id: "point", chartType: "point", bindings: { lat: "lat", lng: "lng", region: "road" } };
-  assert.deepEqual(validateAndNormalizeAnalysis({ columns, suggestions: [point] }, dataProfile).suggestions[0].metricButtons.map(button => button.field), ["sequence"]);
+  assert.deepEqual(normalizeFixture({ columns, suggestions: [point] }, dataProfile).suggestions[0].metricButtons.map(button => button.field), ["sequence"]);
 });
 
 test("popup recommendations have a compact per-map schema and survive server/client normalization", () => {
@@ -125,10 +132,10 @@ test("popup recommendations have a compact per-map schema and survive server/cli
     { id: "points", chartType: "point", bindings: { lat: "lat", lng: "lng" },
       popupSuggestions: [{ name: "info", confidence: .9 }] }
   ];
-  const server = validateAndNormalizeAnalysis({ columns: [], suggestions: specs }, dataProfile);
+  const server = normalizeFixture({ columns: [], suggestions: specs }, dataProfile);
   assert.equal(server.source, "ai");
   assert.deepEqual(server.suggestions.map(item => item.popupSuggestions), specs.map(item => item.popupSuggestions));
-  assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), dataProfile), server);
+  assert.deepEqual(normalizeFixture(JSON.parse(JSON.stringify(server)), dataProfile), server);
 });
 
 test("popup normalization drops invalid entries, keeps the best duplicate and preserves tie order", () => {
@@ -140,22 +147,22 @@ test("popup normalization drops invalid entries, keeps the best duplicate and pr
       { name: "line", confidence: 1.1 }, { name: "info", confidence: NaN }, { name: "bar", confidence: Infinity },
       { name: "line", confidence: true }, null, "info", {}
     ] }] };
-  const result = validateAndNormalizeAnalysis(raw, profile);
+  const result = normalizeFixture(raw, profile);
   assert.deepEqual(result.suggestions[0].popupSuggestions, [
     { name: "line", confidence: .8 }, { name: "info", confidence: .8 }, { name: "bar", confidence: .8 }
   ]);
   raw.suggestions[0].popupSuggestions = [{ name: "bar", confidence: 0 }, { name: "info", confidence: 1 }];
-  assert.deepEqual(validateAndNormalizeAnalysis(raw, profile).suggestions[0].popupSuggestions,
+  assert.deepEqual(normalizeFixture(raw, profile).suggestions[0].popupSuggestions,
     [{ name: "info", confidence: 1 }, { name: "bar", confidence: 0 }]);
 });
 
 test("missing or invalid popup output keeps valid maps and normalizes to an empty fallback list", () => {
   for (const popupSuggestions of [undefined, null, [], {}, "line", [{ name: "pie", confidence: .9 }]]) {
-    const result = validateAndNormalizeAnalysis({ columns: [], suggestions: [{ id: "map", chartType: "choropleth",
+    const result = normalizeFixture({ columns: [], suggestions: [{ id: "map", chartType: "choropleth",
       bindings: { region: "province", value: "temperature" }, popupSuggestions }] }, profile);
     assert.equal(result.source, "ai"); assert.equal(result.suggestions[0].id, "map");
     assert.deepEqual(result.suggestions[0].popupSuggestions, []);
-    assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(result)), profile), result);
+    assert.deepEqual(normalizeFixture(JSON.parse(JSON.stringify(result)), profile), result);
   }
   assert.ok(fallbackAnalysis(profile).suggestions.every(item => item.popupSuggestions.length === 0));
 });
@@ -168,8 +175,8 @@ test("data units and provenance survive legacy legend fallback through server/cl
     { name: "Unknown", unit: null, unitSource: "unknown" }
   ];
   const dataProfile = { rowCount: 2, columns: specs.map(({ name }) => ({ name, inferredType: "number" })) };
-  const server = validateAndNormalizeAnalysis({ columns: specs.map(spec => ({ ...spec, role: "measure", legend: { mode: "reference", referenceId: "old" } })), suggestions: [] }, dataProfile);
-  const client = validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), dataProfile);
+  const server = normalizeFixture({ columns: specs.map(spec => ({ ...spec, role: "measure", legend: { mode: "reference", referenceId: "old" } })), suggestions: [] }, dataProfile);
+  const client = normalizeFixture(JSON.parse(JSON.stringify(server)), dataProfile);
   assert.deepEqual(client, server);
   assert.deepEqual(client.columns.map(column => column.unit), specs.map(spec => spec.unit));
   assert.deepEqual(client.columns.map(column => column.unitSource), specs.map(spec => spec.unitSource));
@@ -183,8 +190,8 @@ test("compact suggestion legends seed only their own matching column default and
       { name: "note", role: "category", semanticType: "air_temperature", legend }],
     suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend }]
   };
-  const server = validateAndNormalizeAnalysis(raw, profile);
-  assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), profile), server);
+  const server = normalizeFixture(raw, profile);
+  assert.deepEqual(normalizeFixture(JSON.parse(JSON.stringify(server)), profile), server);
   assert.equal(server.columns[2].semanticType, "custom_measure");
   assert.equal(Object.hasOwn(server.columns[2].legend, "legendSchemaVersion"), false);
   assert.equal(Object.hasOwn(server.columns[2].legend, "field"), false);
@@ -196,24 +203,24 @@ test("compact suggestion legends seed only their own matching column default and
 test("invalid legend falls back independently without removing a valid choropleth", () => {
   for (const patch of [{ unit: null }, { legend: legendFixture({ field: "other" }) }, { legend: legendFixture({ stops: [] }) }]) {
     const column = { name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", legend: legendFixture(), ...patch };
-    const result = validateAndNormalizeAnalysis({ columns: [column],
+    const result = normalizeFixture({ columns: [column],
       suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend: column.legend }]
     }, profile);
     assert.equal(result.source, "ai"); assert.equal(result.suggestions.length, 1);
     assert.equal(result.suggestions[0].legend, null); assert.ok(result.validationErrors.length);
-    assert.deepEqual(validateAndNormalizeAnalysis(result, profile), result);
+    assert.deepEqual(normalizeFixture(result, profile), result);
   }
 });
 
 test("aggregation changes cannot reuse a semantic legend for a different aggregation", () => {
   for (const agg of ["sum", "count"]) {
-    const result = validateAndNormalizeAnalysis({
+    const result = normalizeFixture({
       columns: [{ name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", legend: legendFixture() }],
       suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg, legend: legendFixture() }]
     }, profile);
     assert.equal(result.columns[2].legend.mode, "semantic");
     assert.equal(result.suggestions[0].legend, null);
-    assert.deepEqual(validateAndNormalizeAnalysis(result, profile), result);
+    assert.deepEqual(normalizeFixture(result, profile), result);
   }
 });
 
@@ -241,31 +248,16 @@ test("validator loại cột lạ/trùng, bù cột thiếu và chỉ loại sug
   assert.ok(result.validationErrors.length >= 3);
 });
 
-test("giữ nhận diện tỉnh/thành phố khi AI gán category hoặc thiếu geoLevel", () => {
-  const regionProfile = { rowCount: 2, columns: [
-    { name: "Tỉnh/thành phố", inferredType: "text", uniqueCount: 2 },
-    { name: "Nhiệt độ trung bình", inferredType: "number", uniqueCount: 2 }
-  ] };
+test("AI column roles are preserved even when familiar geographic names imply another role", () => {
+  const profile = { rowCount: 2, columns: [{ name: "Tỉnh/thành phố", inferredType: "text" }] };
   for (const role of ["category", "text", "geo"]) {
-    const result = validateAndNormalizeAnalysis({
-      columns: [
-        { name: "Tỉnh/thành phố", role, geoLevel: null, labelVi: "Tỉnh/thành phố" },
-        { name: "Nhiệt độ trung bình", role: "measure", aggDefault: "mean", unit: "°C" }
-      ],
-      suggestions: [{
-        id: "weather-map", chartType: "choropleth", confidence: .9,
-        bindings: { region: "Tỉnh/thành phố", value: "Nhiệt độ trung bình" }
-      }]
-    }, regionProfile);
-    assert.equal(result.columns[0].role, "geo");
-    assert.equal(result.columns[0].geoLevel, "admin1");
-    assert.equal(result.suggestions[0].id, "weather-map");
-    assert.equal(result.source, "ai");
-    assert.deepEqual(result.validationErrors, []);
+    const result = validateAndNormalizeAnalysis({ columns: [{ name: "Tỉnh/thành phố", role, geoLevel: null }], suggestions: [] }, profile);
+    assert.equal(result.columns[0].role, role);
+    assert.equal(result.columns[0].geoLevel, null);
   }
 });
 
-test("giữ Khu vực là cột địa phương để tự chọn mạng đường", () => {
+test("không sửa role Khu vực do AI chọn theo tên cột", () => {
   const areaProfile = { rowCount: 2, columns: [
     { name: "Khu vực", inferredType: "text", uniqueCount: 1 },
     { name: "Tên đường", inferredType: "text", uniqueCount: 2 },
@@ -282,12 +274,12 @@ test("giữ Khu vực là cột địa phương để tự chọn mạng đườ
       bindings: { region: "Tên đường", value: "Tốc độ" }
     }]
   }, areaProfile);
-  assert.equal(result.columns.find(column => column.name === "Khu vực").role, "geo");
-  assert.equal(result.columns.find(column => column.name === "Khu vực").geoLevel, "admin1");
+  assert.equal(result.columns.find(column => column.name === "Khu vực").role, "category");
+  assert.equal(result.columns.find(column => column.name === "Khu vực").geoLevel, null);
   assert.equal(result.suggestions[0].chartType, "map_line");
 });
 
-test("fallback dùng cùng AnalysisResult và không biến id thành measure", () => {
+test("fallback giữ cột chưa phân loại và không tự đề xuất bản đồ", () => {
   const result = fallbackAnalysis({
     rowCount: 2,
     columns: [
@@ -296,9 +288,9 @@ test("fallback dùng cùng AnalysisResult và không biến id thành measure", 
       { name: "total", inferredType: "number", uniqueCount: 2 }
     ]
   });
-  assert.equal(result.columns.find(column => column.name === "station_id").role, "id");
-  assert.equal(result.columns.find(column => column.name === "total").aggDefault, "sum");
-  assert.ok(result.suggestions.some(item => item.chartType === "choropleth"));
+  assert.equal(result.columns.find(column => column.name === "station_id").role, "ignore");
+  assert.equal(result.columns.find(column => column.name === "total").aggDefault, null);
+  assert.deepEqual(result.suggestions, []);
   assert.equal(validateAndNormalizeAnalysis(result, {
     rowCount: 2,
     columns: [
@@ -310,7 +302,7 @@ test("fallback dùng cùng AnalysisResult và không biến id thành measure", 
 });
 
 test("mỗi kiểu chỉ giữ cấu hình hợp lệ có confidence cao nhất", () => {
-  const result = validateAndNormalizeAnalysis({
+  const result = normalizeFixture({
     datasetTitle: "Thời tiết",
     grain: "một tỉnh một ngày",
     columns: [],
@@ -329,7 +321,7 @@ test("mỗi kiểu chỉ giữ cấu hình hợp lệ có confidence cao nhất"
 });
 
 test("bar chấp nhận cột thời gian làm trục x", () => {
-  const result = validateAndNormalizeAnalysis({
+  const result = normalizeFixture({
     columns: [
       { name: "date", role: "time", timeParse: "iso", granularity: "day" },
       { name: "temperature", role: "measure", aggDefault: "mean" }
@@ -370,20 +362,20 @@ test("suggestions sai contract vẫn fallback thay vì coi là quyết định k
   for (const suggestions of [null, {}, [{ id: "invalid", chartType: "unsupported" }]]) {
     const result = validateAndNormalizeAnalysis({ columns: [], suggestions }, profile);
     assert.equal(result.source, "rule");
-    assert.ok(result.suggestions.length);
+    assert.deepEqual(result.suggestions, []);
     assert.ok(result.validationErrors.length);
   }
 });
 
-test("fallback ưu tiên chiều địa phương thay vì thuộc tính mô tả khi chọn bar", () => {
+test("fallback không chọn chiều địa lý hay biểu đồ thay AI", () => {
   const result = fallbackAnalysis({ rowCount: 2, columns: [
     { name: "weather_status", inferredType: "text", uniqueCount: 2 },
     ...profile.columns
   ] });
-  assert.equal(result.suggestions.find(item => item.chartType === "bar").bindings.x, "province");
+  assert.deepEqual(result.suggestions, []);
 });
 
-test("fallback dùng Point và không đề xuất H3 cho bảng có kinh độ, vĩ độ", () => {
+test("fallback không tự thêm Point dù bảng có tên cột kinh độ vĩ độ", () => {
   const coordinateProfile = {
     rowCount: 2,
     columns: [
@@ -395,9 +387,7 @@ test("fallback dùng Point và không đề xuất H3 cho bảng có kinh độ,
     ]
   };
   const result = fallbackAnalysis(coordinateProfile);
-  const point = result.suggestions.find(item => item.chartType === "point");
-
-  assert.deepEqual(point.bindings, { lat: "Vĩ độ", lng: "Kinh độ" });
+  assert.deepEqual(result.suggestions, []);
   assert.equal(result.suggestions.some(item => item.chartType === "hex_h3"), false);
 });
 
@@ -410,7 +400,7 @@ test("validator chấp nhận đề xuất Point với binding kinh độ, vĩ �
       { name: "name", inferredType: "text", uniqueCount: 2 }
     ]
   };
-  const result = validateAndNormalizeAnalysis({
+  const result = normalizeFixture({
     datasetTitle: "Cửa hàng",
     grain: "một cửa hàng",
     columns: [
@@ -441,10 +431,10 @@ test("column defaults resolve duplicate legend output while distinct suggestion 
       columns: [{ name: "temperature", role: "measure", aggDefault: "mean", unit: "°C", legend: columnLegend }],
       suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg, legend: suggestionLegend }]
     };
-    const normalized = validateAndNormalizeAnalysis(raw, profile);
+    const normalized = normalizeFixture(raw, profile);
     assert.deepEqual(normalized.columns[2].legend, columnLegend);
     assert.deepEqual(normalized.suggestions[0].legend, agg === "mean" ? columnLegend : suggestionLegend);
-    assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(normalized)), profile), normalized);
+    assert.deepEqual(normalizeFixture(JSON.parse(JSON.stringify(normalized)), profile), normalized);
     assert.equal(normalized.columns[2].aggDefault, "mean");
   }
 });
@@ -458,8 +448,8 @@ test("relative auto stops and units survive server/client normalization for ever
     legend: legendFixture({ aggregation: column.aggDefault, unit: column.unit, mode: "auto",
       domain: [0, 1], stops: [{ value: 0, color: "#000000" }, { value: .2, color: "#808080" }, { value: 1, color: "#ffffff" }] }) })),
     suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend: null }] };
-  const server = validateAndNormalizeAnalysis(raw, dataProfile);
-  const client = validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(server)), dataProfile);
+  const server = normalizeFixture(raw, dataProfile);
+  const client = normalizeFixture(JSON.parse(JSON.stringify(server)), dataProfile);
   assert.deepEqual(client, server);
   assert.deepEqual(client.columns.slice(1).map(column => column.legend), raw.columns.map(column => column.legend));
   assert.deepEqual(client.suggestions[0].legend, client.columns[1].legend);

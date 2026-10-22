@@ -69,16 +69,6 @@ export function pointGeoJSONToRecords(data) {
   return records.length ? { records, bindings: { lat, lng } } : null;
 }
 
-export function isHexagonGeoJSON(data, name = "") {
-  const features = featuresFrom(data);
-  if (!features.length || !geometryKinds(data).includes("area")) return false;
-  if (/hex(agon)?s?/i.test(name)) return true;
-  return features.some(feature => {
-    const properties = feature.properties || {};
-    return /hex/i.test(String(properties.geometry_type || "")) || properties.h3 != null;
-  });
-}
-
 export function clipGeoJSONToPolygon(data, mask) {
   const clip = maskMultiPolygon(mask);
   if (!clip) return EMPTY_FEATURE_COLLECTION;

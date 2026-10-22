@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCoordinateLines, coordinateBindings, inferCoordinateLine } from "../src/coordinate-data.js";
+import { buildCoordinateLines } from "../src/coordinate-data.js";
 import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
 import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
 import { storeColumns, storeRecords, storeSuggestions } from "./fixtures/store-points-fixture.js";
@@ -11,8 +11,6 @@ const records = [3, 1, 2].map(value => ({ vi_do: 21 + value / 100, kinh_do: 105 
 
 test("coordinate paths use file row order by default and preserve input records", () => {
   const before = JSON.stringify(records);
-  assert.deepEqual(coordinateBindings(columns), bindings);
-  assert.deepEqual(inferCoordinateLine(records, columns), bindings);
   const data = buildCoordinateLines(records, columns, bindings);
   assert.deepEqual(data.features[0].geometry.coordinates, [[105.03,21.03], [105.01,21.01], [105.02,21.02]]);
   assert.equal(data.features[0].properties.speed, 20);
@@ -25,7 +23,7 @@ test("coordinate paths sort each route independently by sequence or time", () =>
     const fields = [...columns, { name: "route", role: "id" }, { name: "stt", role: time ? "time" : "measure" }];
     const rows = ["B", "A"].flatMap(route => records.map((record, index) => ({ ...record, route,
       stt: time ? new Date(`2026-01-0${[3,1,2][index]}`) : [3,1,2][index] })));
-    const found = inferCoordinateLine(rows, fields);
+    const found = { ...bindings, region: "route", x: "stt" };
     assert.equal(found.region, "route"); assert.equal(found.x, "stt");
     const data = buildCoordinateLines(rows, fields, found);
     assert.equal(data.features.length, 2);
@@ -42,18 +40,14 @@ test("invalid coordinates split paths; repeated or empty coordinates do not beco
   for (const rows of [[], [records[0]], [records[0], records[0]], [{ vi_do: "", kinh_do: null }, records[0]], [{ vi_do: 91, kinh_do: 181 }]]) {
     assert.deepEqual(buildCoordinateLines(rows, columns, bindings).features, []);
   }
-  assert.equal(inferCoordinateLine([...records, ...Array(3).fill({})], columns), null);
 });
 
-test("fixed stores with repeated monthly observations stay Point even if AI offers a coordinate Line", () => {
-  assert.equal(inferCoordinateLine(storeRecords, storeColumns), null);
-  assert.equal(inferCoordinateLine(storeRecords.slice(0, 4), storeColumns), null, "incomplete monthly observations still describe fixed stores");
+test("coordinate Line decisions remain visible for evaluation even when the interpretation is questionable", () => {
   const result = prepareSuggestions({ columns: storeColumns, suggestions: [...storeSuggestions,
     { id: "bad-path", chartType: "map_line", confidence: 1, title: "Path", bindings: { lat: "vi_do", lng: "kinh_do", x: "thang" } }
   ] }, storeRecords, {}, { mapOnly: true });
   assert.equal(result.find(item => item.chartType === "point").available, true);
-  assert.equal(result.find(item => item.chartType === "map_line").available, false);
-  assert.match(result.find(item => item.chartType === "map_line").unavailableReason, /cố định/);
+  assert.equal(result.find(item => item.chartType === "map_line").available, true);
   assert.ok(result.every(item => ["point", "map_line", "choropleth"].includes(item.chartType)));
 });
 

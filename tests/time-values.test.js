@@ -26,7 +26,7 @@ test("các nhãn kỳ không có năm dùng chung thứ tự cho normalize, bar,
     const line = { id: "line", chartType: "line", title: "Xu hướng", bindings: { x: "period", y: ["metric"] }, confidence: .9 };
     const suggestions = prepareSuggestions({ columns, suggestions: [line] }, normalized.records, normalized.validRowRate);
     assert.ok(suggestions.every(suggestion => suggestion.available));
-    const bar = suggestions.find(suggestion => suggestion.chartType === "bar");
+    const bar = { ...line, chartType: "bar", bindings: { x: "period", y: "metric" } };
     assert.deepEqual(buildBarChartOption(bar, normalized.records, columns).config.data.map(row => row.period), expected.map(String));
     assert.deepEqual(buildLineChartOption(line, normalized.records, columns).config.data.map(row => row.period), expected.map(String));
     const filtered = filterTimeRange(normalized.records, time, String(expected[1]), String(expected[2]));
@@ -79,10 +79,10 @@ test("profile không cần gửi samples vẫn nhận diện được kỳ và g
     assert.equal(column.dateHint, "text");
     assert.equal(column.temporalGranularity, granularity);
     const analysis = fallbackAnalysis(profile);
-    assert.equal(analysis.columns[0].role, "time");
-    assert.equal(analysis.columns[0].granularity, granularity);
-    assert.equal(analysis.columns[1].role, "measure");
-    const normalized = validateAndNormalizeAnalysis({ columns: [{ name: granularity, role: "time" }], suggestions: [] }, profile);
+    assert.equal(analysis.columns[0].role, "ignore");
+    assert.equal(analysis.columns[0].granularity, null);
+    assert.equal(analysis.columns[1].role, "ignore");
+    const normalized = validateAndNormalizeAnalysis({ columns: [{ name: granularity, role: "time", granularity, timeParse: "text" }], suggestions: [] }, profile);
     assert.equal(normalized.columns[0].granularity, granularity);
     assert.equal(normalized.columns[0].timeParse, "text");
   }

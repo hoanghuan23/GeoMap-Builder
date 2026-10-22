@@ -2,7 +2,7 @@ import { buildBarChartOption, buildLineChartOption, resolveAggregation } from ".
 import { comparableFilterValue } from "./ai-data-analysis.js";
 import { filterTimeRange, timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "./time-values.js";
 import { roadAreaField, roadNetworkForArea, roadRefField } from "./road-map-data.js";
-import { normalizeRoadText } from "./congestion-data.js";
+import { normalizeRoadText } from "./text-utils.js";
 import { isCoordinateLine, pointIdentity, pointTitleField } from "./coordinate-data.js";
 import { administrativeContextFields } from "./geographic-grain.js";
 import { normalizePopupSuggestions } from "./ai-chart-contract.js";

@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { administrativeContextFields, geographicLocationName, preferredAdministrativeColumn } from "../src/geographic-grain.js";
 import { profileTabularData } from "../src/tabular-data.js";
-import { fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
 import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
-import { fallbackMapRecommendation } from "../src/ai-data-analysis.js";
+import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
 import { loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
 import { buildAdministrativeGeocodingUrl, getMapTilerAdministrativeBoundary } from "../src/map-search.js";
 import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
@@ -17,21 +17,11 @@ const rows = [1, 2].flatMap(day => [
 const polygon = x => ({ type: "Polygon", coordinates: [[[x, 0], [x + 1, 0], [x + 1, 1], [x, 0]]] });
 const response = features => ({ ok: true, json: async () => ({ type: "FeatureCollection", features }) });
 
-test("region fallback follows the observation level even with one area per country and reversed column order", () => {
+test("empty AI suggestions stay empty regardless of geographic grain or column order", () => {
   for (const records of [rows, rows.map(row => Object.fromEntries(Object.entries(row).reverse()))]) {
-    const profile = profileTabularData(records);
-    const analysis = fallbackAnalysis(profile);
-    assert.equal(analysis.suggestions.find(item => item.chartType === "choropleth").bindings.region, "Khu vực");
-    assert.equal(fallbackMapRecommendation(records).geometry.field, "Khu vực");
-    assert.deepEqual(fallbackMapRecommendation(records).geometry.contextFields, ["Quốc gia"]);
-    assert.equal(fallbackMapRecommendation(records).geometry.country, null);
-    const suggestions = prepareSuggestions({ ...analysis, suggestions: [] }, records, {}, { mapOnly: true });
-    assert.equal(suggestions.find(item => item.chartType === "choropleth").bindings.region, "Khu vực");
+    const analysis = mockAiAnalysis(profileTabularData(records));
+    assert.deepEqual(prepareSuggestions({ ...analysis, suggestions: [] }, records, {}, { mapOnly: true }), []);
   }
-  const countriesOnly = rows.map(({ "Khu vực": _area, ...record }) => record);
-  assert.equal(fallbackMapRecommendation(countriesOnly).geometry.field, "Quốc gia");
-  const noRegions = rows.map(record => ({ ...record, "Khu vực": null }));
-  assert.equal(fallbackMapRecommendation(noRegions).geometry.field, "Quốc gia");
 });
 
 test("generic administrative metadata chooses the deepest populated level and keeps the AI's explicit grain decision", () => {
@@ -47,7 +37,7 @@ test("generic administrative metadata chooses the deepest populated level and ke
     field: "detail", contextFields: administrativeContextFields(columns, "detail")
   }), "Central, West, A");
   const profile = profileTabularData(rows);
-  const analysis = fallbackAnalysis(profile);
+  const analysis = mockAiAnalysis(profile);
   const normalized = validateAndNormalizeAnalysis({ ...analysis, source: "ai", grain: "Số đo cấp quốc gia", suggestions: [{
     id: "country", chartType: "choropleth", bindings: { region: "Quốc gia", value: "value" }, confidence: .9
   }] }, profile);
@@ -68,7 +58,7 @@ test("regional lookup uses each row's country, separates duplicate names, and do
     date: new Date(`2026-09-0${day}`), amount: country.x + day })));
   const geometry = { field: "district", contextFields: administrativeContextFields(columns, "district") };
   const contexts = Object.fromEntries(records.map(record => [geographicLocationName(record, geometry), { country: record.market }]));
-  const suggestions = prepareSuggestions({ columns, suggestions: [] }, records, {}, { mapOnly: true });
+  const suggestions = prepareSuggestions({ columns, suggestions: [{ id: "ai-map", chartType: "choropleth", bindings: { region: "district", value: "amount" }, confidence: .9 }] }, records, {}, { mapOnly: true });
   assert.equal(suggestions[0].chartType, "choropleth");
   assert.equal(suggestions[0].bindings.region, "district");
   assert.equal(suggestions[0].available, true, "same-name areas in different countries are distinct geographic groups");

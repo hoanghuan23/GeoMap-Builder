@@ -1,7 +1,6 @@
-import { inferTimeGranularity, TIME_GRANULARITIES } from "./time-values.js";
-import { inferMeasureAggregation, measureAggregation } from "./measure-semantics.js";
+import { TIME_GRANULARITIES } from "./time-values.js";
+import { measureAggregation } from "./measure-semantics.js";
 import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "./polygon-legend-contract.js";
-import { preferredAdministrativeColumn } from "./geographic-grain.js";
 import { normalizeDataSearchConfig } from "./data-search-config.js";
 
 const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "text", "ignore"]);
@@ -42,13 +41,6 @@ export function normalizeMetricButtons(raw, columns, suggestion, profile) {
   return buttons;
 }
 
-const LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|địa điểm|location|region|khu vực|area|state)/i;
-const ADMINISTRATIVE_LOCATION_HINT = /(tỉnh|thành phố|province|city|district|quận|huyện|khu vực|region|area|state)/i;
-const TIME_HINT = /(^|[\s_.-])(ngày|ngay|date|datetime|timestamp|time|thời điểm|thoi diem|tháng|thang|month|năm|nam|year|quarter|quý|quy|week|tuần|tuan|period|kỳ|ky)([\s_.-]|$)/i;
-const ROAD_NAME_HINT = /(^|[\s_.-])(tên đường|ten duong|tên tuyến|ten tuyen|tuyến đường|tuyen duong|road[\s_.-]*name|route[\s_.-]*name|street[\s_.-]*name)([\s_.-]|$)/i;
-const ID_HINT = /(^|[\s_.-])(id|mã|ma|code|index|rank)([\s_.-]|$)/i;
-const LAT_HINT = /(^|[\s_.-])(lat|latitude|vĩ[\s_.-]*độ|vi[\s_.-]*do)([\s_.-]|$)/i;
-const LNG_HINT = /(^|[\s_.-])(lng|lon|long|longitude|kinh[\s_.-]*(độ|do))([\s_.-]|$)/i;
 
 export const AI_CHART_REGISTRY = Object.freeze({
   choropleth: Object.freeze({
@@ -198,37 +190,18 @@ function cleanOptional(value, allowed = null) {
   return !allowed || allowed.includes(value) ? value : null;
 }
 
-function inferredRole(column) {
-  const name = String(column?.name || "");
-  if (LAT_HINT.test(name)) return { role: "geo", geoLevel: "point_lat" };
-  if (LNG_HINT.test(name)) return { role: "geo", geoLevel: "point_lng" };
-  if (/quốc gia|quoc gia|country|nation/i.test(name) && column?.inferredType !== "number") {
-    return { role: "geo", geoLevel: "country" };
-  }
-  if (ID_HINT.test(name)) return { role: "id" };
-  if (TIME_HINT.test(name) || column?.inferredType === "date") {
-    return { role: "time", timeParse: column?.dateHint || (column?.inferredType === "date" ? "iso" : "text"), granularity: column?.temporalGranularity || inferTimeGranularity(name) };
-  }
-  if (LOCATION_HINT.test(name) && column?.inferredType !== "number") return { role: "geo", geoLevel: /quận|huyện|district/i.test(name) ? "admin2" : "admin1", country: "VN" };
-  if (column?.inferredType === "number") return { role: "measure", aggDefault: inferMeasureAggregation(column) };
-  if (ROAD_NAME_HINT.test(name)) return { role: "category" };
-  if (Number(column?.uniqueCount) > 0 && Number(column.uniqueCount) <= 80) return { role: "category" };
-  return { role: "text" };
-}
-
-export function inferColumnInfo(column) {
-  const inferred = inferredRole(column);
+function unclassifiedColumn(column) {
   return {
     name: String(column?.name || ""),
-    role: inferred.role,
+    role: "ignore",
     labelVi: null,
-    geoLevel: inferred.geoLevel || null,
-    country: inferred.country || null,
-    timeParse: inferred.timeParse || null,
-    granularity: inferred.granularity || null,
+    geoLevel: null,
+    country: null,
+    timeParse: null,
+    granularity: null,
     unit: null,
     unitSource: "unknown",
-    aggDefault: inferred.aggDefault || null,
+    aggDefault: null,
     semanticType: null,
     legend: null,
     source: "rule"
@@ -237,20 +210,12 @@ export function inferColumnInfo(column) {
 
 function normalizeColumn(raw, fallback) {
   if (!raw || !ROLE_VALUES.includes(raw.role)) return fallback;
-  // Administrative names remain geographic dimensions even if AI calls them categories.
-  const isAdministrativeRegion = fallback.role === "geo" && ADMINISTRATIVE_LOCATION_HINT.test(fallback.name)
-    && ["geo", "category", "text"].includes(raw.role);
-  const isCountry = fallback.geoLevel === "country" && ["geo", "category", "text", "id"].includes(raw.role);
-  const isRoadName = fallback.role === "category" && ROAD_NAME_HINT.test(fallback.name)
-    && ["geo", "category", "text"].includes(raw.role);
   return {
     name: fallback.name,
-    role: isCountry || isAdministrativeRegion ? "geo" : isRoadName ? "category" : raw.role,
+    role: raw.role,
     labelVi: typeof raw.labelVi === "string" && raw.labelVi.trim() ? raw.labelVi.trim() : null,
-    geoLevel: isCountry ? "country" : isRoadName ? null : isAdministrativeRegion
-      ? cleanOptional(raw.geoLevel, ["country", "admin1", "admin2"]) || fallback.geoLevel
-      : cleanOptional(raw.geoLevel, ["country", "admin1", "admin2", "point_lat", "point_lng", "h3"]),
-    country: !isCountry && raw.geoLevel !== "country" && !isRoadName && typeof raw.country === "string" && raw.country.trim() ? raw.country.trim().toUpperCase() : null,
+    geoLevel: raw.role === "geo" ? cleanOptional(raw.geoLevel, ["country", "admin1", "admin2", "point_lat", "point_lng", "h3"]) : null,
+    country: raw.role === "geo" && typeof raw.country === "string" && raw.country.trim() ? raw.country.trim().toUpperCase() : null,
     timeParse: cleanOptional(raw.timeParse, ["iso", "excel_serial", "unix_s", "unix_ms", "text"]) || (raw.role === "time" ? fallback.timeParse : null),
     granularity: cleanOptional(raw.granularity, TIME_GRANULARITIES) || (raw.role === "time" ? fallback.granularity : null),
     unit: normalizeLegendUnit(raw.unit),
@@ -266,12 +231,14 @@ function list(value) {
   return Array.isArray(value) ? value : [value];
 }
 
-function validateSuggestion(raw, roleOf, fieldNames, seenIds) {
+function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
   const spec = AI_CHART_REGISTRY[raw?.chartType];
   if (!spec || typeof raw.id !== "string" || !raw.id.trim() || seenIds.has(raw.id)) return null;
   const b = raw.bindings || {};
   const coordinateLine = raw.chartType === "map_line" && b.lat && b.lng;
-  const required = coordinateLine ? ["lat", "lng"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["region", "value"]
+  const nativeKind = raw.chartType === "choropleth" ? "area" : raw.chartType === "map_line" ? "line" : null;
+  const nativeGeometry = profile?.spatial?.nativeGeometry === true && profile.spatial.geometryKinds?.includes(nativeKind);
+  const required = nativeGeometry ? [] : coordinateLine ? ["lat", "lng"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["region", "value"]
     : raw.chartType === "point" ? ["lat", "lng"]
       : raw.chartType === "hex_h3" ? ["lat", "lng", "value"]
         : raw.chartType === "line" ? ["x", "y"] : ["x", "y"];
@@ -287,9 +254,10 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds) {
     if (raw.chartType === "map_line" && !coordinateLine && slot === "region" && names.some(name => !["category", "geo"].includes(roleOf.get(name)))) return null;
     normalizedBindings[slot] = slot === "y" && raw.chartType === "line" ? [...new Set(names)] : names[0];
   }
-  for (const slot of coordinateLine ? ["region", "x", "value"] : raw.chartType === "point" ? ["region"] : []) {
+  for (const slot of nativeGeometry ? ["region", "value"] : coordinateLine ? ["region", "x", "value"] : raw.chartType === "point" ? ["region"] : []) {
     if (b[slot] == null || b[slot] === "") continue;
-    if (typeof b[slot] !== "string" || !fieldNames.has(b[slot]) || !spec.slots[slot]?.includes(roleOf.get(b[slot]))) return null;
+    const roles = nativeGeometry && slot === "region" ? ["geo", "category", "id", "text"] : spec.slots[slot];
+    if (typeof b[slot] !== "string" || !fieldNames.has(b[slot]) || !roles?.includes(roleOf.get(b[slot]))) return null;
     normalizedBindings[slot] = b[slot];
   }
   if (raw.chartType === "line" && typeof b.series === "string" && b.series) {
@@ -311,29 +279,10 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds) {
   };
 }
 
+/** An unavailable analysis retains data without making semantic or visualization decisions. */
 export function fallbackAnalysis(profile, { datasetTitle = "Dữ liệu tải lên" } = {}) {
-  const columns = (profile?.columns || []).map(inferColumnInfo);
-  const byRole = role => columns.filter(column => column.role === role);
-  const measures = byRole("measure");
-  const geo = byRole("geo");
-  const time = byRole("time")[0];
-  const category = byRole("category").find(column => ROAD_NAME_HINT.test(column.name)) || byRole("category")[0];
-  const lat = geo.find(column => column.geoLevel === "point_lat");
-  const lng = geo.find(column => column.geoLevel === "point_lng");
-  const region = preferredAdministrativeColumn(columns, profile);
-  const regionProfile = profile?.columns?.find(column => column.name === region?.name);
-  const groupingRegion = Number(regionProfile?.uniqueCount) > 1 ? region : null;
-  const suggestions = [];
-  const road = byRole("category").find(column => ROAD_NAME_HINT.test(column.name));
-  const roadValue = byRole("category").find(column => /mức độ ùn tắc|muc do un tac|traffic status|congestion/i.test(column.name)) || measures[0];
-  if (road && roadValue) suggestions.push({ id: "rule-map-line", chartType: "map_line", title: "Bản đồ Line", bindings: { region: road.name, value: roadValue.name }, agg: roadValue.aggDefault, confidence: .8, reason: "Ghép tên tuyến với mạng đường có sẵn để thể hiện dữ liệu theo vị trí thực tế.", source: "rule" });
-  if (region && measures[0]) suggestions.push({ id: "rule-choropleth", chartType: "choropleth", title: `${measures[0].name} theo ${region.name}`, bindings: { region: region.name, value: measures[0].name }, agg: measures[0].aggDefault, confidence: .72, reason: "Nhận diện theo quy tắc từ cột địa danh và chỉ số số.", source: "rule" });
-  if (lat && lng) suggestions.push({ id: "rule-point", chartType: "point", title: "Vị trí các bản ghi", bindings: { lat: lat.name, lng: lng.name }, agg: null, confidence: .95, reason: "Mỗi dòng có một cặp kinh độ, vĩ độ nên được hiển thị trực tiếp bằng điểm.", source: "rule" });
-  if (time && measures.length) suggestions.push({ id: "rule-line", chartType: "line", title: `Xu hướng theo ${time.name}`, bindings: { x: time.name, y: [measures[0].name], ...(groupingRegion || category ? { series: (groupingRegion || category).name } : {}) }, agg: null, confidence: .68, reason: "Nhận diện theo quy tắc từ cột thời gian và chỉ số số.", source: "rule" });
-  const x = groupingRegion || category || region;
-  if (x) suggestions.push({ id: "rule-bar", chartType: "bar", title: measures[0] ? `${measures[0].name} theo ${x.name}` : `Số bản ghi theo ${x.name}`, bindings: { x: x.name, y: measures[0]?.name || "count" }, agg: measures[0] ? measures[0].aggDefault : "count", confidence: .65, reason: "Nhận diện theo quy tắc từ cột phân loại.", source: "rule" });
-  return { datasetTitle, grain: "Một dòng tương ứng một bản ghi dữ liệu", columns,
-    suggestions: suggestions.map(suggestion => ({ ...suggestion, popupSuggestions: [], metricButtons: [] })), source: "rule" };
+  return { datasetTitle, grain: "Chưa có kết quả phân tích AI", columns: (profile?.columns || []).map(unclassifiedColumn),
+    suggestions: [], search_bar: false, search_fields: [], source: "rule" };
 }
 
 export function validateAndNormalizeAnalysis(raw, profile) {
@@ -349,13 +298,13 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     if (rawByName.has(column.name)) { errors.push(`Bỏ khai báo cột trùng: ${column.name}`); continue; }
     rawByName.set(column.name, column);
   }
-  const columns = actualColumns.map(column => normalizeColumn(rawByName.get(column.name), inferColumnInfo(column)));
+  const columns = actualColumns.map(column => normalizeColumn(rawByName.get(column.name), unclassifiedColumn(column)));
   const roleOf = new Map(columns.map(column => [column.name, column.role]));
   const seenIds = new Set();
   const rawSuggestions = Array.isArray(raw.suggestions) ? raw.suggestions : null;
   const suggestionsByType = new Map();
   for (const rawSuggestion of rawSuggestions || []) {
-    const suggestion = validateSuggestion(rawSuggestion, roleOf, fieldNames, seenIds);
+    const suggestion = validateSuggestion(rawSuggestion, roleOf, fieldNames, seenIds, profile);
     if (!suggestion) {
       errors.push(`Bỏ suggestion không hợp lệ: ${rawSuggestion?.id || rawSuggestion?.chartType || "(trống)"}`);
       continue;

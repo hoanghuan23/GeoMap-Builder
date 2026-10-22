@@ -20,12 +20,10 @@ export function nativeMapDataset(data, pipeline, fileName) {
   });
   const chartType = kinds[0] === 'area' ? 'choropleth' : 'map_line';
   const supplied = pipeline.analysis.suggestions.find(suggestion => suggestion.chartType === chartType);
-  const measure = columns.find(column => column.role === 'measure');
-  const suggestion = { ...(supplied || { id: 'native-geometry', chartType, title: chartType === 'choropleth' ? 'Bản đồ Polygon' : 'Bản đồ Line',
-    agg: measure?.aggDefault || null, confidence: 0, reason: 'Sử dụng geometry có sẵn trong dữ liệu.', source: 'rule', popupSuggestions: [], metricButtons: [], legend: null }),
-    bindings: { ...supplied?.bindings, lat: null, lng: null, region: identityField, nativeIdentity: identityField, value: supplied?.bindings.value || measure?.name || null },
-    available: true, feasibilityScore: 1, effectiveConfidence: supplied?.confidence || 0, nativeGeometry: true };
-  return { ...pipeline, records, analysis: { ...pipeline.analysis, columns }, fileName, suggestions: [suggestion], selectedSuggestionId: suggestion.id,
+  const suggestion = supplied ? { ...supplied,
+    bindings: { ...supplied.bindings, lat: null, lng: null, region: identityField, nativeIdentity: identityField, value: supplied.bindings.value || null },
+    available: true, feasibilityScore: 1, effectiveConfidence: supplied.confidence, nativeGeometry: true } : null;
+  return { ...pipeline, records, analysis: { ...pipeline.analysis, columns }, fileName, suggestions: suggestion ? [suggestion] : [], selectedSuggestionId: suggestion?.id || null,
     nativeGeometry: { features, records, identityField, titleField }, nativeTitleField: titleField,
     popupSelections: {}, filters: {}, geoAliases: {}, geoSelections: {}, roadColorOverrides: {}, recommendation: null };
 }

@@ -83,10 +83,6 @@
         <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p>Chọn thông tin để vẽ biểu đồ</p></div></div>
         <div id="data-mapping-controls"></div>
       </section>
-      <section id="metro-time-section" class="panel-section" hidden>
-        <div class="section-title"><span class="step">3</span><div><h2>Thời gian di chuyển</h2><p>So sánh thời gian xe buýt và xe máy</p></div></div>
-        <label class="field">Thời gian xuất phát<select id="metro-departure" aria-label="Thời gian xuất phát"></select></label>
-      </section>
       <section id="feature-section" class="panel-section feature-section" hidden>
         <button id="feature-toggle" class="section-title collapsible" aria-expanded="true"><span class="step">4</span><div><h2>Chức năng</h2><p>Bật/tắt tính năng bổ sung</p></div><span class="chevron">⌃</span></button>
         <div id="feature-controls" class="feature-controls">
@@ -101,11 +97,6 @@
               <small id="region-hex-note" class="region-hex-note" role="status"></small>
             </div>
           </div>
-          <div id="metro-layer-controls" hidden>
-            <label class="toggle-row"><span>Hiển thị vùng dữ liệu</span><input id="show-metro-cells" type="checkbox" checked><i></i></label>
-            <label class="toggle-row"><span>Hiển thị đường bao vùng</span><input id="show-metro-boundary" type="checkbox" checked><i></i></label>
-            <label class="toggle-row"><span>Hiển thị các điểm ga</span><input id="show-metro-stations" type="checkbox" checked><i></i></label>
-          </div>
           <label id="line-toggle-field" class="toggle-row" hidden><span id="line-toggle-label">Hiển thị đường nối giữa các điểm</span><input id="show-map-lines" type="checkbox" checked><i></i></label>
         </div>
       </section>
@@ -117,7 +108,6 @@
             <div id="polygon-color-ramp" class="field" hidden>
               <div class="field-label"><span id="polygon-color-label">Dải màu</span><small id="polygon-color-field"></small></div>
               <div id="polygon-palette-options" class="palette-row" role="group" aria-label="Chọn dải màu Polygon">
-                <button id="travel-palette" class="palette travel" type="button" data-palette="travel" aria-label="Dải màu tỷ lệ thời gian" title="Tỷ lệ thời gian xe buýt/xe máy" hidden></button>
                 <button class="palette" type="button" data-palette="diverging" aria-label="Dải màu phân kỳ" title="Dải màu phân kỳ"></button>
                 <button class="palette viridis" type="button" data-palette="viridis" aria-label="Dải màu Viridis" title="Dải màu Viridis"></button>
                 <button class="palette blue" type="button" data-palette="blue" aria-label="Dải màu xanh" title="Dải màu xanh"></button>
@@ -161,10 +151,8 @@
           <div id="map-metric-list" class="map-metric-list" role="group" aria-label="Chọn chỉ số hiển thị trên bản đồ"></div>
         </div>
         <div class="map-legends" role="group" aria-label="Chú giải bản đồ">
-          <div id="metro-legend" class="metro-legend" hidden aria-live="polite"></div>
           <div id="ai-line-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ mạng lưới" aria-live="polite"></div>
           <div id="point-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ điểm" aria-live="polite"></div>
-          <div id="transport-legend" class="transport-legend" hidden aria-live="polite"></div>
           <div id="weather-legend" class="weather-legend" hidden aria-live="polite">
             <div class="weather-legend-heading"><strong id="weather-legend-title"></strong><span id="weather-legend-mode" hidden></span></div>
             <div id="weather-legend-scale" class="weather-legend-scale"></div>

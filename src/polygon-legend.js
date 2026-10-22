@@ -38,15 +38,27 @@ export function polygonLegendLabels(scale, width = 280) {
   const format = value => new Intl.NumberFormat("vi-VN", { maximumSignificantDigits: 5 }).format(value);
   const chosen = [...new Set([scale.min, ...(scale.center == null ? [] : [scale.center]), ...scale.stops.map(([value]) => value), scale.max])];
   const labels = chosen.sort((a, b) => a - b).map(value => ({ value, text: format(value), position: position(value), row: 0 }));
+  const widths = labels.map(label => label.text.length * 6);
+  const lefts = labels.map((label, index) => {
+    const x = label.position * width / 100;
+    return labels.length > 1 && index === 0 ? x : index === labels.length - 1 && labels.length > 1 ? x - widths[index] : x - widths[index] / 2;
+  });
+  const gap = 8;
+  // Keep the actual tick positions; only nudge text when one row has enough room.
+  if (widths.reduce((sum, value) => sum + value, 0) + gap * (labels.length - 1) <= width) {
+    const packed = [...lefts];
+    for (let index = 1; index < packed.length; index++) packed[index] = Math.max(packed[index], packed[index - 1] + widths[index - 1] + gap);
+    packed[packed.length - 1] = Math.min(packed.at(-1), width - widths.at(-1));
+    for (let index = packed.length - 2; index >= 0; index--) packed[index] = Math.min(packed[index], packed[index + 1] - widths[index] - gap);
+    return labels.map((label, index) => ({ ...label, offset: packed[index] - lefts[index] }));
+  }
   const rowEnds = [];
   labels.forEach((label, index) => {
-    const labelWidth = label.text.length * 6;
-    const x = label.position * width / 100;
-    const left = labels.length > 1 && index === 0 ? x : index === labels.length - 1 && labels.length > 1 ? x - labelWidth : x - labelWidth / 2;
-    let row = rowEnds.findIndex(end => left >= end + 8);
+    const left = lefts[index];
+    let row = rowEnds.findIndex(end => left >= end + gap);
     if (row === -1) row = rowEnds.length;
     label.row = row;
-    rowEnds[row] = left + labelWidth;
+    rowEnds[row] = left + widths[index];
   });
   return labels;
 }

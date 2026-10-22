@@ -39,7 +39,7 @@ export async function analyzeMapComposition(body, env, fetchImpl = fetch) {
     const parsed = JSON.parse(text);
     const normalized = normalizeCompositionResult(parsed, input);
     if (env.AI_DEBUG === 'true') {
-      console.debug('AI map composition debug\n', JSON.stringify({ rawOutput: parsed, normalizedOutput: normalized }, null, 2));
+      console.debug('AI map composition debug\n', JSON.stringify({ instructions, input, rawOutput: parsed, normalizedOutput: normalized }, null, 2));
     }
     return normalized;
   } finally { clearTimeout(timer); }

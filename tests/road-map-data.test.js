@@ -14,13 +14,13 @@ const roads = { type: "FeatureCollection", features: [
 const profile = profileTabularData(trafficRecords);
 const analysis = validateAndNormalizeAnalysis(trafficAiAnalysis, profile);
 
-test("map_line có registry, validation và fallback riêng, không biến thành temporal line", () => {
+test("map_line có registry và validation, không tự thêm khi AI chưa đề xuất", () => {
   assert.equal(AI_CHART_REGISTRY.map_line.renderer, "MapLibre");
   assert.equal(AI_CHART_REGISTRY.map_line.label, "Bản đồ Line");
   assert.equal(AI_CHART_REGISTRY.line.renderer, "Recharts");
   assert.deepEqual(analysis.suggestions.map(item => item.chartType), ["map_line", "line", "bar"]);
   assert.deepEqual(analysis.validationErrors, []);
-  assert.ok(fallbackAnalysis(profile).suggestions.some(item => item.chartType === "map_line"));
+  assert.deepEqual(fallbackAnalysis(profile).suggestions, []);
   const bad = validateAndNormalizeAnalysis({ ...trafficAiAnalysis, suggestions: [
     { id: "bad", chartType: "map_line", bindings: { region: "Mã đường", value: TRAFFIC_SPEED } }
   ] }, profile);
@@ -39,24 +39,16 @@ test("tự xác định mạng đường từ cột Khu vực, kể cả dữ li
     { "Khu vực": "Hà Nội" }, { "Khu vực": "An Giang" }, { "Khu vực": "Chưa hỗ trợ" }
   ], columns), { field: "Khu vực", networkIds: ["hanoi", "an_giang"], unknownAreas: ["Chưa hỗ trợ"] });
   assert.deepEqual(roadNetworksFromRecords([{ province: "Đà Nẵng" }], [{ name: "province", role: "category" }]), {
-    field: "province", networkIds: ["da_nang"], unknownAreas: []
+    field: null, networkIds: [], unknownAreas: []
   });
+  assert.equal(roadAreaField([{ name: "market", role: "geo", geoLevel: "admin1" }]), "market");
 });
 
-test("road observations supplement Bản đồ Line when AI only suggests charts, without adding a polygon", () => {
-  const data = normalizeTabularRecords([...trafficRecords, ...trafficRecords.map(row => ({ ...row, "Khu vực": "An Giang" }))], analysis.columns);
-  const suggestions = prepareSuggestions({ ...analysis, suggestions: analysis.suggestions.filter(item => item.chartType !== "map_line") },
-    data.records, data.validRowRate, { mapTilerAvailable: true });
-  const road = suggestions.find(item => item.chartType === "map_line");
-  assert.ok(road.available);
-  assert.equal(road.title, "Bản đồ Line");
-  assert.equal(road.bindings.region, "Tên đường");
-  assert.equal(road.bindings.value, "Mức độ ùn tắc");
-  assert.equal(road.agg, null);
-  assert.equal(suggestions.some(item => item.chartType === "choropleth"), false);
-  const maps = prepareSuggestions({ ...analysis, suggestions: [] }, data.records, data.validRowRate, { mapOnly: true });
-  assert.deepEqual(maps.map(item => item.chartType), ["map_line"], "road metadata still provides a map after standalone chart suggestions are removed");
-  assert.equal(maps[0].source, "rule");
+test("road observations do not supplement missing AI map suggestions", () => {
+  const data = normalizeTabularRecords(trafficRecords, analysis.columns);
+  const suggestions = prepareSuggestions({ ...analysis, suggestions: analysis.suggestions.filter(item => item.chartType !== "map_line") }, data.records, data.validRowRate, { mapOnly: true });
+  assert.deepEqual(suggestions, []);
+  assert.deepEqual(prepareSuggestions({ ...analysis, suggestions: [] }, data.records, data.validRowRate, { mapOnly: true }), []);
 });
 
 test("ghép từng dòng vào đúng mạng theo Khu vực, không ghép chéo tên đường trùng", () => {
@@ -158,8 +150,8 @@ test("chỉ số bản đồ nhận cả số và trạng thái; màu/chú giả
   const categories = roadMapStyle({ features: [
     { properties: { "Mức độ ùn tắc": "Ùn tắc" } }, { properties: { "Mức độ ùn tắc": "Thông thoáng" } }
   ] }, analysis.columns.find(column => column.name === "Mức độ ùn tắc"));
-  assert.equal(categories.rows.find(row => row.label === "Ùn tắc").color, "#f97316");
-  assert.equal(categories.rows.find(row => row.label === "Thông thoáng").color, "#22c55e");
+  const renamed = roadMapStyle({ features: [{ properties: { status: "Ùn tắc" } }, { properties: { status: "Thông thoáng" } }] }, { name: "status", role: "category" });
+  assert.deepEqual(categories.rows, renamed.rows, "category colors do not depend on a known traffic field name");
   const categoryOverride = roadMapStyle({ features: [{ properties: { "Mức độ ùn tắc": "Ùn tắc" } }] },
     analysis.columns.find(column => column.name === "Mức độ ùn tắc"), { "category:Ùn tắc": "#123456" });
   assert.equal(categoryOverride.rows[0].color, "#123456");

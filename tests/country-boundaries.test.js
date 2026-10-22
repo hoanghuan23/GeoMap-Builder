@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
-import { fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
 import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
-import { fallbackMapRecommendation } from "../src/ai-data-analysis.js";
+import { mockMapRecommendation } from "./fixtures/mock-ai-analysis.js";
 import { buildAdministrativeGeocodingUrl, countryCandidateScore, getMapTilerAdministrativeBoundary, landOnlyBoundary } from "../src/map-search.js";
 import { normalizeTabularRecords } from "../src/tabular-data.js";
 import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
@@ -56,12 +57,12 @@ test("country identity matches Vietnamese, English, code and localized response 
 test("country weather XLSX matches five global polygons once and joins the correct values for every day", async () => {
   const parsed = parseSpreadsheetBuffer(createCountryWeatherWorkbook());
   assert.equal(parsed.records.length, 35);
-  const analysis = fallbackAnalysis(parsed.profile);
+  const analysis = mockAiAnalysis(parsed.profile);
   const region = analysis.columns.find(column => column.name === "Quốc gia");
   assert.equal(region.role, "geo");
   assert.equal(region.geoLevel, "country");
   assert.equal(region.country, null);
-  const recommendation = fallbackMapRecommendation(parsed.records);
+  const recommendation = mockMapRecommendation(parsed.records);
   assert.equal(recommendation.geometry.placeType, "country");
   assert.equal(recommendation.geometry.country, null);
   const requests = [];
@@ -98,16 +99,16 @@ test("country weather XLSX matches five global polygons once and joins the corre
   }
 });
 
-test("country names and code columns stay geographic when AI assigns ID, category or a Vietnam filter", () => {
+test("country names and code columns preserve the AI role and geographic level", () => {
   for (const field of ["Quốc gia", "Mã quốc gia", "Ma quoc gia", "Country Code"]) {
     const rows = CODE_COUNTRIES.map(country => ({ [field]: country.iso3, "Nhiệt độ trung bình": country.temperature }));
     const parsed = parseSpreadsheetBuffer(createCountryWeatherWorkbook(rows));
     for (const role of ["geo", "category", "text", "id"]) {
       const result = validateAndNormalizeAnalysis({ columns: [{ name: field, role, geoLevel: "admin1", country: "VN" }], suggestions: [] }, parsed.profile);
       const column = result.columns.find(column => column.name === field);
-      assert.equal(column.role, "geo", `${field}: ${role}`);
-      assert.equal(column.geoLevel, "country");
-      assert.equal(column.country, null);
+      assert.equal(column.role, role, `${field}: ${role}`);
+      assert.equal(column.geoLevel, role === "geo" ? "admin1" : null);
+      assert.equal(column.country, role === "geo" ? "VN" : null);
     }
   }
 });
@@ -116,13 +117,16 @@ test("ISO Alpha-3 weather XLSX joins all seven country metrics through MapTiler 
   const field = "Mã quốc gia";
   const rows = CODE_COUNTRIES.map(country => ({ [field]: country.iso3, "Ngày": "01/09/2026", "Nhiệt độ trung bình": country.temperature }));
   const parsed = parseSpreadsheetBuffer(createCountryWeatherWorkbook(rows));
-  const analysis = validateAndNormalizeAnalysis({ columns: [{ name: field, role: "id" }], suggestions: [] }, parsed.profile);
+  const analysis = validateAndNormalizeAnalysis({ ...mockAiAnalysis(parsed.profile), columns: [
+    { name: field, role: "geo", geoLevel: "country" }, { name: "Ngày", role: "time", timeParse: "text" },
+    { name: "Nhiệt độ trung bình", role: "measure", aggDefault: "mean", unit: "°C" }
+  ], suggestions: [{ id: "ai-country", chartType: "choropleth", bindings: { region: field, value: "Nhiệt độ trung bình" }, confidence: .9 }] }, parsed.profile);
   const { records, validRowRate } = normalizeTabularRecords(parsed.records, analysis.columns);
   const [suggestion] = prepareSuggestions(analysis, records, validRowRate);
   assert.equal(suggestion.chartType, "choropleth");
   assert.equal(suggestion.available, true);
   assert.equal(suggestion.bindings.region, field);
-  const recommendation = fallbackMapRecommendation(parsed.records);
+  const recommendation = mockMapRecommendation(parsed.records);
   assert.equal(recommendation.geometry.placeType, "country");
   assert.equal(recommendation.geometry.country, null);
   const codes = rows.map(row => row[field]);

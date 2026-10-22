@@ -21,7 +21,8 @@ function aggregate(values, aggregation) {
   if (aggregation === "sum") return numbers.reduce((sum, value) => sum + value, 0);
   if (aggregation === "min") return Math.min(...numbers);
   if (aggregation === "max") return Math.max(...numbers);
-  return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+  if (aggregation === "mean") return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+  return numbers.length === 1 ? numbers[0] : null;
 }
 
 export function summarizeFeatureProperties(records, columns, { metricField = null, metricAggregation = null } = {}) {
@@ -34,7 +35,7 @@ export function summarizeFeatureProperties(records, columns, { metricField = nul
     const present = values.filter(value => !isEmpty(value));
     if (!present.length) continue;
     if (column.role === "measure") {
-      const aggregation = name === metricField && metricAggregation ? metricAggregation : column.aggDefault || "mean";
+      const aggregation = name === metricField && metricAggregation ? metricAggregation : column.aggDefault;
       const value = aggregate(present, aggregation);
       if (value != null) properties[name] = value;
       continue;

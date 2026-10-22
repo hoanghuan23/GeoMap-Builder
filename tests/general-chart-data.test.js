@@ -29,7 +29,7 @@ test("không thêm bar khi AI trả rỗng, có chiều nhóm khác, hoặc phé
   assert.match(suggestions[0].unavailableReason, /phép gộp/);
 });
 
-test("cột có chữ total phải bằng tổng thành phần cùng đơn vị mới được ưu tiên", () => {
+test("không suy ra chỉ số total hoặc thêm biểu đồ ngoài quyết định AI", () => {
   const columns = [time,
     { name: "east", role: "measure", unit: "VND", aggDefault: "sum" },
     { name: "west", role: "measure", unit: "VND", aggDefault: "sum" },
@@ -39,15 +39,15 @@ test("cột có chữ total phải bằng tổng thành phần cùng đơn vị 
   const records = [{ period: "T1", east: 1, west: 2, total_rate: 3, total_other: 100 }, { period: "T2", east: 3, west: 4, total_rate: 7, total_other: 200 }];
   const analysis = { columns, suggestions: [{ ...line, bindings: { x: "period", y: ["east", "west"] } }] };
   const rates = Object.fromEntries(columns.map(column => [column.name, 1]));
-  assert.equal(prepareSuggestions(analysis, records, rates).find(item => item.chartType === "bar").bindings.y, "east");
+  assert.equal(prepareSuggestions(analysis, records, rates).some(item => item.chartType === "bar"), false);
   const validTotal = records.map(record => ({ ...record, total_other: record.east + record.west }));
-  assert.equal(prepareSuggestions(analysis, validTotal, rates).find(item => item.chartType === "bar").bindings.y, "total_other");
+  assert.equal(prepareSuggestions(analysis, validTotal, rates).some(item => item.chartType === "bar"), false);
 });
 
 test("chuỗi dài giữ đủ kỳ và không tổng hợp thời gian thành Khác", () => {
   const columns = [{ name: "period", role: "time" }, { name: "score", role: "measure", aggDefault: "sum" }];
   const records = Array.from({ length: 40 }, (_, index) => ({ period: new Date(Date.UTC(2026, 0, index + 1)), score: 40 - index }));
-  const bar = prepareSuggestions({ columns, suggestions: [line] }, records, coverage).find(item => item.chartType === "bar");
+  const bar = prepareSuggestions({ columns, suggestions: [{ ...line, chartType: "bar", bindings: { x: "period", y: "score" } }] }, records, coverage).find(item => item.chartType === "bar");
   assert.equal(buildBarChartOption(bar, records, columns).config.data.length, 40);
   const limited = buildBarChartOption(bar, records, columns, { top: 10 });
   assert.equal(limited.config.data.length, 10);
@@ -89,17 +89,17 @@ test("giữ giờ cùng ngày, không biến null thành zero, từ chối trộ
   assert.equal(new Set(buildBarChartOption(suggestion, days, monthMetadata).config.data.map(row => row.period)).size, 2);
 });
 
-test("tỷ lệ dùng mean, chỉ số chưa rõ không tự có phép gộp, ID không thành thời gian", () => {
+test("fallback không suy đoán phép gộp hay role dựa vào tên cột", () => {
   const result = fallbackAnalysis({ rowCount: 2, columns: [
     { name: "revenue_rate", inferredType: "number", uniqueCount: 2 },
     { name: "Doanh thu", inferredType: "number", uniqueCount: 2 },
     { name: "measurement", inferredType: "number", uniqueCount: 2 },
     { name: "timestamp_id", inferredType: "number", uniqueCount: 2 }
   ] });
-  assert.equal(result.columns[0].aggDefault, "mean");
-  assert.equal(result.columns[1].aggDefault, "sum");
+  assert.equal(result.columns[0].aggDefault, null);
+  assert.equal(result.columns[1].aggDefault, null);
   assert.equal(result.columns[2].aggDefault, null);
-  assert.equal(result.columns[3].role, "id");
+  assert.equal(result.columns[3].role, "ignore");
 });
 
 test("giao diện dùng đúng cột thời gian đã bind và giữ aggregation tự động", () => {

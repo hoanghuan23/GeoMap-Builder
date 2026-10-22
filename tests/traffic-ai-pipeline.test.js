@@ -7,7 +7,7 @@ import { displayFilterValue, requestAiDataAnalysis } from "../src/ai-data-analys
 import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
 import { buildPopupChart, createPopupChartSelection } from "../src/ai-popup-chart.js";
 import { formatLineX } from "../src/charts/line-chart.js";
-import { readMetroData } from "../src/metro-data.js";
+import { jsonDatasets } from "../src/json-datasets.js";
 import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
 import { profileTabularData } from "../src/tabular-data.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "../src/tabular-worker-client.js";
@@ -17,7 +17,7 @@ function uploadHarness() {
   const context = vm.createContext({
     CONFIG: { DEFAULT_RESOLUTION: 6 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
     document: { getElementById: () => ({ checked: true }) },
-    parseSpreadsheetFile, profileRecordsInWorker, requestAiDataAnalysis, readMetroData,
+    parseSpreadsheetFile, profileRecordsInWorker, requestAiDataAnalysis, jsonDatasets,
     recordsToPointGeoJSON() { throw new Error("No coordinates"); }
   });
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
@@ -75,20 +75,16 @@ test("traffic XLSX và JSON chỉ đề xuất bản đồ Line, popup cột/đ�
   }
 });
 
-test("tên đường có hơn 80 giá trị vẫn là chiều phân nhóm, không bị hiểu thành vùng hành chính", () => {
+test("traffic column names do not override AI roles", () => {
   const { profile } = parseSpreadsheetBuffer(createRoadTrafficWorkbook());
-  const fallback = fallbackAnalysis({ ...profile, columns: [...profile.columns].reverse() });
-  assert.equal(fallback.columns.find(column => column.name === "Tên đường").role, "category");
-  assert.equal(fallback.suggestions.find(item => item.chartType === "line").bindings.series, "Tên đường");
-  assert.equal(fallback.suggestions.find(item => item.chartType === "bar").bindings.x, "Tên đường");
+  assert.deepEqual(fallbackAnalysis(profile).suggestions, []);
   for (const role of ["text", "geo"]) {
     const analysis = validateAndNormalizeAnalysis({ ...trafficAiAnalysis, columns: [
       ...trafficAiAnalysis.columns.filter(column => column.name !== "Tên đường"),
-      { name: "Tên đường", role, geoLevel: "admin2", country: "VN" }
-    ] }, profile);
-    assert.equal(analysis.columns.find(column => column.name === "Tên đường").role, "category");
-    assert.equal(analysis.columns.find(column => column.name === "Tên đường").geoLevel, null);
-    assert.equal(analysis.suggestions.length, 3);
+      { name: "Tên đường", role, geoLevel: role === "geo" ? "admin2" : null, country: "VN" }
+    ], suggestions: [] }, profile);
+    assert.equal(analysis.columns.find(column => column.name === "Tên đường").role, role);
+    assert.deepEqual(prepareSuggestions(analysis, trafficRecords, {}, { mapOnly: true }), []);
   }
 });
 

@@ -65,7 +65,7 @@ test("middleware forwards per-column temperature semantics and legends without c
     assert.match(payload.instructions, /MỘT đối tượng được bấm/);
     return { ok: true, json: async () => ({ output_text: JSON.stringify({
       search_bar: true, search_fields: ["province", "temperature", "not_in_input", "province"],
-      columns: [{ name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", semanticType: "air_temperature", legend }],
+      columns: [{ name: "province", role: "geo", geoLevel: "admin1" }, { name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", semanticType: "air_temperature", legend }],
       suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend, popupSuggestions, metricButtons }]
     }) }) };
   };
@@ -141,7 +141,7 @@ test("middleware chỉ gọi OpenAI một lần và fallback ngay khi output kh�
     assert.equal(calls, 1);
     assert.equal(upstreamUrl, "https://api.vilao.ai/v1/responses");
     assert.equal(response.body.source, "rule");
-    assert.ok(response.body.suggestions.some(item => item.chartType === "choropleth"));
+    assert.deepEqual(response.body.suggestions, []);
     const sent = JSON.parse(upstreamBody.input);
     assert.equal(sent.profile.rowCount, 2);
     assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "map_line", "point"]);
@@ -205,7 +205,7 @@ test("malformed analysis JSON returns an error after one upstream request", asyn
 test("debug output preserves valid raw and normalized legends from the same analysis", async () => {
   const originalFetch = globalThis.fetch; const originalDebug = console.debug; let debug;
   const legend = legendFixture();
-  const raw = { columns: [{ name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", legend }],
+  const raw = { columns: [{ name: "province", role: "geo", geoLevel: "admin1" }, { name: "temperature", role: "measure", unit: "°C", aggDefault: "mean", legend }],
     suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend: null }] };
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ output_text: JSON.stringify(raw) }) });
   console.debug = (_label, value) => { debug = JSON.parse(value); };
@@ -214,8 +214,37 @@ test("debug output preserves valid raw and normalized legends from the same anal
       profile: { rowCount: 2, columns: [{ name: "province", inferredType: "text" }, { name: "temperature", inferredType: "number" }] }
     });
     assert.equal(response.status, 200);
-    assert.deepEqual(debug.rawOutput.columns[0].legend, legend);
+    assert.deepEqual(debug.rawOutput.columns[1].legend, legend);
     assert.deepEqual(debug.normalizedOutput.columns[1].legend, legend);
     assert.deepEqual(debug.normalizedOutput.suggestions[0].legend, legend);
   } finally { globalThis.fetch = originalFetch; console.debug = originalDebug; }
+});
+
+test("native geometry without attribute columns still receives an AI decision", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [kind, chartType] of [["area", "choropleth"], ["line", "map_line"]]) {
+      let calls = 0;
+      globalThis.fetch = async (_url, options) => {
+        calls++;
+        const payload = JSON.parse(options.body);
+        const input = JSON.parse(payload.input);
+        assert.equal(input.profile.spatial.nativeGeometry, true);
+        assert.match(input.spatialContext, /Nếu suggestions rỗng thì ứng dụng không tự tạo bản đồ/);
+        assert.doesNotMatch(payload.instructions, /domain \[-20, 40\]/);
+        return { ok: true, json: async () => ({ output_text: JSON.stringify({
+          datasetTitle: "Geometry", grain: "Một đối tượng", columns: [], search_bar: false, search_fields: [],
+          suggestions: [{ id: "native", chartType, confidence: .82, bindings: { region: null, value: null }, reason: "Có geometry phù hợp" }]
+        }) }) };
+      };
+      const response = await call(middlewareFor({ OPENAI_API_KEY: "test" }), {
+        profile: { rowCount: 1, columns: [], spatial: { geometryKinds: [kind], nativeGeometry: true } }
+      });
+      assert.equal(response.status, 200);
+      assert.equal(calls, 1);
+      assert.equal(response.body.source, "ai");
+      assert.equal(response.body.suggestions[0].chartType, chartType);
+      assert.deepEqual(response.body.suggestions[0].bindings, {});
+    }
+  } finally { globalThis.fetch = originalFetch; }
 });

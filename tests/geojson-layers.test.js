@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clipGeoJSONToPolygon, geometryKinds, isHexagonGeoJSON, pointGeoJSONToRecords } from "../src/geojson-layers.js";
-import { fallbackAnalysis } from "../src/ai-chart-contract.js";
+import { clipGeoJSONToPolygon, geometryKinds, pointGeoJSONToRecords } from "../src/geojson-layers.js";
+import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
 import { profileTabularData } from "../src/tabular-data.js";
 
 const cells = {
@@ -12,10 +12,9 @@ const cells = {
   ]
 };
 
-test("recognizes uploaded geometry roles and hexagon files", () => {
+test("recognizes uploaded geometry independently of names or application domains", () => {
   assert.deepEqual(geometryKinds(cells), ["area"]);
-  assert.equal(isHexagonGeoJSON(cells, "anything.geojson"), true);
-  assert.equal(isHexagonGeoJSON({ type: "FeatureCollection", features: [] }, "hexagons.geojson"), false);
+  assert.deepEqual(geometryKinds({ type: "FeatureCollection", features: [] }), []);
 });
 
 test("clips hexagon geometry to the drawn polygon instead of only filtering it", () => {
@@ -46,7 +45,7 @@ test("Point analysis retains properties, feature IDs and authoritative geometry 
   assert.equal(records[0][bindings.lng], 105.935752);
   assert.equal(records[0].__geojson_feature_id_2, "KT001");
   for (const [field, value] of Object.entries(data.features[0].properties)) assert.equal(records[0][field], value);
-  const analysis = fallbackAnalysis(profileTabularData(records));
+  const analysis = mockAiAnalysis(profileTabularData(records));
   assert.deepEqual(analysis.suggestions.find(item => item.chartType === "point").bindings, bindings);
   assert.deepEqual(analysis.columns.filter(column => column.role === "measure").map(column => column.name), ["nhiet_do_c", "do_am_phan_tram"]);
 });

@@ -2861,19 +2861,7 @@ th:last-child {
         width: 130px
     }
 }
-.palette.travel {
-  background: linear-gradient(to right, #53d7e8 25%, #168c50 25%, #168c50 50%, #e5b00d 50%, #e5b00d 75%, #f06b24 75%);
-}
 
-:is(#metro-departure,[data-control-id="metro-departure"]) {
-  margin-top: 8px;
-  width: 100%;
-  padding: 9px;
-  border: 1px solid #d7dfed;
-  border-radius: 6px;
-  background: #fff;
-  color: #182338;
-}
 
 .map-legends {
   position: absolute;
@@ -2893,8 +2881,6 @@ th:last-child {
 
 .map-legends > [hidden] { display: none; }
 
-.metro-legend,
-.transport-legend,
 .point-legend,
 .weather-legend {
   flex: 0 0 auto;
@@ -2922,38 +2908,15 @@ th:last-child {
 .point-legend-row > b { color: #cbd5e1; font-weight: 500; font-variant-numeric: tabular-nums; }
 .point-legend > small { display: block; margin-top: 12px; padding-top: 10px; border-top: 1px solid #ffffff17; color: #a5b4c8; font-size: 10px; line-height: 1.6; }
 
-.metro-legend strong, .metro-legend small,
-.transport-legend strong, .transport-legend small,
 .weather-legend strong, .weather-legend small { display: block; }
-.metro-legend small,
-.transport-legend small,
 .weather-legend small { color: #a5b4c8; margin-top: 10px; }
-.transport-legend {
-  width: 410px;
-}
-.transport-legend-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
-.transport-legend-heading strong { font-size: 13px; }
-.transport-legend-heading span { color: #94a3b8; font-size: 11px; white-space: nowrap; }
-.transport-legend-groups { display: grid; gap: 12px; margin-top: 12px; }
-.transport-legend-groups section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 14px; }
-.transport-legend-groups section > b { grid-column: 1 / -1; color: #f8fafc; font-size: 11px; }
-.transport-legend-groups section > span { display: flex; min-width: 0; align-items: center; gap: 7px; }
-.transport-legend-groups em { overflow: hidden; color: #cbd5e1; font-size: 10px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
-.transport-legend-groups i { flex: 0 0 auto; width: 10px; height: 10px; background: var(--transport-color); }
-.transport-legend-groups i.point { border: 1px solid #fff; border-radius: 50%; }
-.transport-legend-groups i.area { border: 1px solid color-mix(in srgb, var(--transport-color), white 35%); border-radius: 2px; opacity: .8; }
-.transport-legend-groups i.line { width: 18px; height: 3px; border-radius: 999px; }
-.transport-legend > small { padding-top: 9px; border-top: 1px solid #ffffff17; }
-.transport-popup { min-width: 220px; color: #182338; font: 12px/1.5 Inter, sans-serif; }
-.transport-popup > strong { display: block; padding-right: 8px; font-size: 14px; }
-.transport-popup > small { display: block; margin-top: 2px; color: #64748b; }
-.transport-popup dl { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid #e2e8f0; }
-.transport-popup dl div { display: flex; justify-content: space-between; gap: 18px; }
-.transport-popup dt { color: #64748b; }
-.transport-popup dd { margin: 0; font-weight: 600; text-align: right; }
-.metro-legend-scale { display: flex; margin-top: 10px; }
-.metro-legend-scale span { flex: 1; text-align: center; white-space: nowrap; }
-.metro-legend-scale i { display: block; height: 8px; margin-bottom: 7px; }
+.data-feature-popup { min-width: 220px; color: #182338; font: 12px/1.5 Inter, sans-serif; }
+.data-feature-popup > strong { display: block; padding-right: 8px; font-size: 14px; }
+.data-feature-popup > small { display: block; margin-top: 2px; color: #64748b; }
+.data-feature-popup dl { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid #e2e8f0; }
+.data-feature-popup dl div { display: flex; justify-content: space-between; gap: 18px; }
+.data-feature-popup dt { color: #64748b; }
+.data-feature-popup dd { margin: 0; font-weight: 600; text-align: right; }
 .weather-legend { width: 330px; }
 .weather-legend-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .weather-legend-heading strong { flex: 1 1 150px; min-width: 0; overflow-wrap: anywhere; }
@@ -2963,7 +2926,8 @@ th:last-child {
 .polygon-legend-summary[hidden] { display: none; }
 .polygon-legend-summary::before { content: ""; display: block; height: 8px; margin: 4px 0 7px; border-radius: 6px; background: var(--legend-gradient); }
 .polygon-legend-summary:not([hidden]) + .palette-help { display: none; }
-.weather-legend-scale { height: 10px; margin-top: 11px; border-radius: 6px; }
+.weather-legend-scale { position: relative; height: 10px; margin-top: 11px; border-radius: 6px; }
+.polygon-legend-tick { position: absolute; bottom: -3px; width: 1px; height: 3px; background: #cbd5e1; transform: translateX(-50%); }
 .weather-legend-scale.diverging { background: linear-gradient(90deg, #313695, #74add1, #ffffbf, #f46d43, #a50026); }
 .weather-legend-scale.viridis { background: linear-gradient(90deg, #440154, #31688e, #35b779, #90d743, #fde725); }
 .weather-legend-scale.blue { background: linear-gradient(90deg, #eff6ff, #bfdbfe, #60a5fa, #2563eb, #1e3a8a); }
@@ -3012,29 +2976,6 @@ th:last-child {
   z-index: 2;
 }
 
-.metro-comparison-popup { width: min(380px, calc(100vw - 60px)); }
-.metro-comparison-popup .maplibregl-popup-tip { display: none; }
-.metro-comparison-popup .maplibregl-popup-content {
-  width: 100%;
-  padding: 0;
-  border: 1px solid #34352a;
-  border-radius: 18px;
-  background: linear-gradient(135deg, #101018, #0e171b);
-  box-shadow: 0 16px 48px #0006;
-}
-.metro-comparison-popup .maplibregl-popup-close-button {
-  top: -40px;
-  right: 0;
-  width: 32px;
-  height: 32px;
-  border: 1px solid #ffffff40;
-  border-radius: 50%;
-  background: #30353bdd;
-  color: #d6dee6;
-  font-size: 22px;
-  line-height: 28px;
-}
-.metro-comparison-popup .maplibregl-popup-close-button:hover { background: #475569; }
 .weather-cell-popup .maplibregl-popup-content,
 .ai-weather-popup .maplibregl-popup-content {
   min-width: 260px;
@@ -3090,42 +3031,6 @@ th:last-child {
 .weather-popup dt { color: #94a3b8; }
 .weather-popup dd { margin: 3px 0 0; color: #f8fafc; font-size: 14px; font-weight: 700; }
 .weather-popup-status { margin: 14px 0 0; color: #cbd5e1; }
-.metro-comparison { padding: 28px 24px 24px; color: #d7dde5; font-size: 14px; }
-.metro-comparison p { margin: 0; color: #94a3b8; text-align: center; line-height: 1.5; }
-.metro-comparison-ratio {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 14px;
-  padding: 4px 0 20px;
-  border-bottom: 1px solid #ffffff1a;
-  color: #13ad50;
-  font-family: Inter, "Segoe UI", Arial, sans-serif;
-  font-variant-numeric: lining-nums tabular-nums;
-  letter-spacing: normal;
-  white-space: nowrap;
-}
-.metro-comparison-ratio strong { font-size: 52px; line-height: 1.15; }
-.metro-comparison-ratio span { font-size: 27px; }
-.metro-comparison-bars {
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-evenly;
-  height: 132px;
-  margin: 58px 18px 58px 52px;
-}
-.metro-comparison-axis { position: absolute; inset: 0; pointer-events: none; }
-.metro-comparison-axis-unit { position: absolute; top: -34px; left: -14px; color: #6c819c; font-size: 12px; }
-.metro-comparison-tick { position: absolute; left: 0; right: 0; border-top: 1px solid #95891926; }
-.metro-comparison-tick span { position: absolute; right: calc(100% + 12px); transform: translateY(-50%); color: #6c819c; font-size: 11px; }
-.metro-comparison-column { position: relative; width: 48px; z-index: 1; }
-.metro-comparison-column b { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 14px; }
-.metro-comparison-column i { display: block; width: 100%; height: 100%; background: #475569; border-radius: 4px 4px 0 0; }
-.metro-comparison-column:nth-child(2) i { border: 2px dashed #e2e8f0; }
-.metro-comparison-column > span { position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); white-space: nowrap; font-weight: 600; }
-.metro-comparison-notes { display: block; color: #71849e; font-size: 12px; line-height: 1.6; }
-.metro-comparison-notes div + div { margin-top: 5px; }
 
 /* Workspace composition: one canvas, independent controls and legends per dataset. */
 .layer-sidebar[hidden], .layer-sidebar [hidden], .layer-legends[hidden], .workspace-metrics > [hidden], .workspace-tables > [hidden] { display: none !important; }

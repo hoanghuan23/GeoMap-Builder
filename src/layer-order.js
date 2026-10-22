@@ -4,12 +4,11 @@ function layerKinds(layer) {
 
 export function layerRank(layer) {
   const role = String(layer.role || "").toLowerCase();
-  const name = String(layer.name || "").toLowerCase();
   const kinds = layerKinds(layer);
-  if (role === "hexagon" || /hexagons?|h3/.test(name)) return 0;
+  if (role === "hexagon") return 10;
   if (role === "area" || kinds.includes("area")) return 10;
-  if (role === "line" || kinds.includes("line") || /(route|tuyến|metro_route)/.test(name)) return 20;
-  if (role === "point" || kinds.includes("point") || /(stations?|nhà ga|ga[-_ ]?)/.test(name)) return 30;
+  if (role === "line" || kinds.includes("line")) return 20;
+  if (role === "point" || kinds.includes("point")) return 30;
   return 15;
 }
 

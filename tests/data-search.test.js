@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildDataSearchIndex, createMapSearch, searchDataIndex } from "../src/map-search.js";
-import { fallbackAnalysis } from "../src/ai-chart-contract.js";
-import { fallbackMapRecommendation } from "../src/ai-data-analysis.js";
+import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
+import { mockMapRecommendation } from "./fixtures/mock-ai-analysis.js";
 import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
 import { normalizeTabularRecords } from "../src/tabular-data.js";
 import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
@@ -15,8 +15,8 @@ function countryData() {
   const parsed = parseSpreadsheetBuffer(createCountryWeatherWorkbook(names.map((name, index) => ({
     "Tên quốc gia": name, "Ngày": "01/09/2026", "Nhiệt độ trung bình": 20 + index
   }))));
-  const analysis = fallbackAnalysis(parsed.profile);
-  const recommendation = fallbackMapRecommendation(parsed.records);
+  const analysis = mockAiAnalysis(parsed.profile);
+  const recommendation = mockMapRecommendation(parsed.records);
   const { records } = normalizeTabularRecords(parsed.records, analysis.columns);
   const boundaries = { type: "FeatureCollection", features: names.map(name => ({
     ...countryFeature(WEATHER_COUNTRIES[0]),

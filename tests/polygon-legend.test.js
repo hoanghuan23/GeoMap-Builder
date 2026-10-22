@@ -44,6 +44,28 @@ test("legend keeps all seven reference ticks on full and narrow layouts", () => 
   assert.ok(polygonLegendLabels(scale, 100).some(label => label.row > 0), "crowded labels move to another row instead of disappearing");
 });
 
+test("uneven stops share a row without overlapping labels or moving their color ticks", () => {
+  for (const values of [[0, 10, 40, 100, 200], [0, 100, 160, 190, 200]]) {
+    const width = 290;
+    const scale = { hasData: true, min: 0, max: 200, stops: values.map(value => [value, "#123456"]) };
+    const before = JSON.stringify(scale);
+    const labels = polygonLegendLabels(scale, width);
+    assert.deepEqual(labels.map(label => label.value), values);
+    assert.ok(labels.every(label => label.row === 0));
+    assert.deepEqual(labels.map(label => label.position), values.map(value => value / 2));
+    let end = -8;
+    labels.forEach((label, index) => {
+      const textWidth = label.text.length * 6;
+      const x = label.position * width / 100;
+      const left = (index === 0 ? x : index === labels.length - 1 ? x - textWidth : x - textWidth / 2) + label.offset;
+      assert.ok(left >= end + 8 - 1e-10, "text labels retain an eight-pixel gap");
+      assert.ok(left >= 0 && left + textWidth <= width);
+      end = left + textWidth;
+    });
+    assert.equal(JSON.stringify(scale), before);
+  }
+});
+
 test("diverging keeps its center and colors when observations are one-sided or filtered", () => {
   const legend = legendFixture({ type: "diverging", center: 0 });
   for (const values of [[-5, 8], [10, 20], [-30, 70]]) {

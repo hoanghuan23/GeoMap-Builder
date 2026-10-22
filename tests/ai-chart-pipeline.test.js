@@ -23,8 +23,7 @@ test("map feasibility preserves its own popup recommendations through preparatio
   assert.equal(result[0].available, true);
   const rule = prepareSuggestions({ columns: columns.map(column => column.role === "geo" ? { ...column, geoLevel: "admin1" } : column),
     suggestions: [] }, records, { province: 1, date: 1, rain: 1 }, { mapOnly: true });
-  assert.equal(rule[0].source, "rule");
-  assert.equal(rule[0].popupSuggestions, undefined, "generated maps do not invent AI scores");
+  assert.deepEqual(rule, [], "an empty AI decision stays empty");
 });
 
 test("bar aggregate theo nhóm và gộp phần dư thành Khác", () => {
@@ -92,7 +91,7 @@ test("bar ghép áp dụng phép tính đã chọn cho mọi chỉ số, tính K
   ]);
 });
 
-test("bảng doanh thu T01-T12 được bổ sung bar theo thời gian và giữ đúng thứ tự tháng", () => {
+test("bảng doanh thu giữ đúng đề xuất Line của AI và không tự bổ sung Bar", () => {
   const records = Array.from({ length: 12 }, (_, index) => ({
     "Tháng": `T${String(index + 1).padStart(2, "0")}`,
     "Miền Bắc": 100 + index,
@@ -134,9 +133,8 @@ test("bảng doanh thu T01-T12 được bổ sung bar theo thời gian và giữ
   const bar = suggestions.find(item => item.chartType === "bar");
 
   assert.equal(line.available, true);
-  assert.equal(bar.available, true);
-  assert.deepEqual(bar.bindings, { x: "Tháng", y: "Tổng doanh thu" });
-  const option = buildBarChartOption(bar, normalized.records, analysis.columns, { top: "all" });
+  assert.equal(bar, undefined);
+  const option = buildLineChartOption(line, normalized.records, analysis.columns);
   assert.deepEqual(option.config.data.map(row => row["Tháng"]), records.map(record => record["Tháng"]));
 });
 
@@ -254,13 +252,13 @@ test("line giới hạn selectedSeries theo maxSeries", () => {
   assert.equal(option.config.series.length, 3);
 });
 
-test("feasibility kết hợp coverage với confidence và khóa line chỉ có một mốc", () => {
+test("feasibility khóa line chỉ có một mốc và giữ nguyên confidence AI", () => {
   const result = evaluateSuggestion(
     { id: "line", chartType: "line", title: "L", bindings: { x: "date", y: ["rain"] }, confidence: .9 },
     [{ date: new Date(), rain: 1 }], columns, { date: 1, rain: 1 }
   );
   assert.equal(result.available, false);
-  assert.equal(result.effectiveConfidence, .74);
+  assert.equal(result.effectiveConfidence, .9);
 });
 
 test("H3 bị khóa nếu các điểm hợp lệ chỉ tạo thành một cell", () => {
@@ -274,102 +272,23 @@ test("H3 bị khóa nếu các điểm hợp lệ chỉ tạo thành một cell"
   assert.match(result.unavailableReason, /hai ô H3/);
 });
 
-test("bảng thời tiết 34 tỉnh vẫn có biểu đồ vùng khi AI bỏ sót, lọc ngày rồi ghép đúng vùng", () => {
-  const parsed = parseSpreadsheetBuffer(createWeather34Workbook(), { sheetName: "Thoi_tiet_thang_9" });
-  const line = {
-    id: "weather-line", chartType: "line", title: "Xu hướng nhiệt độ", confidence: .95,
-    bindings: { x: "Ngày", y: ["Nhiệt độ trung bình"], series: "Tỉnh/thành phố" }
-  };
-  const analysis = validateAndNormalizeAnalysis({
-    datasetTitle: "Thời tiết", grain: "một tỉnh một ngày",
-    columns: [{ name: "Tỉnh/thành phố", role: "category" }],
-    suggestions: [line]
-  }, parsed.profile);
-  const normalized = normalizeTabularRecords(parsed.records, analysis.columns);
-  const suggestions = prepareSuggestions(analysis, normalized.records, normalized.validRowRate, { mapTilerAvailable: true });
-  const choropleth = suggestions.find(item => item.chartType === "choropleth");
-  assert.equal(choropleth.available, true);
-  assert.deepEqual(choropleth.bindings, { region: "Tỉnh/thành phố", value: "Nhiệt độ trung bình" });
-  assert.equal(choropleth.agg, "mean");
-  assert.equal(choropleth.source, "rule");
-  assert.equal(suggestions.find(item => item.chartType === "line").id, line.id);
-  assert.equal(suggestions.some(item => ["point", "hex_h3"].includes(item.chartType)), false);
-
-  const time = defaultTimeFilter(normalized.records, analysis.columns, choropleth.chartType);
-  assert.equal(time.default, "2026-09-30T00:00:00.000Z");
-  const boundaries = { type: "FeatureCollection", features: WEATHER_PROVINCES.map((name, index) => ({
-    type: "Feature", properties: { __data_location: name },
-    geometry: { type: "Polygon", coordinates: [[[index, 0], [index + 1, 0], [index + 1, 1], [index, 0]]] }
-  })) };
-  const data = joinRecordsToMapTilerBoundaries(normalized.records, boundaries, {
-    geometry: { field: choropleth.bindings.region },
-    metricField: choropleth.bindings.value,
-    aggregation: choropleth.agg
-  }, { filters: { [time.column]: time.default }, columns: analysis.columns });
-  assert.equal(data.features.length, 34);
-  for (const feature of data.features) {
-    const record = normalized.records.find(record => record["Tỉnh/thành phố"] === feature.properties.__location
-      && record["Ngày"].toISOString() === time.default);
-    assert.equal(feature.properties["Nhiệt độ trung bình"], record["Nhiệt độ trung bình"]);
-    assert.equal(feature.properties.__record_count, 1);
-  }
+test("AI suggestions remain empty across weather, traffic and coordinate datasets", () => {
+  for (const [columns, records] of [
+    [[{ name: "province", role: "geo", geoLevel: "admin1" }, { name: "temperature", role: "measure", aggDefault: "mean" }], [{ province: "A", temperature: 20 }, { province: "B", temperature: 30 }]],
+    [[{ name: "Khu vực", role: "geo", geoLevel: "admin1" }, { name: "Tên đường", role: "category" }, { name: "speed", role: "measure" }], [{ "Khu vực": "Hà Nội", "Tên đường": "A", speed: 20 }]],
+    [[{ name: "lat", role: "geo", geoLevel: "point_lat" }, { name: "lng", role: "geo", geoLevel: "point_lng" }], [{ lat: 21, lng: 105 }, { lat: 22, lng: 106 }]]
+  ]) assert.deepEqual(prepareSuggestions({ columns, suggestions: [] }, records, {}, { mapOnly: true }), []);
 });
 
-test("chỉ bổ sung biểu đồ vùng khi có số liệu hợp lệ ở ít nhất hai địa phương", () => {
-  const regionColumns = [
-    { name: "province", role: "geo", geoLevel: "admin1" },
-    { name: "temperature", role: "measure", aggDefault: "mean" }
+test("AI priority is preserved across renderable map types", () => {
+  const columns = [{ name: "lat", role: "geo", geoLevel: "point_lat" }, { name: "lng", role: "geo", geoLevel: "point_lng" }];
+  const suggestions = [
+    { id: "point", chartType: "point", confidence: .99, bindings: { lat: "lat", lng: "lng" } },
+    { id: "line", chartType: "map_line", confidence: .8, bindings: { lat: "lat", lng: "lng" } }
   ];
-  const analysis = { columns: regionColumns, suggestions: [] };
-  const coverage = { province: 1, temperature: 1 };
-  for (const records of [
-    [{ province: "Hà Nội", temperature: 29 }, { province: "Hà Nội", temperature: 30 }],
-    [{ province: "Hà Nội", temperature: 29 }, { province: "Huế", temperature: null }]
-  ]) {
-    assert.deepEqual(prepareSuggestions(analysis, records, coverage), []);
-  }
-  const records = [{ province: "Hà Nội", temperature: 29 }, { province: "Huế", temperature: 30 }];
-  const [localAvailable] = prepareSuggestions(analysis, records, coverage, { mapTilerAvailable: false });
-  assert.equal(localAvailable.chartType, "choropleth");
-  assert.equal(localAvailable.available, true, "bundled country boundaries remain available without a MapTiler key");
-  const [available] = prepareSuggestions(analysis, records, coverage);
-  const preserved = prepareSuggestions({ ...analysis, suggestions: [available] }, records, coverage);
-  assert.equal(preserved.length, 1);
-  assert.equal(preserved[0].id, available.id);
-  assert.deepEqual(analysis.suggestions, []);
-});
-
-test("chuỗi tọa độ hỗ trợ Line và Point, loại H3 và biểu đồ độc lập trong luồng input", () => {
-  const analysis = {
-    columns: [
-      { name: "Vĩ độ", role: "geo", geoLevel: "point_lat" },
-      { name: "Kinh độ", role: "geo", geoLevel: "point_lng" },
-      { name: "Doanh thu", role: "measure", aggDefault: "sum" }
-    ],
-    suggestions: [
-      {
-        id: "h3",
-        chartType: "hex_h3",
-        title: "Doanh thu theo ô H3",
-        bindings: { lat: "Vĩ độ", lng: "Kinh độ", value: "Doanh thu" },
-        confidence: .99
-      },
-      {
-        id: "bar",
-        chartType: "bar",
-        title: "Doanh thu",
-        bindings: { x: "Doanh thu", y: "Doanh thu" },
-        confidence: 1
-      }
-    ]
-  };
-  const suggestions = prepareSuggestions(analysis, [
-    { "Vĩ độ": 21.02, "Kinh độ": 105.83, "Doanh thu": 10 },
-    { "Vĩ độ": 21.05, "Kinh độ": 105.79, "Doanh thu": 20 }
-  ], { "Vĩ độ": 1, "Kinh độ": 1, "Doanh thu": 1 }, { mapOnly: true });
-
-  assert.deepEqual(suggestions.map(item => item.chartType), ["map_line", "point"]);
-  assert.equal(suggestions[0].available, true);
+  const result = prepareSuggestions({ columns, suggestions }, [{ lat: 21, lng: 105 }, { lat: 22, lng: 106 }], {}, { mapOnly: true });
+  assert.deepEqual(result.map(item => item.id), ["point", "line"]);
+  assert.ok(result.every(item => item.available));
 });
 
 test("đổi chỉ số cập nhật phép gộp và tiêu đề cho bar, polygon và H3", () => {

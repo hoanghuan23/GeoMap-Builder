@@ -77,7 +77,6 @@ test("AI map_line dùng bộ lọc chung, đổi giờ, ẩn/hiện và dọn d�
   assert.equal(get("map-style-controls").hidden, true);
   assert.equal(get("style-description").textContent, "Màu sắc, độ dày, độ mờ và chú giải tuyến");
   assert.equal(get("line-toggle-field").hidden, true);
-  assert.equal(get("metro-time-section").hidden, true);
   assert.equal(get("ai-data-filters").hidden, false);
   assert.equal(descendants(get("ai-filter-controls")).some(node => node.className === "ai-road-network-selector"), false);
   const areaFilters = filters().filter(control => control.dataset.field === "Khu vực");

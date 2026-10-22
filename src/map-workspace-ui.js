@@ -6,9 +6,9 @@ import { createLayerDocument } from './map-layer-document.js';
 import { describeWorkspaceLayer, geometryExtent, layerData, tableRecords, csvForRecords } from './map-layer-data.js';
 import { createMapSearch } from './map-search.js';
 import { CONFIG } from './config.js';
-import { matchingMetroBundle } from './metro-upload-group.js';
+import { expandJsonUpload } from './json-datasets.js';
 
-const fileKey = file => `${file.name}:${file.size}:${file.lastModified}`;
+const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
 
 export async function startMapWorkspace(createRuntime, { styles, styleLabels, renderCatalog }) {
@@ -287,11 +287,11 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
 
   async function readUpload(upload, sheetName) {
     const dom = createLayerDocument(document, `parser-${upload.id}`, templates);
-    const parser = createRuntime({ document: dom.document, analyzeSpatialProperties: true, onStatus: status });
+    const parser = createRuntime({ document: dom.document, onStatus: status });
     parser.setSamples($('ai-include-samples').checked);
     try {
       const result = await parser.readSpatialFile(upload.file, { sheetName, signal: upload.controller.signal });
-      return { ...result, metroRole: result.kind === 'metro-part' ? result.role : result.data ? parser.metroPartRole(result.data, upload.file.name) : null };
+      return result;
     }
     finally { parser.dispose(); dom.dispose(); }
   }
@@ -310,9 +310,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       }
     }));
     const newIds = [];
-    const registrationOrder = results.filter(Boolean).sort((a, b) =>
-      Number(['hexagons', 'travel_times'].includes(b.result?.metroRole)) - Number(['hexagons', 'travel_times'].includes(a.result?.metroRole)));
-    for (const entry of registrationOrder) {
+    for (const entry of results.filter(Boolean)) {
       const { id, upload, result, error } = entry;
       if (!uploads.has(id)) continue;
       if (error) {
@@ -320,48 +318,31 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       }
       if (result.kind === 'sheet-selection') { upload.status = 'Chờ chọn sheet'; upload.sheets = result.sheetNames; renderUploads(); continue; }
       let item;
-      let reusedMetro = false;
       try {
-        const matchedBundle = result.metroRole ? matchingMetroBundle([...runtimes.values()], result) : null;
-        const metro = result.metroRole && (['hexagons', 'travel_times'].includes(result.metroRole) || matchedBundle);
-        if (metro) {
-          item = matchedBundle;
-          if (item) {
-            reusedMetro = true; item.preparsedResults.set(upload.file, result);
-            await item.api.processSpatialFiles([upload.file]);
-            const layer = workspace.layersById[item.id];
-            layer.descriptor = describeWorkspaceLayer(item.id, item.api.state, layer.title);
-            workspace.datasetsById[layer.datasetId] = { kind: 'metro-bundle', parts: item.api.state.metroParts, data: item.api.state.metroData };
-            workspace.revision++;
-            upload.layerId = item.id; upload.status = 'Sẵn sàng'; upload.message = layer.title;
-            renderUploads(); continue;
-          }
-        }
         const runtimeId = `layer-${workspace.sequence + 1}`;
         item = makeRuntime(runtimeId, new Map([[upload.file, result]]));
         item.api.state.fileName = upload.file.name;
-        if (metro) { item.metroBundle = true; await item.api.processSpatialFiles([upload.file]); }
-        else await item.api.load(result, upload.file);
+        await item.api.load(result, upload.file);
         if (!uploads.has(id)) { item.api.dispose(); item.manager.dispose(); item.dom.dispose(); continue; }
         const state = item.api.state;
         state.spatialAnalysis = result.spatialAnalysis || null;
         const analysis = state.aiDataset?.analysis || result.spatialAnalysis;
-        const title = metro ? 'Giao thông Metro' : analysis?.source === 'ai' && analysis.datasetTitle ? analysis.datasetTitle : upload.file.name.replace(/\.[^.]+$/, '');
-        const layer = addWorkspaceLayer(workspace, { dataset: metro ? { kind: 'metro-bundle', parts: state.metroParts, data: state.metroData } : state.aiDataset || result, runtime: item.api, title, fileKey: upload.key,
+        const title = analysis?.source === 'ai' && analysis.datasetTitle ? analysis.datasetTitle : upload.file.name.replace(/\.[^.]+$/, '');
+        const layer = addWorkspaceLayer(workspace, { dataset: state.aiDataset || result, runtime: item.api, title, fileKey: upload.key,
           descriptor: describeWorkspaceLayer(runtimeId, state, title) });
         runtimes.set(layer.id, item);
         sidebars.append(item.panel); metrics.append(item.metric); legendOriginal.append(item.legends); tables.append(item.table);
         document.querySelector('.map-panel').append(item.chart);
-        upload.layerId = layer.id; upload.status = 'Sẵn sàng'; upload.message = title;
+        upload.layerId = layer.id; upload.status = state.mapType ? 'Sẵn sàng' : 'Chưa có bản đồ';
+        upload.message = state.aiDataset?.fallbackReason || (state.mapType ? title : 'AI chưa đề xuất được bản đồ khả dụng.');
         newIds.push(layer.id);
       } catch (error) {
-        if (!reusedMetro) { item?.api.dispose(); item?.manager.dispose(); item?.dom.dispose(); }
+        item?.api.dispose(); item?.manager.dispose(); item?.dom.dispose();
         keys.delete(upload.key);
         upload.status = 'Lỗi'; upload.message = error.message || 'Không thể dựng bản đồ';
       }
       renderUploads();
     }
-    // A later component can turn a previously incomplete Metro bundle into a renderable layer.
     const pendingIds = newIds.filter(id => workspace.layersById[id]);
     for (const id of pendingIds) {
       const layer = workspace.layersById[id]; layer.descriptor = describeWorkspaceLayer(id, runtimes.get(id).api.state, layer.title);
@@ -399,15 +380,20 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     if (!previous && activeMapGroup(workspace)) fitGroup(activeMapGroup(workspace));
   }
 
-  function importFiles(files) {
+  async function importFiles(files) {
     const entries = [];
-    for (const file of files) {
-      const key = fileKey(file);
-      if (keys.has(key)) { status(`Đã bỏ qua file trùng: ${file.name}`); continue; }
-      keys.add(key);
-      const id = `import-${++uploadSequence}`;
-      const upload = { id, file, key, controller: new AbortController(), status: 'Đang chờ' };
-      uploads.set(id, upload); workspace.importsById[id] = upload; entries.push({ id, upload });
+    for (const original of files) {
+      let datasets;
+      try { datasets = await expandJsonUpload(original); }
+      catch { datasets = [original]; } // The normal reader reports malformed input per upload.
+      for (const file of datasets) {
+        const key = fileKey(file);
+        if (keys.has(key)) { status(`Đã bỏ qua file trùng: ${file.name}`); continue; }
+        keys.add(key);
+        const id = `import-${++uploadSequence}`;
+        const upload = { id, file, key, controller: new AbortController(), status: 'Đang chờ' };
+        uploads.set(id, upload); workspace.importsById[id] = upload; entries.push({ id, upload });
+      }
     }
     renderUploads(); if (entries.length) enqueue(() => processUploads(entries));
   }
@@ -418,14 +404,6 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     upload.controller.abort(); uploads.delete(id); delete workspace.importsById[id]; keys.delete(upload.key);
     if (upload.layerId) {
       const item = runtimes.get(upload.layerId);
-      if (item.metroBundle && [...uploads.values()].some(other => other.layerId === upload.layerId)) {
-        const file = item.api.state.uploadedFiles.find(value => value.fileKey === upload.key);
-        if (file) await item.api.removeUploadedFile(file.id);
-        item.preparsedResults.delete(upload.file);
-        const layer = workspace.layersById[item.id]; layer.descriptor = describeWorkspaceLayer(item.id, item.api.state, layer.title);
-        workspace.datasetsById[layer.datasetId] = { kind: 'metro-bundle', parts: item.api.state.metroParts, data: item.api.state.metroData };
-        workspace.revision++; renderUploads(); sync(); return;
-      }
       item.api.dispose(); item.manager.dispose(); item.dom.dispose();
       runtimes.delete(upload.layerId); mounted.delete(upload.layerId); removeWorkspaceLayer(workspace, upload.layerId);
     }
