@@ -1784,7 +1784,6 @@ input[type=range] {
     margin: 0 auto !important
 }
 
-.map-panel.chart-mode .map-toolbar,
 .map-panel.chart-mode .map-controls,
 .map-panel.chart-mode .map-query-panel,
 .map-panel.chart-mode .map-metric-control,
@@ -2221,23 +2220,6 @@ input[type=range] {
     background: #fff8f7
 }
 
-.map-toolbar {
-    position: absolute;
-    top: 50%;
-    right: 10px;
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    background: #fff;
-    border: 1px solid #d9e1eb;
-    border-radius: 7px;
-    padding: 4px;
-    box-shadow: 0 4px 15px #17263f26;
-    z-index: 3
-}
-
-.map-toolbar button,
 .map-controls button {
     border: 0;
     background: #fff;
@@ -2245,17 +2227,6 @@ input[type=range] {
     height: 31px;
     border-radius: 5px;
     font-size: 16px
-}
-
-.map-toolbar button.active {
-    background: var(--blue);
-    color: #fff
-}
-
-.map-toolbar i {
-    width: 25px;
-    border-top: 1px solid var(--line);
-    margin: 4px 0
 }
 
 .map-controls {
@@ -2399,14 +2370,6 @@ input[type=range] {
     line-height: 1
 }
 
-.map-panel:has(.map-metric-control:not([hidden])) .map-toolbar {
-    top: auto;
-    bottom: 34px;
-    transform: none;
-    flex-direction: row
-}
-
-.map-panel:has(.map-metric-control:not([hidden])) .map-toolbar i { width: 0; height: 23px; border-top: 0; border-left: 1px solid var(--line); margin: 0 4px; }
 .map-panel:has(.map-metric-control:not([hidden])) .right-cards { right: auto; left: 12px; top: 70px; }
 
 @media (max-width: 760px) {
