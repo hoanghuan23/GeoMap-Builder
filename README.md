@@ -92,6 +92,8 @@ Các file ADM dùng cấu trúc thuộc tính `GID_0`, `COUNTRY`, `GID_1/2`, `NA
 
 ADM1 cục bộ hiện chứa 63 tỉnh/thành theo bộ ranh giới nguồn. Khi MapTiler trả ranh giới mới cho tập dữ liệu 34 tỉnh/thành, ứng dụng ưu tiên ranh giới đó. Nếu phải dùng file dự phòng thì polygon giữ nguyên theo file; việc khớp tên không tự hợp nhất các tỉnh.
 
+Riêng tên `TP. Hồ Chí Minh` khi tra cấp `region` tại Việt Nam được gửi tới MapTiler dưới tên `Hồ Chí Minh` để lấy polygon mở rộng, bao gồm Bình Dương và Bà Rịa–Vũng Tàu cũ. Tên dòng dữ liệu gốc được giữ nguyên để ghép chỉ số; alias do người dùng chọn vẫn được ưu tiên.
+
 Các file GeoJSON độc lập cũng được xếp lớp theo nội dung thay vì thứ tự upload. Rule nền luôn đặt polygon/hexagon dưới line/route và đặt point/station trên cùng; AI nhận metadata của các lớp để đề xuất thứ tự chi tiết giữa những lớp cùng nhóm. Nếu chưa cấu hình OpenAI hoặc API lỗi, thứ tự hình học này vẫn được áp dụng ngay ở trình duyệt.
 
 Ranh giới từ MapTiler được cắt bằng GeoJSON của quốc gia tương ứng khi đã cấu hình nguồn cục bộ: ADM0 cho quốc gia, ADM1 cho tỉnh/thành, ADM2 cho quận/huyện; ADM0 dự phòng khi cấp chi tiết không giao nhau. Với polygon cấp quốc gia, chọn mặt nạ theo chính quốc gia trong kết quả. Nước chưa có mặt nạ cục bộ giữ polygon MapTiler; không dùng VNM để cắt nước khác. Polygon đã đọc từ thư mục quốc gia được dùng trực tiếp. File ranh giới nằm trong `administrative_division/` (được gitignore) và cần có trên máy build.

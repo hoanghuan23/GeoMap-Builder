@@ -108,7 +108,7 @@ test("34-province input keeps the MapTiler geometry for every province", async (
       const url = new URL(rawUrl);
       assert.equal(url.origin, "https://api.maptiler.com");
       const path = decodeURIComponent(url.pathname);
-      const name = WEATHER_PROVINCES.find(name => path.includes(name));
+      const name = WEATHER_PROVINCES.find(name => path.includes(name === "TP. Hồ Chí Minh" ? "Hồ Chí Minh" : name));
       assert.ok(name);
       return response([{ id: `region.${name}`, text: name, place_type: ["region"], geometry: polygon }]);
     }
@@ -116,6 +116,64 @@ test("34-province input keeps the MapTiler geometry for every province", async (
   assert.equal(boundaries.matchRate, 1);
   assert.deepEqual(boundaries.matched, [...WEATHER_PROVINCES]);
   assert.ok(boundaries.features.every(feature => feature.geometry === polygon && feature.properties.boundary_source === "MapTiler"));
+});
+
+test("TP. Hồ Chí Minh uses the expanded MapTiler region and preserves the spreadsheet name", async () => {
+  const name = "TP. Hồ Chí Minh";
+  const suggestion = { id: "region.887", text: "Thành phố Hồ Chí Minh", place_name: "Thành phố Hồ Chí Minh, Việt Nam",
+    place_type: ["region"], properties: { country_code: "vn" }, geometry: { type: "Point", coordinates: [106.7, 10.8] } };
+  const expanded = { type: "MultiPolygon", coordinates: [
+    [[[106.6, 10.7], [106.8, 10.7], [106.8, 10.9], [106.6, 10.9], [106.6, 10.7]]],
+    [[[106.5, 11], [106.8, 11], [106.8, 11.3], [106.5, 11.3], [106.5, 11]]],
+    [[[107.1, 10.4], [107.4, 10.4], [107.4, 10.7], [107.1, 10.7], [107.1, 10.4]]]
+  ] };
+  const urls = [];
+  const boundaries = await loadAdministrativeBoundaries([name], {
+    apiKey: "key", placeType: "region", country: "VNM", fetchImpl: async rawUrl => {
+      const url = new URL(rawUrl); urls.push(url);
+      assert.equal(url.origin, "https://api.maptiler.com", "the expanded region must not fall back to old ADM");
+      if (url.pathname === "/geocoding/region.887.json") return response([{ ...suggestion, geometry: expanded }]);
+      // Abbreviated autocomplete returns point-only places; a typed lookup returns the region.
+      if (decodeURIComponent(url.pathname) === "/geocoding/Hồ Chí Minh, Việt Nam.json"
+        && url.searchParams.get("types") === "region") return response([suggestion]);
+      return response([{ id: "place.hcm", text: name, place_type: ["place"], geometry: { type: "MultiPoint", coordinates: [[106.7, 10.8]] } }]);
+    }
+  });
+  assert.equal(urls.length, 2);
+  assert.equal(boundaries.matchRate, 1);
+  assert.deepEqual(boundaries.unmatched, []);
+  const boundary = boundaries.features[0];
+  assert.equal(boundary.id, "region.887");
+  assert.equal(boundary.geometry, expanded);
+  assert.equal(boundary.properties.boundary_source, "MapTiler");
+  assert.equal(boundary.properties.__data_location, name);
+  const joined = joinRecordsToMapTilerBoundaries([{ province: name, temperature: 28.5 }], boundaries, {
+    geometry: { field: "province" }, metricField: "temperature"
+  });
+  assert.equal(joined.features.length, 1);
+  assert.equal(joined.features[0].geometry, expanded);
+  assert.equal(joined.features[0].properties.__location, name);
+  assert.equal(joined.features[0].properties.__metric, 28.5);
+});
+
+test("HCM query override is limited to Vietnamese regions and explicit aliases take priority", async () => {
+  for (const { name, options, expectedQuery, countryCode } of [
+    { name: "TP. Hồ Chí Minh", options: { placeType: "county", country: "VNM" }, expectedQuery: "TP. Hồ Chí Minh", countryCode: "vn" },
+    { name: "TP. Hồ Chí Minh", options: { placeType: "region", country: "THA" }, expectedQuery: "TP. Hồ Chí Minh", countryCode: "th" },
+    { name: "TP. Cần Thơ", options: { placeType: "region", country: "VNM" }, expectedQuery: "TP. Cần Thơ", countryCode: "vn" },
+    { name: "TP. Hồ Chí Minh", options: { aliases: { "TP. Hồ Chí Minh": "Sài Gòn" } }, expectedQuery: "Sài Gòn, Việt Nam", countryCode: "vn" }
+  ]) {
+    const urls = [];
+    const result = await loadAdministrativeBoundaries([name], {
+      apiKey: "key", ...options, fetchImpl: async rawUrl => {
+        const url = new URL(rawUrl); urls.push(url);
+        return response([{ id: "region.city", text: options.aliases ? "Sài Gòn" : name, place_type: ["region"],
+          properties: { country_code: countryCode }, geometry: polygon }]);
+      }
+    });
+    assert.equal(decodeURIComponent(urls[0].pathname), `/geocoding/${expectedQuery}.json`);
+    assert.equal(result.features[0].properties.__data_location, name);
+  }
 });
 
 test("same-name communes require a choice and can reuse the explicitly selected polygon", async () => {

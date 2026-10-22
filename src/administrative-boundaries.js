@@ -115,19 +115,22 @@ async function resolveCandidates(name, { apiKey, placeType, country, signal, fet
     && resolveBoundaryCountry(String(name).split(",")[0]) === code;
   const isCountry = requestedCountry || cityState;
   const effectivePlaceType = isCountry ? "country" : placeType;
-  const query = administrativeQuery(name, effectivePlaceType, lookupCountry);
+  // MapTiler autocomplete returns point-only places for this abbreviated province name.
+  const providerName = code === "VNM" && placeType === "region" && normalizePlaceWords(name) === "tp ho chi minh"
+    ? "Hồ Chí Minh" : name;
+  const query = administrativeQuery(providerName, effectivePlaceType, lookupCountry);
   // Provider lookup works for every country; local files are an optional fallback.
   if (apiKey) {
     try {
       let candidates;
       const narrowLookup = isCountry || !query.parents.length && (!query.kind || query.kind === "region");
       if (narrowLookup) {
-        const boundary = await getMapTilerAdministrativeBoundary(cityState ? COUNTRY_BOUNDARY_SOURCES[code].name : name, { apiKey, country: lookupCountry,
+        const boundary = await getMapTilerAdministrativeBoundary(cityState ? COUNTRY_BOUNDARY_SOURCES[code].name : providerName, { apiKey, country: lookupCountry,
           placeType: query.kind === "region" ? "region" : effectivePlaceType, signal, fetchImpl });
         candidates = boundary ? [boundary] : [];
       } else {
         // Use the same administrative search as the search bar for explicit district/commune names.
-        candidates = await searchMapTilerBoundaries(name, { apiKey, country: lookupCountry, signal, fetchImpl });
+        candidates = await searchMapTilerBoundaries(providerName, { apiKey, country: lookupCountry, signal, fetchImpl });
       }
       if (query.parents.length) {
         candidates = await describeCandidates(candidates.filter(feature => mapTilerScore(feature, { ...query, parents: [] }, !query.kind && !isCountry) < 2), { apiKey, signal, fetchImpl });
@@ -141,7 +144,7 @@ async function resolveCandidates(name, { apiKey, placeType, country, signal, fet
       }
       if (!isCountry && !query.kind) {
         let alternatives = candidates;
-        if (narrowLookup) alternatives = await searchMapTilerBoundaries(name, { apiKey, country: lookupCountry, signal, fetchImpl,
+        if (narrowLookup) alternatives = await searchMapTilerBoundaries(providerName, { apiKey, country: lookupCountry, signal, fetchImpl,
           candidateFilter: feature => boundaryMatchesCountry(feature, lookupCountry) && mapTilerScore(feature, query, true) === 0 });
         const exact = alternatives.filter(feature => boundaryMatchesCountry(feature, lookupCountry) && mapTilerScore(feature, query, true) === 0);
         if (exact.length) return [...new Map(exact.map(feature => [feature.id, withSource(feature, name, "MapTiler")])).values()];
