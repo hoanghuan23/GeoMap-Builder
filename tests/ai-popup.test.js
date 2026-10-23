@@ -103,6 +103,8 @@ test("renderer ghi chuỗi HTML bằng textContent", () => {
     properties: { province: "Lào Cai", note: "<b>x</b>" }
   }, [columns[0], columns[8]], "province");
   const list = card.children[1];
-  assert.equal(list.children[1].children[1].textContent, "<b>x</b>");
+  assert.equal(list.children[0].children[1].textContent, "<b>x</b>");
+  assert.equal(list.children[0].className, "popup-info-note");
+  assert.equal(card.children[0].children[1].textContent, "Lào Cai");
   assert.equal(innerHtmlWrites, 0);
 });

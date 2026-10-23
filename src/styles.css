@@ -2989,7 +2989,7 @@ th:last-child {
 .weather-cell-popup .maplibregl-popup-tip { border-top-color: #0d1219fa; }
 .weather-cell-popup .maplibregl-popup-close-button { color: #94a3b8; font-size: 20px; }
 .ai-weather-popup { width: min(360px, calc(100vw - 44px)); }
-.ai-map-popup { width: min(360px, var(--popup-map-width, calc(100vw - 32px))); z-index: 8; }
+.ai-map-popup { width: min(440px, var(--popup-map-width, calc(100vw - 32px))); z-index: 8; }
 .ai-map-popup.has-popup-chart { width: min(520px, var(--popup-map-width, calc(100vw - 32px))); }
 .ai-map-popup .maplibregl-popup-content {
   min-width: 0;
@@ -3022,16 +3022,36 @@ th:last-child {
   box-shadow: 0 6px 18px #0006;
 }
 .ai-weather-popup .maplibregl-popup-close-button:hover { background: #46505d; }
-.weather-popup { padding: 18px; font: 12px/1.45 Inter, "Segoe UI", Arial, sans-serif; }
+.weather-popup { padding: 18px 12px 12px; font: 12px/1.45 Inter, "Segoe UI", Arial, sans-serif; }
 .weather-popup > strong { display: block; padding-right: 18px; color: #f8fafc; font-size: 14px; }
 .weather-popup > small { display: block; margin-top: 2px; color: #64748b; }
-.popup-source-record { margin-top: 14px; padding-top: 12px; border-top: 1px solid #ffffff24; }
-.popup-source-record > strong { color: #f8fafc; }
+.popup-country-title { padding-bottom: 12px; border-bottom: 1px solid #ffffff12; }
+.popup-source-record { margin-top: 16px; }
+.popup-source-record + .popup-source-record { margin-top: 24px; padding-top: 20px; border-top: 1px solid #ffffff24; }
 .weather-popup dl { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 14px 0 0; }
 .ai-weather-popup .weather-popup dl { max-height: min(420px, 55vh); overflow-y: auto; padding-right: 2px; }
 .weather-popup dl > div { padding: 9px; border: 1px solid #ffffff12; border-radius: 8px; background: #ffffff08; }
 .weather-popup dt { color: #94a3b8; }
 .weather-popup dd { margin: 3px 0 0; color: #f8fafc; font-size: 14px; font-weight: 700; }
+.popup-info-heading { position: relative; padding: 0 30px 22px 0; border-bottom: 1px solid #ffffff12; }
+.popup-info-caption { display: block; margin-bottom: 6px; color: #a7b3c5; font-size: 10px; text-transform: uppercase; }
+.popup-info-heading > strong { display: block; color: #f8fafc; font-size: 17px; line-height: 1.45; overflow-wrap: anywhere; }
+.weather-popup dl.popup-info-details { display: flex; flex-wrap: wrap; gap: 10px 8px; margin: 18px 0 0; max-height: none; overflow: visible; padding: 0; }
+.weather-popup .popup-info-details > div { min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; overflow-wrap: anywhere; }
+.weather-popup .popup-info-details > .popup-info-chip { order: 0; flex: 0 1 auto; max-width: 100%; }
+.popup-info-chip dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.weather-popup .popup-info-chip dd { margin: 0; padding: 2px 8px; border-radius: 999px; background: #ffffff1a; font-size: 12px; font-weight: 500; }
+.weather-popup .popup-info-details > .popup-info-description { order: 1; flex: 1 0 100%; margin-top: 2px; }
+.weather-popup .popup-info-description dt { color: #c5cfdd; }
+.weather-popup .popup-info-description dd { margin-top: 8px; font-size: 15px; font-weight: 400; line-height: 1.8; white-space: pre-wrap; }
+.weather-popup .popup-info-details > .popup-info-value { order: 2; flex: 1 1 calc(50% - 8px); padding: 6px 0; }
+.weather-popup .popup-info-details > .popup-info-meta { order: 3; flex: 1 1 calc(50% - 8px); margin-top: 12px; padding-top: 18px; border-top: 1px solid #ffffff12; }
+.weather-popup .popup-info-meta dt { font-size: 11px; }
+.weather-popup .popup-info-meta dd { margin-top: 6px; font-size: 15px; }
+.weather-popup .popup-info-details > .popup-info-note { order: 4; flex: 1 0 100%; margin-top: 4px; padding: 12px; border-radius: 12px; background: #000; }
+.weather-popup .popup-info-note dt { color: #e2e8f0; font-size: 14px; font-weight: 600; }
+.popup-info-note dt::before { content: "ⓘ"; margin-right: 8px; font-weight: 400; }
+.weather-popup .popup-info-note dd { margin-top: 6px; font-size: 13px; font-weight: 400; line-height: 1.65; white-space: pre-wrap; }
 .weather-popup-status { margin: 14px 0 0; color: #cbd5e1; }
 
 /* Workspace composition: one canvas, independent controls and legends per dataset. */

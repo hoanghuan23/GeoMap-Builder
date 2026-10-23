@@ -29,6 +29,16 @@ export function aiPopupRows(properties, columns) {
   });
 }
 
+function popupDetailKind(detail, column) {
+  const name = normalizedText(`${detail.field} ${detail.label}`).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/ghi chu|\b(notes?|remarks?|comments?)\b/.test(name)) return "note";
+  if (detail.value.length <= 80 && /cap nhat|\b(updated?|modified)\b/.test(name)) return "meta";
+  if (detail.value.length > 80 || /[\r\n]/.test(detail.value) || column?.role === "text") return "description";
+  if (["category", "geo"].includes(column?.role)) return "chip";
+  if (["id", "time"].includes(column?.role)) return "meta";
+  return "value";
+}
+
 export function createAiPopupContent(documentRef, feature, columns, geometryField, { records = [] } = {}) {
   const properties = feature?.properties || {};
   const card = documentRef.createElement("div");
@@ -36,6 +46,7 @@ export function createAiPopupContent(documentRef, feature, columns, geometryFiel
   const title = documentRef.createElement("strong");
   title.textContent = properties[geometryField] || properties.h3 || "Khu vực dữ liệu";
   if (records.length > 1) {
+    title.className = "popup-country-title";
     const sections = documentRef.createElement("div");
     sections.className = "popup-source-records";
     for (const record of records) {
@@ -46,9 +57,20 @@ export function createAiPopupContent(documentRef, feature, columns, geometryFiel
     card.append(title, sections);
     return card;
   }
+  const heading = documentRef.createElement("header");
+  heading.className = "popup-info-heading";
+  const caption = documentRef.createElement("small");
+  caption.className = "popup-info-caption";
+  const geometryColumn = (columns || []).find(column => column.name === geometryField);
+  caption.textContent = geometryColumn ? `Thông tin ${geometryColumn.labelVi || humanizeField(geometryColumn.name)}` : "Thông tin khu vực";
+  heading.append(caption, title);
   const list = documentRef.createElement("dl");
+  list.className = "popup-info-details";
   for (const detail of aiPopupRows(properties, columns)) {
+    if (detail.field === geometryField) continue;
     const row = documentRef.createElement("div");
+    row.className = `popup-info-${popupDetailKind(detail, columns.find(column => column.name === detail.field))}`;
+    row.title = detail.label;
     const term = documentRef.createElement("dt");
     const value = documentRef.createElement("dd");
     term.textContent = detail.label;
@@ -56,6 +78,6 @@ export function createAiPopupContent(documentRef, feature, columns, geometryFiel
     row.append(term, value);
     list.append(row);
   }
-  card.append(title, list);
+  card.append(heading, list);
   return card;
 }
