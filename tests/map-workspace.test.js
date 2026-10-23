@@ -46,7 +46,7 @@ test('composition profiles strip records, geometry and sample values; validation
   const input = normalizeCompositionInput({ ...profile, records: ['private'], layers: profile.layers.map(item => ({ ...item, originalData: { secret: true }, samples: ['private'] })) });
   assert.equal(JSON.stringify(input).includes('private'), false);
   const decision = { layerId: 'b', action: 'append_to_group', targetGroupId: 'g', newGroupKey: null, groupTitle: 'A + B', confidence: .95, reason: 'Cùng ngữ cảnh' };
-  const raw = { schemaVersion: 1, decisions: [decision], searchLayerIds: ['a', 'b', 'unknown', 'b'] };
+  const raw = { decisions: [decision], searchLayerIds: ['a', 'b', 'unknown', 'b'] };
   assert.deepEqual(normalizeCompositionResult(raw, input).searchLayerIds, ['b']);
   assert.equal(normalizeCompositionResult(raw, input).decisions[0].action, 'append_to_group');
   for (const patch of [{ targetGroupId: 'missing' }, { confidence: 2 }, { confidence: '0.9' }, { newGroupKey: 'bad' }]) {

@@ -218,7 +218,7 @@ for (const sequential of [false, true]) {
       newLayerIds: oldGroup ? [points.id] : [areas.id, points.id],
       layers: layerSearch.map(([layer, config]) => ({ ...config, id: layer.id, title: layer.title, available: true })) });
     // The composition model omits the area layer, despite its valid analysis.
-    const output = normalizeCompositionResult({ schemaVersion: 1, searchLayerIds: [points.id],
+    const output = normalizeCompositionResult({ searchLayerIds: [points.id],
       decisions: snapshot.newLayerIds.map(layerId => ({ layerId, action: oldGroup ? 'append_to_group' : 'create_group',
         targetGroupId: oldGroup?.id || null, newGroupKey: oldGroup ? null : 'combined',
         groupTitle: 'Vùng và điểm', confidence: .9, reason: 'Có ích khi xem chung.' })) }, snapshot);

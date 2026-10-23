@@ -15,7 +15,7 @@ create_group riêng một lớp dùng targetGroupId null, newGroupKey null. unde
 Nếu có nhiều nhóm phù hợp, chọn confidence cao nhất; hòa thì ưu tiên activeGroupId rồi thứ tự nhóm đầu vào. Xử lý lớp mới theo thứ tự newLayerIds.
 Đặt groupTitle tiếng Việt ngắn theo nội dung cả nhóm, không chỉ theo lớp mới. reason giải thích cụ thể bằng tiếng Việt, confidence 0..1.
 searchLayerIds gồm đầy đủ các lớp có search_bar true và search_fields hợp lệ trong hồ sơ đầu vào, để giữ tìm kiếm của từng file sau khi ghép nhóm. Không bỏ lớp vì khác geometry hoặc đã có lớp khác tìm được cùng địa danh; không bật lại lớp search_bar false, không tạo cột/chỉ số mới.
-Thứ tự vẽ được ứng dụng kiểm soát: vùng/lục giác dưới, tuyến giữa, điểm trên. Trả schemaVersion 1.`;
+Thứ tự vẽ được ứng dụng kiểm soát: vùng/lục giác dưới, tuyến giữa, điểm trên.`;
 
 export async function analyzeMapComposition(body, env, fetchImpl = fetch) {
   const input = normalizeCompositionInput(body);

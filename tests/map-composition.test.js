@@ -9,7 +9,7 @@ import { Readable } from 'node:stream';
 
 const input = { workspaceRevision: 1, groups: [], newLayerIds: ['a', 'b'], layers: ['a', 'b'].map(id => ({ id, title: id, available: true,
   chartType: 'point', geometryKinds: ['point'], columns: [], search_bar: false, search_fields: [] })) };
-const result = { schemaVersion: 1, decisions: ['a', 'b'].map(layerId => ({ layerId, action: 'create_group', targetGroupId: null, newGroupKey: 'same', groupTitle: 'A + B', confidence: .9, reason: 'Có ích khi hiển thị chung' })), searchLayerIds: [] };
+const result = { decisions: ['a', 'b'].map(layerId => ({ layerId, action: 'create_group', targetGroupId: null, newGroupKey: 'same', groupTitle: 'A + B', confidence: .9, reason: 'Có ích khi hiển thị chung' })), searchLayerIds: [] };
 
 test('composition client caches successful descriptors, excludes workspace revision, and retries failures', async () => {
   let calls = 0;
@@ -43,10 +43,11 @@ test('server forwards only minimized metadata with a strict schema and validates
   // Gateways may ignore text.format, so the model must see the same schema
   // in its instructions, including the exact layerId key and batch semantics.
   assert.ok(payload.instructions.includes(JSON.stringify(MAP_COMPOSITION_SCHEMA)));
+  assert.equal(payload.instructions.includes('schemaVersion'), false);
   assert.match(payload.instructions, /Tên trường là layerId/);
   assert.match(payload.instructions, /Khi groups rỗng, không dùng append_to_group/);
   assert.equal(payload.input.includes('private'), false);
-  assert.equal(output.decisions.length, 2);
+  assert.deepEqual(output.decisions, result.decisions);
   assert.match(COMPOSITION_INSTRUCTIONS, /TOÀN BỘ/);
   assert.match(COMPOSITION_INSTRUCTIONS, /bắc cầu/);
   assert.match(COMPOSITION_INSTRUCTIONS, /Không ghép chỉ vì bbox/);
@@ -92,7 +93,7 @@ for (const [titleA, chartA, kindA, titleB, chartB, kindB] of geometryPairs) {
         columns: [{ name: 'entity_name', role: 'text' }], search_bar: index < 2, search_fields: ['entity_name'] };
     });
     const snapshot = { workspaceRevision: workspace.revision, groups: [], newLayerIds: layers.map(layer => layer.id), layers };
-    const modelReply = { schemaVersion: 1, decisions: layers.map((layer, index) => ({ layerId: layer.id, action: 'create_group',
+    const modelReply = { decisions: layers.map((layer, index) => ({ layerId: layer.id, action: 'create_group',
       targetGroupId: null, newGroupKey: index < 2 ? 'compatible' : null,
       groupTitle: index < 2 ? `${titleA} + ${titleB}` : layer.title, confidence: .9, reason: 'Quyết định từ hồ sơ đầu vào.' })),
       searchLayerIds: [layers[1].id] };
