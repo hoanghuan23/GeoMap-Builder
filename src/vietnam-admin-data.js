@@ -20,9 +20,13 @@ function matchesFilter(value, selectedValue) {
   return !selectedValue || comparable === selectedValue;
 }
 
+function isFiniteValue(value) {
+  return (typeof value === "number" || typeof value === "string" && value.trim() !== "") && Number.isFinite(Number(value));
+}
+
 function aggregate(values, aggregation) {
   if (aggregation === "count") return values.length;
-  const numbers = values.map(Number).filter(Number.isFinite);
+  const numbers = values.filter(isFiniteValue).map(Number);
   if (!numbers.length) return null;
   if (aggregation === "sum") return numbers.reduce((sum, value) => sum + value, 0);
   if (aggregation === "min") return Math.min(...numbers);
@@ -30,7 +34,7 @@ function aggregate(values, aggregation) {
   return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
 }
 
-export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters = {}, columns = null } = {}) {
+export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters = {}, columns = null, includeMissingMetric = false } = {}) {
   const { metricField } = recommendation;
   const locationField = recommendation.geometry.field;
   const byLocation = new Map((boundaries?.features || []).map(feature => [
@@ -59,6 +63,9 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
           ...group.records[0],
           ...(aggregation ? { [metricField]: aggregate(group.records.map(record => record[metricField]).filter(value => value != null), aggregation) } : {})
         };
+    const metric = recordProperties[metricField];
+    const hasMetric = isFiniteValue(metric);
+    if (!hasMetric && !includeMissingMetric) return [];
     const boundaryProperties = { ...(boundary.properties || {}) };
     for (const column of columns || []) delete boundaryProperties[column?.name];
     const properties = {
@@ -66,7 +73,7 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
       ...recordProperties,
       __location: String(group.records[0]?.[locationField] ?? "").trim(),
       ...(recommendation.geometry.contextFields?.length ? { __location_context: recommendation.geometry.contextFields } : {}),
-      __metric: Number(recordProperties[metricField]),
+      __metric: hasMetric ? Number(metric) : null,
       __record_count: group.records.length,
       boundary_source: boundary.properties?.boundary_source || "MapTiler"
     };

@@ -2680,11 +2680,15 @@ async function filteredAiBoundary({ fit = false } = {}) {
   if (selected?.chartType !== "choropleth") return;
   const { records, boundaries, recommendation } = state.aiDataset;
   const filters = selectedAiFilters(); state.aiDataset.filters = filters;
-  const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters, columns: state.aiDataset.analysis.columns });
+  const searchBoundary = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, {
+    filters, columns: state.aiDataset.analysis.columns, includeMissingMetric: true
+  });
+  state.aiDataset.searchBoundary = searchBoundary;
+  const data = { ...searchBoundary, features: searchBoundary.features.filter(feature => Number.isFinite(feature.properties.__metric)) };
   state.boundary = data; state.sourceBoundary = data;
   state.baselineCount = null;
   const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)];
-  state.dataProfile = analyzeSpatialData(data, { numericFields });
+  state.dataProfile = analyzeSpatialData(data, { numericFields, hasArea: true });
   map.getSource("polygon-data")?.setData(data);
   map.getSource("vietnam-boundary")?.setData(data);
   if (state.mapType === "h3" || isRegionHexMode()) await rebuildGrid({ fit });
@@ -2766,9 +2770,9 @@ async function activateAiChoropleth(suggestion) {
     return false;
   }
   const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters: initialFilters, columns: dataset.analysis.columns });
-  if (!data.features.length) throw new Error(`Không ghép được trường ${geometryLabel} với ranh giới hành chính.`);
   const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)];
-  const profile = analyzeSpatialData(data, { numericFields });
+  // A period with no metric values still supports switching to another period or metric.
+  const profile = analyzeSpatialData(data, { numericFields, hasArea: true });
   await replaceBoundary(data, name, profile, { preservePolygons: true, preserveAi: true });
   dataset.recommendation = recommendation; dataset.boundaries = boundaries;
   state.aiDataset = dataset;
@@ -2900,12 +2904,14 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
   applyStyle();
 }
 
-// Search follows the analyzed fields and the features produced by the active filters.
+// Search follows the active filters and retains regions with a missing color metric.
 function currentDataSearch() {
   if (!state.mapType || state.chartConfig || !state.aiDataset && !state.dataProfile) { return {}; }
   const suggestion = activeMapPopupSuggestion();
+  const dataset = state.aiDataset;
   const data = state.mapType === "point" ? state.pointData
-    : state.mapType === "line" ? state.lineData : state.boundary;
+    : state.mapType === "line" ? state.lineData
+      : suggestion?.chartType === "choropleth" && dataset?.searchBoundary ? dataset.searchBoundary : state.boundary;
   if (state.aiDataset && !suggestion) { return {}; }
   if (!state.aiDataset && dataSearchProfile !== state.dataProfile) {
     dataSearchProfile = state.dataProfile;
@@ -2916,7 +2922,6 @@ function currentDataSearch() {
   const columns = state.aiDataset?.analysis.columns || state.spatialAnalysis?.columns || dataSearchColumns;
   const titleField = state.aiDataset?.nativeTitleField || (suggestion?.chartType === "point" ? pointTitleField(columns)
     : state.aiDataset?.recommendation?.geometry?.field);
-  const dataset = state.aiDataset;
   const pointSelection = dataset?.activePointView?.selection;
   const filtered = dataset ? Object.values(dataset.filters || {}).some(value =>
     Array.isArray(value) ? value.length > 0 : value != null && value !== "")

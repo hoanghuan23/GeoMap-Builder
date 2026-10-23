@@ -119,6 +119,67 @@ test("uploaded country weather enables search using the current date and country
   assert.equal(indexes.at(-1).entries.length, 0);
 });
 
+test("khởi tạo polygon với ngày cuối toàn null vẫn cho phép đổi ngày hoặc chỉ số", async () => {
+  const { context, get, sources } = createHarness();
+  const indexes = [];
+  context.searchController = { setData(snapshot) { indexes.push(buildDataSearchIndex(snapshot)); } };
+  vm.runInContext("mapSearch = searchController", context);
+  const columns = [
+    { name: "region", role: "geo", geoLevel: "admin2", country: "VN" },
+    { name: "date", role: "time", timeParse: "iso" },
+    { name: "temperature", role: "measure", aggDefault: "mean" },
+    { name: "rain", role: "measure", aggDefault: "sum" }
+  ];
+  const records = ["Hà Đông", "Ba Đình"].flatMap(region => [1, 2].map(day => ({
+    region, date: `2026-09-0${day}`, temperature: day === 2 ? null : 22, rain: 18
+  })));
+  context.nullPipeline = {
+    ...normalizeTabularRecords(records, columns),
+    analysis: { source: "ai", columns, search_bar: true, search_fields: ["region"], suggestions: [{
+      id: "temperature-map", chartType: "choropleth", title: "Nhiệt độ", confidence: .9,
+      bindings: { region: "region", value: "temperature" }, agg: "mean", popupSuggestions: [], metricButtons: []
+    }] }
+  };
+  context.loadAdministrativeBoundaries = async names => ({
+    type: "FeatureCollection", matched: names, unmatched: [], matchRate: 1,
+    features: names.map((name, index) => ({
+      type: "Feature", properties: { __data_location: name },
+      geometry: { type: "Polygon", coordinates: [[[105 + index, 20], [106 + index, 20], [106 + index, 21], [105 + index, 20]]] }
+    }))
+  });
+  context.landOnlyBoundary = async feature => feature;
+  context.joinRecordsToMapTilerBoundaries = joinRecordsToMapTilerBoundaries;
+  await vm.runInContext('replaceAiPipelineData(nullPipeline, "null-weather.xlsx")', context);
+  assert.equal(vm.runInContext("state.mapType", context), "polygon");
+  assert.equal(vm.runInContext("state.dataProfile.hasArea", context), true);
+  assert.equal(sources.get("polygon-data").data.features.length, 0);
+  assert.equal(sources.get("vietnam-boundary").data.features.length, 0);
+  assert.equal(get("weather-legend").hidden, true);
+  assert.equal(get("ai-data-filters").hidden, false);
+  assert.equal(indexes.at(-1).enabled, true);
+  const result = searchDataIndex(indexes.at(-1), "ha dong")[0];
+  assert.equal(result.label, "Hà Đông");
+  assert.equal(result.feature.properties.__metric, null);
+  assert.equal(result.feature.properties.rain, 18);
+  assert.equal(result.feature.properties.date, "2026-09-02T00:00:00.000Z");
+  await vm.runInContext('changeAiMapMetric("rain")', context);
+  assert.equal(sources.get("polygon-data").data.features.length, 2);
+  await vm.runInContext('changeAiMapMetric("temperature")', context);
+  assert.equal(sources.get("polygon-data").data.features.length, 0);
+  assert.equal(searchDataIndex(indexes.at(-1), "ha dong")[0].label, "Hà Đông");
+  const descendants = node => [node, ...node.children.flatMap(descendants)];
+  const date = descendants(get("ai-filter-controls")).find(node => node.className === "ai-generated-filter" && node.dataset.field === "date");
+  date.value = "2026-09-01T00:00:00.000Z";
+  await vm.runInContext("filteredAiBoundary()", context);
+  assert.equal(sources.get("polygon-data").data.features.length, 2);
+  assert.equal(vm.runInContext("state.mapType", context), "polygon");
+  assert.equal(searchDataIndex(indexes.at(-1), "ha dong")[0].feature.properties.temperature, 22);
+  const region = descendants(get("ai-filter-controls")).find(node => node.className === "ai-generated-filter" && node.dataset.field === "region");
+  region.value = "Ba Đình";
+  await vm.runInContext("filteredAiBoundary()", context);
+  assert.deepEqual(searchDataIndex(indexes.at(-1), "ha dong"), [], "search still respects the explicit region filter");
+});
+
 test("AI road search works without a spatial profile and counts names rather than segments", () => {
   const { context } = createHarness();
   const indexes = [];

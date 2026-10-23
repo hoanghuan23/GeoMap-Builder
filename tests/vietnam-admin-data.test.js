@@ -67,6 +67,58 @@ test("choropleth aggregate nhiều dòng cùng địa danh thay vì tạo polygo
   assert.equal(result.features[0].properties.__record_count, 2);
 });
 
+test("choropleth bỏ khu vực thiếu chỉ số đang xem, giữ số 0 và dữ liệu nguồn", () => {
+  const records = [
+    { region: "Ba Đình", pollution: 26, temperature: 22 },
+    { region: "Hà Đông", pollution: null, temperature: 19.4 },
+    { region: "Sơn Tây", pollution: 0, temperature: 19.1 }
+  ];
+  const boundaries = { type: "FeatureCollection", features: records.map((row, index) => boundary(row.region, index)) };
+  const original = JSON.stringify({ records, boundaries });
+  const columns = [
+    { name: "region", role: "geo" },
+    { name: "pollution", role: "measure", aggDefault: "mean" },
+    { name: "temperature", role: "measure", aggDefault: "mean" }
+  ];
+  for (const schema of [null, columns]) {
+    const recommendation = { geometry: { field: "region" }, metricField: "pollution", aggregation: "mean" };
+    const pollution = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { columns: schema });
+    assert.deepEqual(pollution.features.map(feature => feature.properties.__location), ["Ba Đình", "Sơn Tây"]);
+    assert.equal(pollution.features[1].properties.__metric, 0);
+    const temperature = joinRecordsToMapTilerBoundaries(records, boundaries, { ...recommendation, metricField: "temperature" }, { columns: schema });
+    assert.equal(temperature.features.length, 3);
+    assert.equal(temperature.features[1].properties.temperature, 19.4);
+  }
+  assert.equal(JSON.stringify({ records, boundaries }), original);
+});
+
+test("choropleth không vẽ giá trị thiếu hoặc không hợp lệ trước và sau khi tổng hợp", () => {
+  const missing = [null, undefined, "", "   ", NaN, Infinity, -Infinity, "null"];
+  const records = missing.map((value, index) => ({ region: `Vùng ${index}`, value }));
+  const boundaries = { type: "FeatureCollection", features: records.map((row, index) => boundary(row.region, index)) };
+  for (const aggregation of [undefined, "sum", "mean", "min", "max"]) {
+    for (const columns of [null, [{ name: "region", role: "geo" }, { name: "value", role: "measure", aggDefault: aggregation }]]) {
+      const result = joinRecordsToMapTilerBoundaries(records, boundaries, {
+        geometry: { field: "region" }, metricField: "value", aggregation
+      }, { columns });
+      assert.deepEqual(result.features, [], `aggregation=${aggregation}, columns=${Boolean(columns)}`);
+    }
+  }
+});
+
+test("choropleth tổng hợp các giá trị hợp lệ khi khu vực có cả dòng null", () => {
+  const records = [null, "", "   ", 0, 20].map(value => ({ region: "Hà Đông", value }));
+  const boundaries = { type: "FeatureCollection", features: [boundary("Hà Đông", 0)] };
+  for (const columns of [null, [{ name: "region", role: "geo" }, { name: "value", role: "measure", aggDefault: "mean" }]]) {
+    const result = joinRecordsToMapTilerBoundaries(records, boundaries, {
+      geometry: { field: "region" }, metricField: "value", aggregation: "mean"
+    }, { columns });
+    assert.equal(result.features.length, 1);
+    assert.equal(result.features[0].properties.value, 10);
+    assert.equal(result.features[0].properties.__record_count, 5);
+  }
+});
+
 test("choropleth copy schema nguồn và không chọn ngẫu nhiên giá trị phân loại", () => {
   const recommendation = { geometry: { field: "province" }, metricField: "revenue", aggregation: "sum" };
   const columns = [

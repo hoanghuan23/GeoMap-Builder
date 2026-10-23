@@ -108,6 +108,38 @@ test("country spreadsheet searches only uploaded countries, including accents, a
   assert.deepEqual(searchDataIndex(index, "01/09/2026"), [], "dates are not place names");
 });
 
+test("search finds and focuses a region with a null metric without adding it to thematic layers", t => {
+  const { controller, search, camera, selected, sources } = harness(t);
+  const records = [
+    { region: "Hà Đông", pollution: null, temperature: 19.4 },
+    { region: "Ba Đình", pollution: 26, temperature: 22 }
+  ];
+  const columns = [
+    { name: "region", role: "geo", geoLevel: "admin2" },
+    { name: "pollution", role: "measure", aggDefault: "mean" },
+    { name: "temperature", role: "measure", aggDefault: "mean" }
+  ];
+  const geometry = countryData().data.features[0].geometry;
+  const boundaries = { type: "FeatureCollection", features: records.map(record => ({
+    type: "Feature", geometry, properties: { __data_location: record.region }
+  })) };
+  const recommendation = { geometry: { field: "region" }, metricField: "pollution", aggregation: "mean" };
+  const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { columns, includeMissingMetric: true });
+  const rendered = { ...data, features: data.features.filter(feature => Number.isFinite(feature.properties.__metric)) };
+  sources.set("polygon-data", { data: rendered });
+  sources.set("vietnam-boundary", { data: rendered });
+  controller.setData({ data, columns, titleField: "region", chartType: "choropleth", sourceRecords: records, filtered: true });
+  const results = search("ha dong");
+  assert.equal(results.length, 1);
+  results[0].handlers.click();
+  assert.equal(camera.length, 1);
+  assert.equal(selected[0][0].properties.__location, "Hà Đông");
+  assert.equal(selected[0][0].properties.__metric, null);
+  assert.equal(selected[0][0].properties.temperature, 19.4);
+  assert.deepEqual(sources.get("polygon-data").data.features.map(feature => feature.properties.__location), ["Ba Đình"]);
+  assert.equal(sources.get("vietnam-boundary").data, rendered);
+});
+
 test("search stays hidden until searchable analyzed data exists and focuses the uploaded feature", t => {
   const { controller, get, search, camera, selected } = harness(t);
   assert.equal(get("map-search").hidden, true);

@@ -154,6 +154,54 @@ const polygonMetricButtons = [
   { field: "minimum", label: "Nhiệt độ thấp nhất", icon: "❄️", color: "#3b82f6" }
 ];
 
+test("khu vực null biến mất khỏi lớp tô và viền, hiện lại theo chỉ số và ngày có dữ liệu", async () => {
+  const h = harness({ thematic: true, metricButtons: polygonMetricButtons });
+  h.run(`
+    dataset.records.forEach(row => {
+      row.region = row.region === 'A' ? 'Hà Đông' : 'Ba Đình';
+      if (row.region === 'Hà Đông' && row.date.getUTCDate() === 3) row.temperature = null;
+    });
+    dataset.boundaries.features.forEach((feature, index) => {
+      feature.properties.__data_location = index === 0 ? 'Hà Đông' : 'Ba Đình';
+    });
+  `);
+  await h.run("filteredAiBoundary(); renderMapMetricControls();");
+  const locations = source => Array.from(h.sources.get(source).data.features, feature => feature.properties.__location);
+  assert.deepEqual(locations("polygon-data"), ["Ba Đình"]);
+  assert.deepEqual(locations("vietnam-boundary"), ["Ba Đình"]);
+  assert.equal(h.run("currentDataSearch().data.features.length"), 2);
+  assert.equal(h.run("currentDataSearch().data.features[0].properties.__location"), "Hà Đông");
+  assert.equal(h.run("currentDataSearch().data.features[0].properties.__metric"), null);
+  assert.equal(h.dataset.records.length, 6);
+  assert.equal(h.dataset.boundaries.features.length, 2);
+
+  const list = h.get("map-metric-list");
+  const clickMetric = field => list.events.click({ target: list.children.find(button => button.dataset.metricField === field) });
+  await clickMetric("minimum");
+  assert.deepEqual(locations("polygon-data"), ["Hà Đông", "Ba Đình"]);
+  h.run("openMapPopup(state.boundary.features[0], [105,21]);");
+  const popup = h.popups.at(-1);
+  await clickMetric("temperature");
+  assert.deepEqual(locations("polygon-data"), ["Ba Đình"]);
+  assert.equal(popup.removed, true, "close the popup when its region has no active metric");
+
+  const date = h.all(".ai-generated-filter").find(control => control.dataset.field === "date");
+  date.value = "2026-09-02T00:00:00.000Z"; await h.change(date);
+  assert.deepEqual(locations("polygon-data"), ["Hà Đông", "Ba Đình"]);
+  date.value = "2026-09-03T00:00:00.000Z"; await h.change(date);
+  const region = h.all(".ai-generated-filter").find(control => control.dataset.field === "region");
+  region.value = "Hà Đông"; await h.change(region);
+  assert.deepEqual(locations("polygon-data"), []);
+  assert.deepEqual(locations("vietnam-boundary"), []);
+  assert.equal(h.run("state.mapType"), "polygon");
+  assert.equal(h.run("state.dataProfile.hasArea"), true);
+  assert.equal(h.get("weather-legend").hidden, true);
+  assert.equal(h.run("currentDataSearch().data.features[0].properties.__location"), "Hà Đông");
+  await clickMetric("minimum");
+  assert.deepEqual(locations("polygon-data"), ["Hà Đông"]);
+  assert.equal(h.get("weather-legend").hidden, false);
+});
+
 test("map metric buttons update Polygon and sidebar while preserving date, region and popup settings", async () => {
   const h = harness({ metricButtons: polygonMetricButtons }); h.mode("bar");
   const controls = h.all(".ai-generated-filter");

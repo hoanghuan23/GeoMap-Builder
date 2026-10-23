@@ -73,7 +73,9 @@ function harness() {
     CONFIG: { DEFAULT_RESOLUTION: 6, MAX_RENDER_CELLS: 1000 },
     DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
     document: { getElementById: get, querySelectorAll: () => [] },
-    joinRecordsToMapTilerBoundaries: () => regions,
+    joinRecordsToMapTilerBoundaries: () => ({ ...regions, features: regions.features.map(feature => ({
+      ...feature, properties: { ...feature.properties, __metric: feature.properties.value }
+    })) }),
     analyzeSpatialData: () => ({ numericFields: ["value"], textFields: ["region"] })
   });
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
