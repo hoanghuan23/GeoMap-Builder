@@ -1,5 +1,6 @@
 import { polygonToCells, latLngToCell, cellToBoundary, cellToLatLng, cellToParent, getResolution } from "h3-js";
 import { summarizeFeatureProperties } from "./feature-properties.js";
+import { numericMapValue } from "./map-value.js";
 
 function geometriesFromGeoJSON(data) {
   if (!data) return [];
@@ -81,7 +82,7 @@ function coordinateField(headers, aliases) {
 }
 
 function isFiniteValue(value) {
-  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+  return numericMapValue(value) != null;
 }
 
 export function recordsToPointGeoJSON(records, { latField = null, lngField = null } = {}) {
@@ -124,11 +125,11 @@ export function recordsToAggregatedH3(records, { latField, lngField, valueField,
     const latitude = Number(record?.[latField]); const longitude = Number(record?.[lngField]);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) continue;
     coordinateRows += 1;
-    if (!isFiniteValue(record?.[valueField])) continue;
-    const value = Number(record[valueField]);
+    const value = numericMapValue(record?.[valueField]);
     const cell = latLngToCell(latitude, longitude, resolution);
     const group = groups.get(cell) || { values: [], records: [] };
-    group.values.push(value); group.records.push(record); groups.set(cell, group);
+    if (value != null) group.values.push(value);
+    group.records.push(record); groups.set(cell, group);
   }
   const collection = cellsToFeatureCollection([...groups.keys()]);
   for (const feature of collection.features) {

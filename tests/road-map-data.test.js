@@ -5,6 +5,8 @@ import { defaultTimeFilter, applyPipelineFilters, prepareSuggestions, withSugges
 import { fallbackAnalysis, validateAndNormalizeAnalysis, AI_CHART_REGISTRY } from "../src/ai-chart-contract.js";
 import { normalizeTabularRecords, profileTabularData } from "../src/tabular-data.js";
 import { trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED } from "./fixtures/road-traffic-fixture.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
+import { MAP_NO_DATA_COLOR } from "../src/map-value.js";
 
 const roads = { type: "FeatureCollection", features: [
   { type: "Feature", properties: { name: "Đường Lĩnh Nam" }, geometry: { type: "LineString", coordinates: [[105.8, 21], [105.81, 21.01]] } },
@@ -155,5 +157,27 @@ test("chỉ số bản đồ nhận cả số và trạng thái; màu/chú giả
   const categoryOverride = roadMapStyle({ features: [{ properties: { "Mức độ ùn tắc": "Ùn tắc" } }] },
     analysis.columns.find(column => column.name === "Mức độ ùn tắc"), { "category:Ùn tắc": "#123456" });
   assert.equal(categoryOverride.rows[0].color, "#123456");
-  assert.equal(roadMapStyle({ features: [] }, { name: "value", role: "measure" }).color, "#94a3b8");
+  assert.equal(roadMapStyle({ features: [] }, { name: "value", role: "measure" }).color, "rgba(0, 0, 0, 0)");
+});
+
+test("Line retains searchable roads and distinguishes missing measures from a constant zero", () => {
+  const columns = [{ name: "route", role: "text" }, { name: "metric", role: "measure", aggDefault: "mean" }];
+  const data = joinRoadRecords([
+    { route: "Đường Lĩnh Nam", metric: null }, { route: "Đường Lĩnh Nam", metric: " " },
+    { route: "Đường Ngọc Hồi", metric: 0 }
+  ], roads, { roadField: "route", valueField: "metric", columns });
+  assert.deepEqual(data.features.map(feature => feature.properties.metric), [null, 0]);
+  const style = roadMapStyle(data, columns[1]);
+  assert.equal(style.rows.length, 1);
+  assert.deepEqual(style.color[1], ["==", ["typeof", ["get", "metric"]], "number"]);
+  assert.equal(style.color[2], style.rows[0].color);
+  assert.equal(style.color[3], MAP_NO_DATA_COLOR);
+  const index = buildDataSearchIndex({ data, columns, chartType: "map_line", search_bar: true, search_fields: ["route"] });
+  assert.equal(index.enabled, true);
+  assert.equal(searchDataIndex(index, "linh nam")[0].feature, data.features[0]);
+  const empty = { features: data.features.map(feature => ({ ...feature, properties: { ...feature.properties, metric: null } })) };
+  assert.deepEqual(roadMapStyle(empty, columns[1]), { color: MAP_NO_DATA_COLOR, rows: [] });
+  const categorical = roadMapStyle({ features: [null, "", " ", "Open"].map(status => ({ properties: { status } })) }, { name: "status", role: "category" });
+  assert.equal(categorical.rows.length, 1);
+  assert.equal(categorical.color.at(-1), MAP_NO_DATA_COLOR);
 });

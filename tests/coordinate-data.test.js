@@ -4,6 +4,8 @@ import { buildCoordinateLines } from "../src/coordinate-data.js";
 import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
 import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
 import { storeColumns, storeRecords, storeSuggestions } from "./fixtures/store-points-fixture.js";
+import { roadMapStyle } from "../src/road-map-data.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
 
 const columns = [{ name: "vi_do", role: "measure" }, { name: "kinh_do", role: "measure" }, { name: "speed", role: "measure", aggDefault: "mean" }];
 const bindings = { lat: "vi_do", lng: "kinh_do" };
@@ -16,6 +18,19 @@ test("coordinate paths use file row order by default and preserve input records"
   assert.equal(data.features[0].properties.speed, 20);
   assert.equal(data.stats.matchedRows, 3);
   assert.equal(JSON.stringify(records), before);
+});
+
+test("coordinate Line keeps a path with no selected measure available for search", () => {
+  const fields = [...columns, { name: "route", role: "category" }];
+  const rows = ["A", "B"].flatMap(route => records.map(record => ({ ...record, route, speed: route === "A" ? null : 0 })));
+  const data = buildCoordinateLines(rows, fields, { ...bindings, region: "route", value: "speed" });
+  assert.equal(data.features.length, 2);
+  const style = roadMapStyle(data, fields.find(column => column.name === "speed"));
+  assert.equal(style.color[3], "rgba(0, 0, 0, 0)");
+  const index = buildDataSearchIndex({ data, columns: fields, chartType: "map_line", search_bar: true, search_fields: ["route"] });
+  assert.equal(index.enabled, true);
+  assert.equal(searchDataIndex(index, "A")[0].feature.properties.speed, undefined);
+  assert.equal(searchDataIndex(index, "B")[0].feature.properties.speed, 0);
 });
 
 test("coordinate paths sort each route independently by sequence or time", () => {

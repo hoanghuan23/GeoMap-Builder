@@ -1,6 +1,7 @@
 import { humanizeField } from "../charts/data-transformers.js";
 import { serializeTabularValue } from "../tabular-data.js";
 import { timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "../time-values.js";
+import { numericMapColor, numericMapValue as numberValue } from "../map-value.js";
 
 export const POINT_COLOR = "#00d084";
 export const POINT_COLORS = Object.freeze(["#5b8ff9", "#f58b61", "#63c785", "#f6bd16", "#9270ca", "#6dc8ec", "#d9548a", "#2f9e9e"]);
@@ -34,12 +35,6 @@ export function mergePointStyle(input = {}) {
     borderWidth: clamp("borderWidth", 0, 4),
     showLegend: input.showLegend !== false
   };
-}
-
-function numberValue(value) {
-  if (typeof value !== "number" && typeof value !== "string" || typeof value === "string" && !value.trim()) return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
 }
 
 function groupKey(value) {
@@ -87,7 +82,7 @@ export function createPointModel(records, columns, { lat, lng }) {
   }
   return {
     data: { type: "FeatureCollection", features },
-    measures: measures.filter(column => features.some(feature => feature.properties[column.name] != null)).map(column => ({ ...column, label: fieldLabel(column) })),
+    measures: measures.map(column => ({ ...column, label: fieldLabel(column) })),
     groups, timeColumn, times,
     totalRecords: records.length,
     coordinateCount: features.length,
@@ -96,7 +91,8 @@ export function createPointModel(records, columns, { lat, lng }) {
 }
 
 export function normalizePointSelection(model, saved = {}) {
-  const metric = model.measures.find(column => column.name === saved.metricField) || model.measures[0];
+  const metric = model.measures.find(column => column.name === saved.metricField)
+    || model.measures.find(column => model.data.features.some(feature => feature.properties[column.name] != null)) || model.measures[0];
   const group = model.groups.find(column => column.name === saved.groupField)
     || model.groups.find(column => column.values.length > 1) || model.groups[0];
   const validKeys = new Set(group?.values.map(item => item.key));
@@ -143,7 +139,7 @@ function radiusExpression(metric, size = 100) {
 export function pointPaint(input = {}, metric = null, color = null) {
   const style = mergePointStyle(input);
   return {
-    "circle-color": color ?? style.color,
+    "circle-color": metric ? numericMapColor(metric.field, color ?? style.color) : color ?? style.color,
     "circle-radius": radiusExpression(metric, style.size),
     "circle-opacity": style.opacity,
     "circle-stroke-color": style.borderColor,

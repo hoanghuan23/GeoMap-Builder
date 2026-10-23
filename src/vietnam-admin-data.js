@@ -1,5 +1,6 @@
 import { summarizeFeatureProperties } from "./feature-properties.js";
 import { geographicLocationName } from "./geographic-grain.js";
+import { numericMapValue } from "./map-value.js";
 
 function normalizedName(value) {
   return String(value ?? "").split(",").map(part => part
@@ -22,7 +23,7 @@ function matchesFilter(value, selectedValue) {
 
 function aggregate(values, aggregation) {
   if (aggregation === "count") return values.length;
-  const numbers = values.map(Number).filter(Number.isFinite);
+  const numbers = values.map(numericMapValue).filter(value => value != null);
   if (!numbers.length) return null;
   if (aggregation === "sum") return numbers.reduce((sum, value) => sum + value, 0);
   if (aggregation === "min") return Math.min(...numbers);
@@ -66,7 +67,7 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
       ...recordProperties,
       __location: String(group.records[0]?.[locationField] ?? "").trim(),
       ...(recommendation.geometry.contextFields?.length ? { __location_context: recommendation.geometry.contextFields } : {}),
-      __metric: Number(recordProperties[metricField]),
+      __metric: numericMapValue(recordProperties[metricField]),
       __record_count: group.records.length,
       boundary_source: boundary.properties?.boundary_source || "MapTiler"
     };

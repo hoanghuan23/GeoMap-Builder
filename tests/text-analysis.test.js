@@ -4,7 +4,10 @@ import { Readable } from "node:stream";
 import { aiMapRecommendationPlugin } from "../server/ai-map-recommendation.js";
 import { MAP_ANALYSIS_INSTRUCTIONS } from "../server/map-analysis-instructions.js";
 import { requestAiTextAnalysis } from "../src/ai-data-analysis.js";
-import { weatherText, weatherRecords, textWeatherAnalysis, textWeatherOutput } from "./fixtures/text-weather-fixture.js";
+import { aiPopupRows } from "../src/ai-popup.js";
+import { metricExtractionCases } from "./fixtures/text-metric-fixture.js";
+import { weatherText, weatherRecords, textWeatherAnalysis, textWeatherOutput,
+  comparativeWeatherText, comparativeWeatherRecords, comparativeWeatherOutput } from "./fixtures/text-weather-fixture.js";
 
 function middlewareFor(env = { OPENAI_API_KEY: "test" }) {
   let middleware;
@@ -57,6 +60,69 @@ test("text endpoint extracts records and all map metadata in one structured resp
   assert.equal(analysis.suggestions[0].metricButtons.length, 2);
   assert.deepEqual(analysis.suggestions[0].popupSuggestions, [{ name: "info", confidence: .95 }]);
 });
+
+test("all direct and inferred weather measures survive server, client, and information popup", async t => {
+  // Mocked AI checks transport and rendering; inference quality needs a live-model evaluation.
+  const originalFetch = globalThis.fetch; t.after(() => { globalThis.fetch = originalFetch; });
+  let upstreamCalls = 0;
+  globalThis.fetch = async (url, options) => {
+    if (url === "/api/ai/analyze-map-text") {
+      const result = await call(JSON.parse(options.body));
+      return { ok: result.status === 200, json: async () => result.body };
+    }
+    upstreamCalls++;
+    assert.equal(JSON.parse(JSON.parse(options.body).input).text, comparativeWeatherText);
+    return { ok: true, json: async () => ({ output_text: JSON.stringify(comparativeWeatherOutput()) }) };
+  };
+  const result = await requestAiTextAnalysis(comparativeWeatherText);
+  assert.equal(upstreamCalls, 1);
+  assert.equal(result.analysis.source, "ai");
+  assert.deepEqual(result.rawRecords, comparativeWeatherRecords);
+  const measures = result.analysis.columns.filter(column => column.role === "measure");
+  assert.deepEqual(measures.map(column => column.unit), ["°C", "%", "mm"]);
+  assert.ok(measures.every(column => column.legend && result.validRowRate[column.name] === 1));
+  assert.deepEqual(result.analysis.suggestions[0].metricButtons.map(button => button.field), measures.map(column => column.name));
+  for (const expected of comparativeWeatherRecords) {
+    const record = result.records.find(row => row["Tỉnh thành"] === expected["Tỉnh thành"]);
+    const popup = aiPopupRows(record, result.analysis.columns);
+    for (const column of measures) {
+      assert.equal(record[column.name], expected[column.name]);
+      assert.equal(popup.find(row => row.field === column.name)?.value,
+        new Intl.NumberFormat("vi-VN").format(expected[column.name]));
+    }
+    assert.equal(popup.find(row => row.field === "Tháng")?.value, "09/2026");
+  }
+});
+
+for (const item of metricExtractionCases) {
+  test(`text extraction preserves shared measures, scope notes and independent breakdowns: ${item.id}`, async t => {
+    // Transport/popup regression; npm run eval:text separately checks actual model behavior.
+    const originalFetch = globalThis.fetch; t.after(() => { globalThis.fetch = originalFetch; });
+    let upstreamCalls = 0;
+    globalThis.fetch = async (url, options) => {
+      if (url === "/api/ai/analyze-map-text") {
+        const result = await call(JSON.parse(options.body));
+        return { ok: result.status === 200, json: async () => result.body };
+      }
+      upstreamCalls++;
+      const payload = JSON.parse(options.body);
+      assert.equal(JSON.parse(payload.input).text, item.text);
+      assert.match(payload.instructions, /Không nhân đôi cùng quan sát/);
+      assert.match(payload.instructions, /Không suy ra tổng đầy đủ từ một phân nhóm/);
+      assert.match(payload.instructions, /Không đánh dấu Ghi chú là measure/);
+      return { ok: true, json: async () => ({ output_text: JSON.stringify(item.output()) }) };
+    };
+    const result = await requestAiTextAnalysis(item.text);
+    assert.equal(upstreamCalls, 1);
+    item.check(result);
+    const noteColumn = result.analysis.columns.find(column => column.name === "Ghi chú");
+    assert.equal(noteColumn.role, "text");
+    assert.equal(noteColumn.legend, null);
+    for (const row of result.records.filter(row => row[noteColumn.name])) {
+      assert.equal(aiPopupRows(row, result.analysis.columns).find(item => item.field === noteColumn.name)?.value, row[noteColumn.name]);
+    }
+  });
+}
 
 test("invalid or oversized text, method, and missing key fail before upstream", async t => {
   const originalFetch = globalThis.fetch; t.after(() => { globalThis.fetch = originalFetch; });

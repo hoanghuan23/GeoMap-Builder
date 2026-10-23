@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildPointView, createPointModel, DEFAULT_POINT_STYLE, mergePointStyle, normalizePointSelection, pointPaint, POINT_COLOR, POINT_COLORS } from "../src/renderers/point-style.js";
 import { storeColumns, storeRecords, storeBindings } from "./fixtures/store-points-fixture.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
+import { MAP_NO_DATA_COLOR } from "../src/map-value.js";
 
 const columns = [
   { name: "code", role: "id" },
@@ -56,7 +58,8 @@ test("Point defaults use valid measures and top five categories without includin
   assert.equal(view.stats.visibleCount, 7);
   assert.equal(view.stats.totalCount, 8);
   assert.equal(view.stats.coordinateRate, 8 / 9);
-  assert.deepEqual(model.measures.map(column => column.name), ["revenue", "rating"]);
+  assert.deepEqual(model.measures.map(column => column.name), ["empty", "revenue", "rating"]);
+  assert.equal(buildPointView(model, { metricField: "empty" }).selection.metricField, "empty");
   assert.equal(model.timeColumn, null);
 });
 
@@ -72,7 +75,7 @@ test("Point filtering preserves popup properties, string IDs, source records and
   assert.equal(selected.metric.min, 0);
   const all = buildPointView(model, { ...selected.selection, mode: "all" }, selected.colors);
   assert.equal(all.data.features.length, 3);
-  assert.equal(all.paint["circle-color"], POINT_COLOR);
+  assert.equal(evaluate(all.paint["circle-color"], { revenue: 0 }), POINT_COLOR);
   assert.equal(all.legendRows[0].count, 3);
   assert.deepEqual(records, original);
 });
@@ -133,7 +136,7 @@ test("Eight selected groups have distinct matching map/legend colors, stable acr
   const initial = buildPointView(model, { selectedValues: records.slice(0, 8).map(row => row.type) });
   assert.equal(new Set(Object.values(initial.colors)).size, 8);
   assert.ok(initial.legendRows.every(row => POINT_COLORS.includes(row.color)));
-  for (const row of initial.legendRows) assert.equal(evaluate(initial.paint["circle-color"], { type: row.key }), row.color);
+  for (const row of initial.legendRows) assert.equal(evaluate(initial.paint["circle-color"], { type: row.key, revenue: 0 }), row.color);
   const changed = buildPointView(model, { ...initial.selection, metricField: "rating", time: model.times[0] }, initial.colors);
   assert.deepEqual(changed.colors, initial.colors);
   const replaced = buildPointView(model, { ...initial.selection, selectedValues: [...initial.selection.selectedValues.slice(1), "G8"] }, initial.colors);
@@ -156,18 +159,46 @@ test("Point radius handles zero, negative, missing, constant values and zoom", (
   assert.equal(evaluate(constant.paint["circle-radius"], { rating: null }), 4);
 });
 
-test("One date remains selectable while high-cardinality groups and empty measures are omitted", () => {
+test("Point missing measures stay uncolored and searchable in every group mode and across metric changes", () => {
+  const records = [0, null, undefined, "", " ", false, NaN, Infinity].map((value, index) =>
+    record("A", value, { code: String(index), name: `Điểm ${index}` }));
+  const model = createPointModel(records, [{ name: "empty", role: "measure" }, ...columns], bindings);
+  for (const mode of ["all", "pick"]) {
+    const view = buildPointView(model, { metricField: "revenue", groupField: "type", mode });
+    assert.equal(view.data.features.length, records.length);
+    assert.equal(view.metric.min, 0);
+    assert.equal(view.metric.max, 0);
+    const index = buildDataSearchIndex({ data: view.data, columns, chartType: "point", search_fields: ["name"], search_bar: true });
+    assert.equal(index.enabled, true);
+    assert.equal(index.uniqueCount, records.length);
+    for (const [position, feature] of view.data.features.entries()) {
+      const color = evaluate(view.paint["circle-color"], feature.properties);
+      if (position === 0) assert.notEqual(color, MAP_NO_DATA_COLOR);
+      else assert.equal(color, MAP_NO_DATA_COLOR);
+      assert.equal(searchDataIndex(index, feature.properties.name)[0].feature, feature);
+    }
+    const changed = buildPointView(model, { ...view.selection, metricField: "rating" });
+    assert.ok(changed.data.features.every(feature => evaluate(changed.paint["circle-color"], feature.properties) !== MAP_NO_DATA_COLOR));
+    const empty = buildPointView(model, { ...view.selection, metricField: "empty" });
+    assert.equal(empty.selection.metricField, "empty");
+    assert.ok(empty.data.features.every(feature => evaluate(empty.paint["circle-color"], feature.properties) === MAP_NO_DATA_COLOR));
+    assert.deepEqual(empty.data, view.data);
+  }
+});
+
+test("One date and an empty measure remain selectable while high-cardinality groups are omitted", () => {
   const records = Array.from({ length: 81 }, (_, index) => record(`G${index}`, null, { day: "2026-07-01" }));
   const model = createPointModel(records, columns.filter(column => !["rating", "name"].includes(column.name)).concat({ name: "day", role: "time" }), bindings);
   assert.equal(model.groups.length, 0);
-  assert.equal(model.measures.length, 0);
+  assert.equal(model.measures.length, 1);
   assert.equal(model.timeColumn.name, "day");
   const view = buildPointView(model);
   assert.equal(view.selection.mode, "all");
-  assert.equal(view.selection.metricField, null);
+  assert.equal(view.selection.metricField, "revenue");
   assert.equal(view.selection.time, "2026-07-01");
   assert.equal(view.data.features.length, 81);
-  assert.equal(evaluate(view.paint["circle-radius"], {}, 10), 6);
+  assert.equal(evaluate(view.paint["circle-color"], {}), MAP_NO_DATA_COLOR);
+  assert.equal(evaluate(view.paint["circle-radius"], {}, 10), 4);
 });
 
 test("Selection normalizes stale groups and caps to eight; category values remain ordinary data", () => {
@@ -178,7 +209,7 @@ test("Selection normalizes stale groups and caps to eight; category values remai
   const view = buildPointView(model, selection);
   assert.equal(new Set(Object.values(view.colors)).size, 8);
   assert.equal(view.legendRows.find(row => row.key === "__proto__").color, view.colors.__proto__);
-  assert.equal(evaluate(view.paint["circle-color"], { type: "__proto__" }), view.colors.__proto__);
+  assert.equal(evaluate(view.paint["circle-color"], { type: "__proto__", revenue: 1 }), view.colors.__proto__);
   assert.equal(normalizePointSelection(model, { selectedValues: ["missing"] }).selectedValues.length, 5);
 });
 
@@ -206,13 +237,13 @@ test("Custom group colors match the legend, persist on metric changes and restor
   const styled = buildPointView(model, initial.selection, initial.paletteColors, { groupColors: { A: "#ff0000" } });
   assert.equal(styled.colors.A, "#ff0000");
   assert.equal(styled.legendRows.find(row => row.key === "A").color, "#ff0000");
-  assert.equal(evaluate(styled.paint["circle-color"], { type: "A" }), "#ff0000");
+  assert.equal(evaluate(styled.paint["circle-color"], { type: "A", revenue: 0 }), "#ff0000");
   const changed = buildPointView(model, { ...styled.selection, metricField: "rating" }, styled.paletteColors, { groupColors: { A: "#ff0000" } });
   assert.deepEqual(changed.colors, styled.colors);
   const reset = buildPointView(model, styled.selection, styled.paletteColors);
   assert.deepEqual(reset.colors, initial.colors);
   const all = buildPointView(model, { ...initial.selection, mode: "all" }, initial.paletteColors, { color: "#112233" });
-  assert.equal(all.paint["circle-color"], "#112233");
+  assert.equal(evaluate(all.paint["circle-color"], { revenue: 0 }), "#112233");
   assert.equal(all.legendRows[0].color, "#112233");
 });
 

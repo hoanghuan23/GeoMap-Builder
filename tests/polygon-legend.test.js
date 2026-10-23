@@ -95,6 +95,21 @@ test("constants, empty/invalid values, tiny ranges and legacy output always prod
   }
 });
 
+test("missing polygon measures stay transparent while zero retains its legend color", () => {
+  for (const legend of [legendFixture({ mode: "auto" }), legendFixture(), null]) {
+    for (const values of [[null, 0, 14], [null, 0]]) {
+      const scale = resolve(values, legend);
+      const paint = polygonFillExpression(null, null, null, "#ff0000", scale);
+      assert.equal(scale.dataMin, 0);
+      assert.deepEqual(paint[1], ["==", ["typeof", ["get", "temperature"]], "number"]);
+      assert.equal(paint[3], "rgba(0, 0, 0, 0)");
+      if (values.length === 2 && legend?.mode !== "semantic") assert.equal(paint[2], scale.colors[0]);
+    }
+    const empty = resolve([null, undefined], legend);
+    assert.equal(polygonFillExpression(null, null, null, "#ff0000", empty), "rgba(0, 0, 0, 0)");
+  }
+});
+
 test("source precedence only accepts legends bound to the active field, unit and aggregation", () => {
   const columnLegend = legendFixture({ title: "Cột" });
   assert.equal(resolve([25, 34], legendFixture({ title: "Suggestion" }), { columnMetadata: [{ ...legendColumn, legend: columnLegend }] }).title, "Suggestion");

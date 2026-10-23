@@ -306,7 +306,7 @@ function fillExpression() {
 
 function activePolygonLegendScale() {
   const suggestion = activePolygonSuggestion();
-  if (!suggestion || state.mapType !== "polygon") return null;
+  if (!suggestion || !["polygon", "h3"].includes(state.mapType)) return null;
   const dataset = state.aiDataset; const columns = dataset.analysis.columns;
   const cache = dataset.polygonLegendScaleCache ||= { resolved: null, logged: new Set() };
   const column = columns.find(item => item.name === suggestion.bindings.value);
@@ -958,10 +958,11 @@ function refreshMapPopup() {
 function applyHeatmapWeight() {
   if (!map?.getLayer("point-heatmap")) return;
   const field = state.dataProfile?.numericFields?.[0];
-  const values = field ? state.pointData.features.map(feature => Number(feature.properties?.[field])).filter(Number.isFinite) : [];
+  const values = field ? polygonColorField(state.pointData, { numericFields: [field] }).values : [];
   const min = values.length ? Math.min(...values) : 0; const max = values.length ? Math.max(...values) : 0;
-  if (field && max > min) {
-    map.setPaintProperty("point-heatmap", "heatmap-weight", ["interpolate", ["linear"], ["to-number", ["get", field], min], min, .15, max, 1]);
+  if (field) {
+    const weight = max > min ? ["interpolate", ["linear"], ["to-number", ["get", field], min], min, .15, max, 1] : 1;
+    map.setPaintProperty("point-heatmap", "heatmap-weight", ["case", ["==", ["typeof", ["get", field]], "number"], weight, 0]);
   } else {
     map.setPaintProperty("point-heatmap", "heatmap-weight", 1);
   }
@@ -2624,17 +2625,13 @@ async function refreshAiH3({ fit = false } = {}) {
     columns: dataset.analysis.columns
   });
   if (result.stats.coordinateRate < .7 || result.stats.cellCount < 2) throw new Error("Không đủ tọa độ hợp lệ để tạo ít nhất hai ô H3.");
-  if (!dataset.spatialData) {
-    dataset.spatialData = {
-      type: "FeatureCollection",
-      features: dataset.records.flatMap(record => {
-        if (record?.[suggestion.bindings.lat] == null || record?.[suggestion.bindings.lat] === "" || record?.[suggestion.bindings.lng] == null || record?.[suggestion.bindings.lng] === "") return [];
-        const latitude = Number(record?.[suggestion.bindings.lat]); const longitude = Number(record?.[suggestion.bindings.lng]);
-        if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return [];
-        return [{ type: "Feature", properties: { ...record }, geometry: { type: "Point", coordinates: [longitude, latitude] } }];
-      })
-    };
-  }
+  dataset.spatialData = {
+    type: "FeatureCollection",
+    features: records.flatMap(record => {
+      const pair = coordinatePair(record, suggestion.bindings);
+      return pair ? [{ type: "Feature", properties: { ...record }, geometry: { type: "Point", coordinates: pair } }] : [];
+    })
+  };
   state.h3Data = result.data; state.pointData = dataset.spatialData || EMPTY_FEATURE_COLLECTION;
   state.boundary = state.pointData; state.sourceBoundary = state.pointData; state.mapType = "h3";
   state.dataProfile = analyzeSpatialData(result.data, { numericFields: [suggestion.bindings.value] });
@@ -2918,7 +2915,8 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
 // Search follows the analyzed fields and the features produced by the active filters.
 function currentDataSearch() {
   if (!state.mapType || state.chartConfig || !state.aiDataset && !state.dataProfile) { return {}; }
-  const suggestion = activeMapPopupSuggestion();
+  const suggestion = activeMapPopupSuggestion()
+    || state.aiDataset?.suggestions.find(item => item.id === state.aiDataset.selectedSuggestionId && item.chartType === "hex_h3");
   const data = state.mapType === "point" ? state.pointData
     : state.mapType === "line" ? state.lineData : state.boundary;
   if (state.aiDataset && !suggestion) { return {}; }
