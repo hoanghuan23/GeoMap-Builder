@@ -1,8 +1,7 @@
 const nullableString = { anyOf: [{ type: 'string', maxLength: 160 }, { type: 'null' }] };
 export const MAP_COMPOSITION_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['schemaVersion', 'decisions', 'searchLayerIds'],
+  type: 'object', additionalProperties: false, required: ['decisions', 'searchLayerIds'],
   properties: {
-    schemaVersion: { type: 'integer', enum: [1] },
     decisions: { type: 'array', maxItems: 50, items: {
       type: 'object', additionalProperties: false,
       required: ['layerId', 'action', 'targetGroupId', 'newGroupKey', 'groupTitle', 'confidence', 'reason'],
@@ -65,14 +64,14 @@ export function normalizeCompositionInput(raw) {
 }
 
 export function fallbackComposition(input, reason = 'Chưa xác định khả năng kết hợp; dữ liệu được giữ thành bản đồ riêng.') {
-  return { schemaVersion: 1, source: 'rule', decisions: input.newLayerIds.map(layerId => ({ layerId, action: 'undetermined', targetGroupId: null,
+  return { source: 'rule', decisions: input.newLayerIds.map(layerId => ({ layerId, action: 'undetermined', targetGroupId: null,
     newGroupKey: null, groupTitle: input.layers.find(layer => layer.id === layerId)?.title || 'Dữ liệu tải lên', confidence: 0, reason })),
     searchLayerIds: input.layers.filter(layer => layer.search_bar !== false && layer.search_fields?.length).map(layer => layer.id) };
 }
 
 export function normalizeCompositionResult(raw, input) {
   const fallback = fallbackComposition(input);
-  if (raw?.schemaVersion !== 1 || !Array.isArray(raw.decisions)) return fallback;
+  if (!Array.isArray(raw?.decisions)) return fallback;
   const layers = new Map(input.layers.map(layer => [layer.id, layer]));
   const groups = new Map(input.groups.map(group => [group.id, group]));
   const decisions = input.newLayerIds.map((id, index) => {
@@ -94,6 +93,6 @@ export function normalizeCompositionResult(raw, input) {
   // Composition can recommend search layers, but omission must not disable
   // the valid search configuration already produced for an individual file.
   const recommended = Array.isArray(raw.searchLayerIds) ? raw.searchLayerIds.filter(id => searchable.has(id)) : [];
-  return { schemaVersion: 1, source: raw.source === 'rule' ? 'rule' : 'ai', decisions,
+  return { source: raw.source === 'rule' ? 'rule' : 'ai', decisions,
     searchLayerIds: [...new Set([...recommended, ...searchable])] };
 }

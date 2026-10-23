@@ -136,7 +136,7 @@ const state = {
   dataOrigin: null,
   uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0, primaryUploadId: null,
   aiDataset: null, pendingSheet: null,
-  mapStyle: "map4d"
+  mapStyle: "liberty"
 };
 let map; let mapSearch; let toastTimer; let statusTimer; let cellPopup; let pointPopup; let layerOrderTimer; let tabularAbortController; let aiBoundaryAbortController;
 let mapPopupView = null;

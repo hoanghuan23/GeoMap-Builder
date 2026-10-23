@@ -24,7 +24,7 @@
           <h2 id="basemap-heading">Nền bản đồ</h2>
         </div>
         <div id="basemap-options" class="basemap-options" role="group" aria-label="Chọn nền bản đồ">
-          <button class="basemap-option active" type="button" data-map-style="map4d" aria-pressed="true">
+          <button class="basemap-option" type="button" data-map-style="map4d" aria-pressed="false">
             <span class="basemap-preview basemap-preview-map4d" aria-hidden="true"></span>
             <span>Map4D · IOTLink</span>
           </button>
@@ -32,7 +32,7 @@
             <span class="basemap-preview basemap-preview-satellite" aria-hidden="true"></span>
             <span>Vệ tinh</span>
           </button>
-          <button class="basemap-option" type="button" data-map-style="liberty" aria-pressed="false">
+          <button class="basemap-option active" type="button" data-map-style="liberty" aria-pressed="true">
             <span class="basemap-preview basemap-preview-liberty" aria-hidden="true"></span>
             <span>Liberty</span>
           </button>
@@ -45,7 +45,7 @@
             <span>Tối</span>
           </button>
         </div>
-        <p id="basemap-selection" class="basemap-selection" aria-live="polite">Nền đang dùng: <b>Map4D · IOTLink</b></p>
+        <p id="basemap-selection" class="basemap-selection" aria-live="polite">Nền đang dùng: <b>Liberty</b></p>
       </section>
       <section class="panel-section">
         <div class="section-title"><span class="step">1</span><div><h2>Cung cấp dữ liệu</h2><p>Tải lên hoặc nhập vùng cần phân tích</p></div></div>
@@ -174,9 +174,9 @@
         <div class="map-controls"><button id="zoom-in">+</button><button id="zoom-out">−</button><button id="fullscreen">⛶</button></div>
         <div class="right-cards"><article id="cell-stats-card" class="map-card stats-card" hidden><div class="card-heading"><div><span class="card-icon purple">⌁</span><b>Thống kê</b></div><button>•••</button></div><div class="stat-primary"><span id="cell-count">0</span><small id="cell-label">Tổng số cell (res 5)</small></div></article></div>
         <div class="map-attribution">
-          <span id="map4d-attribution"><a href="https://map4d.vn/" target="_blank" rel="noopener">© Map4D · IOTLink</a></span>
+          <span id="map4d-attribution" hidden><a href="https://map4d.vn/" target="_blank" rel="noopener">© Map4D · IOTLink</a></span>
           <span id="satellite-attribution" hidden><a href="https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer" target="_blank" rel="noopener">© Esri, Vantor, Earthstar Geographics, GIS User Community</a> · <a href="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer" target="_blank" rel="noopener">Esri, HERE, Garmin, © OpenStreetMap contributors, GIS User Community</a></span>
-          <span id="vector-attribution" hidden>© OpenFreeMap · © OpenMapTiles · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a></span>
+          <span id="vector-attribution">© OpenFreeMap · © OpenMapTiles · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a></span>
           · <a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">© MapTiler</a> · GADM 4.1
         </div>
       </div>

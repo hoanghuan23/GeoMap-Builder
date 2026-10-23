@@ -44,10 +44,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   sidebar.children[1].append(groupField, compositionNote, retry, showTable);
   $('sheet-selector-field').hidden = true;
   document.querySelector('.drop-zone small').textContent = 'CSV, Excel, JSON, GeoJSON · AI đánh giá hiển thị nhiều lớp';
-  const map = new globalThis.maplibregl.Map({ container: 'map', style: styles.map4d, center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
+  const map = new globalThis.maplibregl.Map({ container: 'map', style: styles.liberty, center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
   let readyResolve; const ready = new Promise(resolve => { readyResolve = resolve; });
   let uploadSequence = 0; let scheduled = false; let tableShown = false; let queue = Promise.resolve();
-  let selectedSignature = ''; let compositionController; let currentStyle = 'map4d'; let statusTimer; let styleReady = false;
+  let selectedSignature = ''; let compositionController; let currentStyle = 'liberty'; let statusTimer; let styleReady = false;
   const mounted = new Set();
   const search = createMapSearch({ map, minFilteredObjects: CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS,
     onSelect(_feature, _center, entry) {
