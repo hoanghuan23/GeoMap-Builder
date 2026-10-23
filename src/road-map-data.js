@@ -158,13 +158,13 @@ export function roadMapStyle(data, column, colorOverrides = {}) {
   const colorFor = (key, fallback) => /^#[0-9a-f]{6}$/i.test(colorOverrides[key] || "") ? colorOverrides[key] : fallback;
   if (column?.role === "measure") {
     const numbers = values.map(Number).filter(Number.isFinite);
-    if (!numbers.length) return { color: "#94a3b8", rows: [] };
+    if (!numbers.length) return { color: "rgba(0, 0, 0, 0)", rows: [] };
     const min = Math.min(...numbers); const max = Math.max(...numbers);
     const colors = /toc do|speed|ty le toc do/.test(normalizeRoadText(field))
       ? ["#dc2626", "#f97316", "#eab308", "#22c55e"] : ["#22c55e", "#eab308", "#f97316", "#dc2626"];
     if (min === max) {
       const key = "measure-0"; const color = colorFor(key, colors[0]);
-      return { color, rows: [{ key, label: String(min), color }] };
+      return { color: ["case", ["==", ["typeof", ["get", field]], "number"], color, "rgba(0, 0, 0, 0)"], rows: [{ key, label: String(min), color }] };
     }
     const stops = colors.map((color, index) => ({
       key: `measure-${index}`,
@@ -172,7 +172,7 @@ export function roadMapStyle(data, column, colorOverrides = {}) {
       color: colorFor(`measure-${index}`, color)
     }));
     return {
-      color: ["case", ["==", ["typeof", ["get", field]], "number"], ["interpolate", ["linear"], ["to-number", ["get", field], min], ...stops.flatMap(stop => [stop.value, stop.color])], "#94a3b8"],
+      color: ["case", ["==", ["typeof", ["get", field]], "number"], ["interpolate", ["linear"], ["to-number", ["get", field], min], ...stops.flatMap(stop => [stop.value, stop.color])], "rgba(0, 0, 0, 0)"],
       rows: stops.map(stop => ({ key: stop.key, label: stop.value.toLocaleString("vi-VN", { maximumFractionDigits: 1 }), color: stop.color }))
     };
   }
@@ -182,5 +182,5 @@ export function roadMapStyle(data, column, colorOverrides = {}) {
     const fallback = BAR_COLORS[index % BAR_COLORS.length];
     return { key, label: value, color: colorFor(key, fallback) };
   });
-  return { color: rows.length ? ["match", ["to-string", ["get", field]], ...rows.flatMap(row => [row.label, row.color]), "#94a3b8"] : "#94a3b8", rows };
+  return { color: rows.length ? ["match", ["to-string", ["get", field]], ...rows.flatMap(row => [row.label, row.color]), "rgba(0, 0, 0, 0)"] : "rgba(0, 0, 0, 0)", rows };
 }

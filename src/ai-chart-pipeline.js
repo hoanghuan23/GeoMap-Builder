@@ -32,6 +32,7 @@ function first(value) {
 }
 
 export function resolveAggregation(suggestion, columns) {
+  if (["choropleth", "map_line"].includes(suggestion?.chartType) && !suggestion.bindings?.value) return null;
   if (AGGREGATIONS.has(suggestion?.agg)) return suggestion.agg;
   const valueName = suggestion?.bindings?.value || first(suggestion?.bindings?.y);
   const column = columnMap(columns).get(valueName);
@@ -372,8 +373,7 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
     if (!groups) { available = false; unavailableReason = "Không có tên tuyến hợp lệ để ghép với mạng đường."; }
   } else if (suggestion.chartType === "choropleth") {
     const groups = administrativeGroups(records, columns, suggestion.bindings.region).length;
-    feasibilityScore = Math.min(feasibilityScore, Math.min(1, groups / 2));
-    if (groups < 2) { available = false; unavailableReason = "Cần ít nhất hai địa danh hợp lệ."; }
+    if (!groups) { available = false; unavailableReason = "Cần ít nhất một địa danh hợp lệ."; }
   } else if (suggestion.chartType === "point") {
     const { lat, lng } = suggestion.bindings;
     const coordinateRows = records.filter(record => {

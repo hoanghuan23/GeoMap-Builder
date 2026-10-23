@@ -22,6 +22,25 @@ export function resolveBoundaryCountry(value) {
   )?.[0] || null;
 }
 
+/** A display label may qualify a country without changing the requested ADM0. */
+export function countryLookupName(value) {
+  const name = String(value ?? "").trim();
+  if (resolveBoundaryCountry(name)) return name;
+  return name.split(/\s*[—–]\s*|\s+-\s+/u)[0].replace(/\s*\([^()]*\)\s*$/u, "").trim() || name;
+}
+
+export function resolvedCountryProperties(feature) {
+  const properties = feature.properties || {};
+  if (!feature.place_type?.includes("country") && properties.__data_place_type !== "country" && properties.__admin_level !== 0) return {};
+  const rawCode = properties.__country_code || properties.GID_0 || properties.country_code || properties.short_code || feature.country_code;
+  const code = resolveBoundaryCountry(rawCode) || resolveBoundaryCountry(feature.text || feature.place_name)
+    || String(rawCode || "").toUpperCase();
+  const name = COUNTRY_BOUNDARY_SOURCES[code]?.name || feature.text || properties.NAME_0 || properties.name || feature.place_name;
+  const key = code || feature.id || normalizedCountry(name);
+  return key ? { __resolved_location_key: `country:${key}`, __resolved_location_name: name,
+    ...(code ? { __resolved_country_code: code } : {}) } : {};
+}
+
 export function countryBoundaryUrl(country, level = 0) {
   const code = resolveBoundaryCountry(country);
   return COUNTRY_BOUNDARY_SOURCES[code]?.files[level] || null;

@@ -1,7 +1,7 @@
 import { normalizePolygonLegendRecommendation, polygonLegendTarget } from "./polygon-legend-contract.js";
 import { resolveAggregation } from "./ai-chart-pipeline.js";
 
-export const POLYGON_NO_DATA_COLOR = "#cbd5e1";
+export const POLYGON_NO_DATA_COLOR = "rgba(0, 0, 0, 0)";
 const FALLBACK_COLORS = ["#e2e8f0", "#94a3b8", "#475569"];
 const featuresOf = data => Array.isArray(data) ? data : data?.type === "Feature" ? [data] : data?.features || [];
 

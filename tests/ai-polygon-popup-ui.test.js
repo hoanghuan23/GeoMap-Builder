@@ -8,7 +8,7 @@ import * as times from "../src/time-values.js";
 import { AI_CHART_REGISTRY, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "../src/ai-data-analysis.js";
 import { createAiPopupContent } from "../src/ai-popup.js";
-import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
 import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
 import { analyzeSpatialData } from "../src/data-capabilities.js";
 import * as roadMap from "../src/road-map-data.js";
@@ -23,6 +23,7 @@ import { storeColumns, storeRecords, storeSuggestions } from "./fixtures/store-p
 import { normalizeTabularRecords, profileTabularData } from "../src/tabular-data.js";
 import { trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED } from "./fixtures/road-traffic-fixture.js";
 import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
+import { descriptiveColumns, descriptiveCountryFetch, descriptiveRecords, descriptiveSuggestion } from "./fixtures/descriptive-countries-fixture.js";
 
 class Element {
   constructor() {
@@ -124,7 +125,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   if (metricButtons !== null) dataset.suggestions.find(suggestion => suggestion.id === dataset.selectedSuggestionId).metricButtons = metricButtons;
   const context = vm.createContext({
     ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract,
-    fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
+    fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, collapseCountryFeatures, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
     humanizeField: field => field, renderMapIcon() {}, renderChartIcon() {}, keepSelectOpenAfterMouseClick: value => value,
@@ -153,6 +154,87 @@ const polygonMetricButtons = [
   { field: "temperature", label: "Nhiệt độ trung bình", icon: "🌡️", color: "#f59e0b" },
   { field: "minimum", label: "Nhiệt độ thấp nhất", icon: "❄️", color: "#3b82f6" }
 ];
+
+test("descriptive countries render with the fixed color and preserve both source records in the popup", async () => {
+  const h = harness({ thematic: true, boundaryLoader: (names, options) => loadAdministrativeBoundaries(names, {
+    ...options, apiKey: "key", fetchImpl: descriptiveCountryFetch()
+  }) });
+  Object.assign(h.dataset, { records: structuredClone(descriptiveRecords),
+    analysis: { source: "ai", columns: descriptiveColumns, search_bar: true, search_fields: ["Điểm đến"] },
+    selectedSuggestionId: descriptiveSuggestion.id, suggestions: [{ ...descriptiveSuggestion, available: true }], popupSelections: {} });
+  const original = JSON.stringify(h.dataset.records);
+  h.get("fixed-color").value = "#123456";
+  h.run("replaceBoundary = async (data, name, profile) => { state.boundary = data; state.dataProfile = profile; };");
+  assert.equal(await h.run("activateAiChoropleth(dataset.suggestions[0])"), true);
+  assert.equal(h.sources.get("polygon-data").data.features.length, 51);
+  assert.equal(h.layers.get("polygon-fill").paint["fill-color"], "#123456");
+  assert.equal(h.get("fixed-color").disabled, false);
+  assert.equal(h.get("polygon-palette-options").hidden, true);
+  assert.equal(h.get("weather-legend").hidden, true);
+  h.run("renderMapMetricControls()");
+  assert.equal(h.get("map-metric-control").hidden, true);
+  assert.equal(h.run("activePolygonLegendScale()"), null);
+  h.run("openMapPopup(state.boundary.features.find(feature => feature.properties.__resolved_country_code === 'CHN'), [105, 21])");
+  const sections = h.popups.at(-1).card.querySelectorAll(".popup-source-record");
+  assert.equal(sections.length, 2);
+  const texts = sections.map(section => section.querySelectorAll("*").map(node => node.textContent).join(" | "));
+  assert.match(texts[0], /Trung Quốc — đảo Hải Nam.*Đoàn du lịch.*Chỉ áp dụng tại đảo Hải Nam/);
+  assert.match(texts[1], /Trung Quốc — quá cảnh.*Có vé nối chuyến.*Giữ nguyên điều kiện quá cảnh/);
+  assert.ok(texts.every(text => !text.includes("Nhiều giá trị")));
+  assert.equal(Object.keys(h.run("currentDataSearch().locationKeys")).length, 52);
+  h.run("fitBoundary = () => {};");
+  const region = h.all(".ai-generated-filter").find(control => control.dataset.field === "Điểm đến");
+  region.value = "Trung Quốc — quá cảnh"; await h.change(region);
+  assert.equal(h.sources.get("polygon-data").data.features.length, 1);
+  assert.equal(h.sources.get("polygon-data").data.features[0].properties["Ghi chú"], descriptiveRecords.at(-1)["Ghi chú"]);
+  assert.equal(JSON.stringify(h.dataset.records), original);
+});
+
+test("one matched country is enough for Polygon without a measure", async () => {
+  const h = harness({ thematic: true, boundaryLoader: (names, options) => loadAdministrativeBoundaries(names, {
+    ...options, apiKey: "key", fetchImpl: descriptiveCountryFetch()
+  }) });
+  Object.assign(h.dataset, { records: structuredClone(descriptiveRecords.slice(-1)), analysis: { source: "ai", columns: descriptiveColumns },
+    selectedSuggestionId: descriptiveSuggestion.id, suggestions: [{ ...descriptiveSuggestion, available: true }] });
+  h.run("replaceBoundary = async (data, name, profile) => { state.boundary = data; state.dataProfile = profile; };");
+  assert.equal(await h.run("activateAiChoropleth(dataset.suggestions[0])"), true);
+  assert.equal(h.sources.get("polygon-data").data.features.length, 1);
+  assert.equal(h.dataset.recommendation.metricField, null);
+  assert.equal(h.dataset.recommendation.aggregation, null);
+});
+
+test("an all-null selected Polygon measure keeps its thematic configuration and search data", async () => {
+  const h = harness({ thematic: true });
+  h.run("dataset.records.forEach(row => row.temperature = null); dataset.recommendation.aggregation = 'mean';");
+  await h.run("filteredAiBoundary()");
+  assert.equal(h.sources.get("polygon-data").data.features.length, 0);
+  assert.equal(h.run("currentDataSearch().data.features.length"), 2);
+  assert.equal(h.run("usesDefaultPolygonColor()"), false);
+  assert.equal(h.get("fixed-color").disabled, true);
+});
+
+test("Point and both Line providers retain default colors and controls without measures", async () => {
+  const point = harness({ point: true });
+  point.run(`dataset.analysis.columns = dataset.analysis.columns.filter(column => column.role !== 'measure');
+    dataset.pointModels = {}; dataset.pointSelections = {}; dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]);
+    refreshPointView(dataset.suggestions[0], {rebuildControls:true}); renderPointStyleControls(); renderPointLegend();`);
+  assert.equal(point.run("dataset.activePointView.metric"), null);
+  assert.equal(point.run("dataset.activePointView.paint['circle-color']"), point.run("state.pointStyle.color"));
+  assert.equal(point.get("point-fixed-color-field").hidden, false);
+  assert.equal(point.get("point-legend").hidden, true);
+  assert.equal(point.sources.get("point-data").data.features.length, 2);
+  for (const options of [{ road: true }, { path: true }]) {
+    const h = harness(options);
+    h.run(`dataset.analysis.columns = dataset.analysis.columns.filter(column => column.role === 'geo' || column.name === 'Tên đường');
+      dataset.suggestions[0].bindings = {...dataset.suggestions[0].bindings, value:null}; dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]);
+      populateAiFilters(dataset); refreshAiRoadMap(); renderRoadStyleControls(); renderRoadLegend();`);
+    assert.equal(h.run("dataset.recommendation.metricField"), null);
+    assert.equal(h.run("dataset.roadStyle.color"), "#00d084");
+    assert.equal(h.get("ai-line-legend").hidden, true);
+    assert.equal(h.get("road-style-colors").children.length, 1);
+    assert.ok(h.sources.get("line-data").data.features.length > 0);
+  }
+});
 
 test("khu vực null biến mất khỏi lớp tô và viền, hiện lại theo chỉ số và ngày có dữ liệu", async () => {
   const h = harness({ thematic: true, metricButtons: polygonMetricButtons });
@@ -1022,11 +1104,11 @@ test("Point city selection filters stores, preserves one map time and keeps each
   assert.equal(h.all(".ai-point-time").length, 1);
 });
 
-test("new store data prefers Point to polygon and resets popup settings", async () => {
+test("new store data accepts a single city polygon in AI priority order and resets popup settings", async () => {
   const h = harness({ point: true }); h.mode("bar");
   h.run("showChartStyleControls = () => {}; selectAiSuggestion = async id => { globalThis.selectedId = id; return true; };");
   await h.run("replaceAiPipelineData({records: dataset.records, analysis: {...dataset.analysis, suggestions: dataset.suggestions}}, 'stores.csv')");
-  assert.equal(h.run("selectedId"), "stores");
+  assert.equal(h.run("selectedId"), "cities");
   assert.equal(h.run("Object.keys(state.aiDataset.popupSelections).length"), 0);
 });
 
@@ -1061,6 +1143,6 @@ test("coordinate Line keeps coordinate/order fields out of metric controls and a
   const before = h.rendered.length;
   const control = h.get("road-style-colors").querySelector(".road-style-color");
   control.value = "#123456"; h.get("road-style-controls").events.change({ target: control });
-  assert.equal(h.run("dataset.roadStyle.color"), "#123456");
+  assert.equal(JSON.stringify(h.run("dataset.roadStyle.color")), JSON.stringify(["case", ["==", ["typeof", ["get", "speed"]], "number"], "#123456", "rgba(0, 0, 0, 0)"]));
   assert.equal(h.rendered.length, before, "changing map color does not rebuild popup charts");
 });

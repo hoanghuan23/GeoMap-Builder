@@ -22,7 +22,7 @@ test("map_line có registry và validation, không tự thêm khi AI chưa đề
   assert.deepEqual(analysis.validationErrors, []);
   assert.deepEqual(fallbackAnalysis(profile).suggestions, []);
   const bad = validateAndNormalizeAnalysis({ ...trafficAiAnalysis, suggestions: [
-    { id: "bad", chartType: "map_line", bindings: { region: "Mã đường", value: TRAFFIC_SPEED } }
+    { id: "bad", chartType: "map_line", bindings: { region: "Không có", value: TRAFFIC_SPEED } }
   ] }, profile);
   assert.ok(bad.validationErrors.length);
   assert.equal(validateAndNormalizeAnalysis({ ...trafficAiAnalysis, suggestions: [] }, profile).suggestions.length, 0);
@@ -155,5 +155,18 @@ test("chỉ số bản đồ nhận cả số và trạng thái; màu/chú giả
   const categoryOverride = roadMapStyle({ features: [{ properties: { "Mức độ ùn tắc": "Ùn tắc" } }] },
     analysis.columns.find(column => column.name === "Mức độ ùn tắc"), { "category:Ùn tắc": "#123456" });
   assert.equal(categoryOverride.rows[0].color, "#123456");
-  assert.equal(roadMapStyle({ features: [] }, { name: "value", role: "measure" }).color, "#94a3b8");
+  assert.equal(roadMapStyle({ features: [] }, { name: "value", role: "measure" }).color, "rgba(0, 0, 0, 0)");
+});
+
+test("Line retains zero and leaves missing selected values transparent, including an all-null column", () => {
+  const column = { name: "value", role: "measure", aggDefault: "mean" };
+  const records = [{ road: "Đường Lĩnh Nam", value: 0 }, { road: "Đường Ngọc Hồi", value: null }];
+  const join = source => joinRoadRecords(source, roads, { roadField: "road", valueField: "value", columns: [{ name: "road", role: "text" }, column] });
+  const data = join(records);
+  assert.equal(data.features.length, 2);
+  assert.equal(data.features[0].properties.value, 0);
+  const paint = roadMapStyle(data, column);
+  assert.equal(paint.rows[0].label, "0");
+  assert.equal(paint.color.at(-1), "rgba(0, 0, 0, 0)");
+  assert.deepEqual(roadMapStyle(join(records.map(row => ({ ...row, value: null }))), column), { color: "rgba(0, 0, 0, 0)", rows: [] });
 });

@@ -4,7 +4,7 @@ import { filterTimeRange, timeValueInfo, timeValuesAreComparable, uniqueTimeValu
 import { roadAreaField, roadNetworkForArea, roadRefField } from "./road-map-data.js";
 import { normalizeRoadText } from "./text-utils.js";
 import { isCoordinateLine, pointIdentity, pointTitleField } from "./coordinate-data.js";
-import { administrativeContextFields } from "./geographic-grain.js";
+import { administrativeContextFields, sourceLocationNames } from "./geographic-grain.js";
 import { normalizePopupSuggestions } from "./ai-chart-contract.js";
 
 export function mapDisplaySuggestions(suggestions = [], selectedSuggestionId = null) {
@@ -67,6 +67,12 @@ export function popupFeaturesMatch(feature, other, regionField, { chartType = "c
   if (chartType === "point") return pointIdentity(feature?.properties, columns, bindings) === pointIdentity(other?.properties, columns, bindings);
   if (isCoordinateLine({ chartType, bindings })) return !bindings.region || String(feature?.properties?.[bindings.region] ?? "").trim() === String(other?.properties?.[bindings.region] ?? "").trim();
   if (chartType === "map_line") return roadIdentity(feature?.properties, regionField, columns) === roadIdentity(other?.properties, regionField, columns);
+  const locations = sourceLocationNames(feature?.properties); const otherLocations = sourceLocationNames(other?.properties);
+  if (locations.length || otherLocations.length) {
+    const left = locations.length ? locations : [popupRegionValue(feature, regionField)];
+    const right = otherLocations.length ? otherLocations : [popupRegionValue(other, regionField)];
+    return left.some(name => right.some(otherName => regionKey(name) === regionKey(otherName)));
+  }
   if (regionKey(popupRegionValue(feature, regionField)) !== regionKey(popupRegionValue(other, regionField))) return false;
   const fields = administrativeContextFields(columns, regionField);
   return fields.every(field => regionKey(feature?.properties?.[field]) === regionKey(other?.properties?.[field]));

@@ -38,9 +38,9 @@ import { createAiPopupContent } from "./ai-popup.js";
 import { administrativeContextFields, geographicLocationName, applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
 import { compareTimeValues, filterTimeRange, formatTimeValue, timeValueInfo, uniqueTimeValues } from "./time-values.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
-import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupChartColumns, popupDisplayOptions, popupFeaturesMatch, popupTimeColumn } from "./ai-popup-chart.js";
+import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupChartColumns, popupDisplayOptions, popupFeaturesMatch, popupRegionRecords, popupTimeColumn } from "./ai-popup-chart.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-client.js";
-import { joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
+import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
 import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
 import { joinRoadRecordsByArea, roadAreaField, ROAD_NETWORKS, roadMapStyle, roadNetworksFromRecords, roadValueColumns } from "./road-map-data.js";
 import { roadNetworkUrl } from "./road-network-assets.js";
@@ -303,9 +303,14 @@ function fillExpression() {
   return $("fixed-color").value;
 }
 
+function usesDefaultPolygonColor() {
+  const suggestion = activePolygonSuggestion();
+  return Boolean(suggestion) && !suggestion.bindings.value;
+}
+
 function activePolygonLegendScale() {
   const suggestion = activePolygonSuggestion();
-  if (!suggestion || state.mapType !== "polygon") return null;
+  if (!suggestion?.bindings.value || state.mapType !== "polygon") return null;
   const dataset = state.aiDataset; const columns = dataset.analysis.columns;
   const cache = dataset.polygonLegendScaleCache ||= { resolved: null, logged: new Set() };
   const column = columns.find(item => item.name === suggestion.bindings.value);
@@ -328,12 +333,13 @@ function activePolygonLegendScale() {
 
 function syncPolygonPaletteControls(resolvedScale = activePolygonLegendScale()) {
   const thematicData = state.mapType === "h3" ? state.h3Data : state.boundary;
-  const colorField = resolvedScale ? { field: resolvedScale.field } : polygonColorField(thematicData, state.dataProfile);
+  const fixed = usesDefaultPolygonColor();
+  const colorField = fixed ? null : resolvedScale ? { field: resolvedScale.field } : polygonColorField(thematicData, state.dataProfile);
   const managed = Boolean(resolvedScale);
   $("fixed-color").disabled = managed;
-  $("polygon-color-label").textContent = managed ? "Chú giải màu" : "Dải màu";
-  $("polygon-palette-options").hidden = managed;
-  $("polygon-palette-help").hidden = managed;
+  $("polygon-color-label").textContent = fixed ? "Màu mặc định" : managed ? "Chú giải màu" : "Dải màu";
+  $("polygon-palette-options").hidden = managed || fixed;
+  $("polygon-palette-help").hidden = managed || fixed;
   const summary = $("polygon-legend-summary");
   summary.hidden = !managed;
   if (managed) {
@@ -343,7 +349,7 @@ function syncPolygonPaletteControls(resolvedScale = activePolygonLegendScale()) 
     summary.style.setProperty("--legend-gradient", resolvedScale.gradient || resolvedScale.noDataColor);
     summary.title = resolvedScale.reason;
   }
-  $("polygon-color-field").textContent = colorField ? `Theo ${humanizeField(colorField.field)}` : "Cần thuộc tính dữ liệu";
+  $("polygon-color-field").textContent = fixed ? "Màu mặc định" : colorField ? `Theo ${humanizeField(colorField.field)}` : "Cần thuộc tính dữ liệu";
   document.querySelectorAll("#polygon-color-ramp .palette").forEach(button => {
     button.disabled = managed || !colorField;
     button.classList.toggle("active", !managed && button.dataset.palette === state.polygonPalette);
@@ -353,7 +359,7 @@ function syncPolygonPaletteControls(resolvedScale = activePolygonLegendScale()) 
 function renderWeatherLegend(resolvedScale = activePolygonLegendScale()) {
   const legend = $("weather-legend");
   const isAiMap = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
-  const show = $("show-map-layers").checked && isAiMap;
+  const show = $("show-map-layers").checked && isAiMap && !usesDefaultPolygonColor();
   legend.hidden = !show;
   if (!show) return;
   const mode = $("weather-legend-mode");
@@ -408,7 +414,7 @@ function applyStyle() {
   const borderColor = $("border-color").value;
   const borderWidth = Number($("line-width").value);
   if (map.getLayer("h3-fill")) {
-    const h3Color = state.aiDataset || isRegionHexMode()
+    const h3Color = !usesDefaultPolygonColor() && (state.aiDataset || isRegionHexMode())
       ? polygonFillExpression(isRegionHexMode() ? state.boundary : state.h3Data, state.dataProfile, state.polygonPalette, color, resolvedScale)
       : color;
     map.setPaintProperty("h3-fill", "fill-color", h3Color);
@@ -417,7 +423,8 @@ function applyStyle() {
     map.setPaintProperty("h3-border", "line-width", borderWidth);
   }
   if (map.getLayer("polygon-fill")) {
-    map.setPaintProperty("polygon-fill", "fill-color", polygonFillExpression(state.boundary, state.dataProfile, state.polygonPalette, color, resolvedScale));
+    map.setPaintProperty("polygon-fill", "fill-color", usesDefaultPolygonColor() ? color
+      : polygonFillExpression(state.boundary, state.dataProfile, state.polygonPalette, color, resolvedScale));
     map.setPaintProperty("polygon-fill", "fill-opacity", opacity);
     map.setPaintProperty("polygon-border", "line-color", borderColor);
     map.setPaintProperty("polygon-border", "line-width", borderWidth);
@@ -822,9 +829,12 @@ function aiWeatherPopupContent(feature) {
     return column.role === "time" && recommendation.filters?.some(filter => filter.field === column.name && filter.control === "datetime-select")
       ? { ...column, granularity: "datetime" } : column;
   });
+  const records = !recommendation.metricField && feature.properties?.__source_locations
+    ? popupRegionRecords(applyPipelineFilters(state.aiDataset.records, state.aiDataset.filters || {}), feature,
+      recommendation.geometry.field, { chartType: "choropleth", columns, bindings: activePolygonSuggestion()?.bindings }) : [];
   return createAiPopupContent(document, feature, displayedColumns,
     state.aiDataset.nativeTitleField || (activeMapPopupSuggestion()?.chartType === "point"
-      ? pointTitleField(displayedColumns) || state.aiDataset.analysis.search_fields?.[0] : recommendation.geometry?.field));
+      ? pointTitleField(displayedColumns) || state.aiDataset.analysis.search_fields?.[0] : recommendation.geometry?.field), { records });
 }
 
 function showAiPolygonDetails(event) {
@@ -1403,7 +1413,7 @@ function aiLineStyle(data, suggestion) {
   const column = dataset.analysis.columns.find(item => item.name === field);
   const colors = roadColorOverridesFor(suggestion);
   const color = colors.path || "#00d084";
-  return column ? roadMapStyle(data, column, colors) : { color, rows: [{ key: "path", label: "Chuỗi tọa độ", color }] };
+  return column ? roadMapStyle(data, column, colors) : { color, rows: [{ key: "path", label: "Màu tuyến", color }] };
 }
 
 function renderRoadStyleControls() {
@@ -1753,7 +1763,7 @@ function recommendationForSuggestion(suggestion) {
   const coordinateLine = isCoordinateLine(suggestion);
   const coordinateMap = coordinateLine || suggestion.chartType === "point";
   const valueField = suggestion.bindings.value || (Array.isArray(suggestion.bindings.y) ? suggestion.bindings.y[0] : suggestion.bindings.y)
-    || (coordinateMap ? dataset.analysis.columns.find(column => column.role === "measure" && ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name))?.name : null);
+    || (coordinateMap ? dataset.analysis.columns.find(column => column.role === "measure" && ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name))?.name : null) || null;
   const regionField = suggestion.bindings.region;
   const region = columns.get(regionField);
   const contextFields = suggestion.chartType === "choropleth" ? administrativeContextFields(dataset.analysis.columns, regionField) : [];
@@ -2366,10 +2376,10 @@ function renderPointStyleControls() {
   $("point-show-border").checked = style.showBorder;
   $("point-show-legend").checked = style.showLegend;
   const view = activePointSuggestion() ? state.aiDataset.activePointView : null;
-  const grouped = view?.selection.mode === "pick";
+  const grouped = Boolean(view?.metric) && view.selection.mode === "pick";
   $("point-fixed-color-field").hidden = grouped;
   $("point-group-color-field").hidden = !grouped;
-  $("point-show-legend-field").hidden = !view;
+  $("point-show-legend-field").hidden = !view?.metric;
   $("point-group-colors").replaceChildren(...(grouped ? view.legendRows.map(item => {
     const row = document.createElement("label"); row.className = "bar-color-row";
     const label = document.createElement("span"); label.textContent = item.label; label.title = item.label;
@@ -2404,7 +2414,7 @@ function refreshPointStyle() {
 function renderPointLegend() {
   const legend = $("point-legend");
   const view = state.aiDataset?.activePointView;
-  legend.hidden = !activePointSuggestion() || !state.pointStyle.showLegend || !$("show-map-layers").checked || !view?.stats.visibleCount;
+  legend.hidden = !activePointSuggestion() || !view?.metric || !state.pointStyle.showLegend || !$("show-map-layers").checked || !view.stats.visibleCount;
   if (legend.hidden) return;
   const heading = document.createElement("div"); heading.className = "point-legend-heading";
   const title = document.createElement("strong"); title.textContent = view.legendTitle;
@@ -2458,6 +2468,7 @@ function renderRoadLegend() {
   if (legend.hidden) return;
   const dataset = state.aiDataset;
   const field = suggestion.bindings.value || dataset.recommendation.metricField;
+  if (!field) { legend.hidden = true; return; }
   const column = dataset.analysis.columns.find(column => column.name === field);
   const heading = document.createElement("div"); heading.className = "point-legend-heading";
   const title = document.createElement("strong"); title.textContent = column?.labelVi || field || "Chuỗi tọa độ";
@@ -2622,7 +2633,7 @@ async function refreshAiH3({ fit = false } = {}) {
   }
   state.h3Data = result.data; state.pointData = dataset.spatialData || EMPTY_FEATURE_COLLECTION;
   state.boundary = state.pointData; state.sourceBoundary = state.pointData; state.mapType = "h3";
-  state.dataProfile = analyzeSpatialData(result.data, { numericFields: [suggestion.bindings.value] });
+  state.dataProfile = analyzeSpatialData(result.data, { numericFields: [suggestion.bindings.value].filter(Boolean) });
   map.getSource("h3-grid")?.setData(result.data); map.getSource("point-data")?.setData(state.pointData);
   map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   $("cell-count").textContent = result.stats.cellCount.toLocaleString("vi-VN"); $("cell-label").textContent = `Tổng số cell (res ${state.resolution})`;
@@ -2683,11 +2694,13 @@ async function filteredAiBoundary({ fit = false } = {}) {
   const searchBoundary = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, {
     filters, columns: state.aiDataset.analysis.columns, includeMissingMetric: true
   });
-  state.aiDataset.searchBoundary = searchBoundary;
-  const data = { ...searchBoundary, features: searchBoundary.features.filter(feature => Number.isFinite(feature.properties.__metric)) };
+  const data = recommendation.metricField
+    ? { ...searchBoundary, features: searchBoundary.features.filter(feature => Number.isFinite(feature.properties.__metric)) }
+    : collapseCountryFeatures(searchBoundary, recommendation.geometry.field);
+  state.aiDataset.searchBoundary = recommendation.metricField ? searchBoundary : data;
   state.boundary = data; state.sourceBoundary = data;
   state.baselineCount = null;
-  const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)];
+  const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)].filter(Boolean);
   state.dataProfile = analyzeSpatialData(data, { numericFields, hasArea: true });
   map.getSource("polygon-data")?.setData(data);
   map.getSource("vietnam-boundary")?.setData(data);
@@ -2696,7 +2709,7 @@ async function filteredAiBoundary({ fit = false } = {}) {
     syncPolygonPaletteControls(); applyStyle();
     if (fit && data.features.length) fitBoundary();
   }
-  setCurrentFileNote(`${data.features.length} khu vực · ${recommendation.metricField} · ${recommendation.source === "ai" ? "GPT-5.6 Luna đề xuất" : "quy tắc dự phòng"}`);
+  setCurrentFileNote(`${data.features.length} khu vực · ${recommendation.metricField || "Màu mặc định"} · ${recommendation.source === "ai" ? "GPT-5.6 Luna đề xuất" : "quy tắc dự phòng"}`);
   refreshMapPopup();
 }
 
@@ -2758,7 +2771,7 @@ async function activateAiChoropleth(suggestion) {
   suggestion.effectiveConfidence = suggestion.confidence;
   const initialFilters = populateAiFilters(dataset);
   renderGeoRepair(resolvedBoundaries.unmatched);
-  if (boundaries.features.length < 2 || resolvedBoundaries.matchRate < .7) {
+  if (boundaries.features.length < 1 || resolvedBoundaries.matchRate < .7) {
     suggestion.available = false;
     suggestion.repairable = resolvedBoundaries.unmatched.length > 0;
     suggestion.geoUnmatched = resolvedBoundaries.unmatched;
@@ -2770,7 +2783,7 @@ async function activateAiChoropleth(suggestion) {
     return false;
   }
   const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters: initialFilters, columns: dataset.analysis.columns });
-  const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)];
+  const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)].filter(Boolean);
   // A period with no metric values still supports switching to another period or metric.
   const profile = analyzeSpatialData(data, { numericFields, hasArea: true });
   await replaceBoundary(data, name, profile, { preservePolygons: true, preserveAi: true });
@@ -2929,7 +2942,7 @@ function currentDataSearch() {
     : selectedProvinceNames().length > 0;
   return { data, columns, titleField, chartType: dataset?.nativeGeometry ? undefined : suggestion?.chartType,
     search_bar: dataset?.analysis.search_bar ?? state.spatialAnalysis?.search_bar, search_fields: dataset?.analysis.search_fields || state.spatialAnalysis?.search_fields,
-    filtered, sourceRecords: dataset?.records };
+    filtered, sourceRecords: dataset?.records, locationKeys: dataset?.boundaries?.locationKeys };
 }
 
 function syncDataSearch() {

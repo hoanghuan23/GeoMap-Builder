@@ -20,6 +20,7 @@ import { trafficAiAnalysis } from "./road-traffic-fixture.js";
 import { jsonDatasets } from "../../src/json-datasets.js";
 import * as polygonLegend from "../../src/polygon-legend.js";
 import * as legendContract from "../../src/polygon-legend-contract.js";
+import * as boundaryData from "../../src/vietnam-admin-data.js";
 
 // Exercise the actual upload and UI handlers with a MapLibre/DOM adapter.
 export function createHarness() {
@@ -50,7 +51,7 @@ export function createHarness() {
   };
   const context = vm.createContext({
     ...capabilities, ...polygonStyle, ...pointStyle, ...geojsonLayers, ...layerOrder, PointRenderer, PolygonRenderer,
-    ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, ...polygonLegend, ...legendContract,
+    ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, ...polygonLegend, ...legendContract, ...boundaryData,
     jsonDatasets, nativeMapDataset, nativeMapView, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue, profileRecordsInWorker, parseSpreadsheetFile,
     requestAiDataAnalysis: async records => ({ analysis: { ...trafficAiAnalysis, source: "ai" }, records, validRowRate: 1 }),
     roadNetworkUrl: () => "/roads/hanoi_roads.json",

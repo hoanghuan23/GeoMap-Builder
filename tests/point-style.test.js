@@ -56,7 +56,7 @@ test("Point defaults use valid measures and top five categories without includin
   assert.equal(view.stats.visibleCount, 7);
   assert.equal(view.stats.totalCount, 8);
   assert.equal(view.stats.coordinateRate, 8 / 9);
-  assert.deepEqual(model.measures.map(column => column.name), ["revenue", "rating"]);
+  assert.deepEqual(model.measures.map(column => column.name), ["empty", "revenue", "rating"]);
   assert.equal(model.timeColumn, null);
 });
 
@@ -72,7 +72,7 @@ test("Point filtering preserves popup properties, string IDs, source records and
   assert.equal(selected.metric.min, 0);
   const all = buildPointView(model, { ...selected.selection, mode: "all" }, selected.colors);
   assert.equal(all.data.features.length, 3);
-  assert.equal(all.paint["circle-color"], POINT_COLOR);
+  assert.equal(evaluate(all.paint["circle-color"], { revenue: 0 }), POINT_COLOR);
   assert.equal(all.legendRows[0].count, 3);
   assert.deepEqual(records, original);
 });
@@ -133,7 +133,7 @@ test("Eight selected groups have distinct matching map/legend colors, stable acr
   const initial = buildPointView(model, { selectedValues: records.slice(0, 8).map(row => row.type) });
   assert.equal(new Set(Object.values(initial.colors)).size, 8);
   assert.ok(initial.legendRows.every(row => POINT_COLORS.includes(row.color)));
-  for (const row of initial.legendRows) assert.equal(evaluate(initial.paint["circle-color"], { type: row.key }), row.color);
+  for (const row of initial.legendRows) assert.equal(evaluate(initial.paint["circle-color"], { type: row.key, revenue: 0 }), row.color);
   const changed = buildPointView(model, { ...initial.selection, metricField: "rating", time: model.times[0] }, initial.colors);
   assert.deepEqual(changed.colors, initial.colors);
   const replaced = buildPointView(model, { ...initial.selection, selectedValues: [...initial.selection.selectedValues.slice(1), "G8"] }, initial.colors);
@@ -150,24 +150,37 @@ test("Point radius handles zero, negative, missing, constant values and zoom", (
   assert.equal(evaluate(radius, { revenue: 10 }), 12);
   assert.equal(evaluate(radius, { revenue: null }), 4);
   assert.equal(view.metric.missingCount, 2);
+  assert.notEqual(evaluate(view.paint["circle-color"], { type: "A", revenue: 0 }), "rgba(0, 0, 0, 0)");
+  assert.equal(evaluate(view.paint["circle-color"], { type: "B", revenue: null }), "rgba(0, 0, 0, 0)");
   assert.ok(evaluate(radius, { revenue: 10 }, 16) > evaluate(radius, { revenue: 10 }, 4));
   const constant = buildPointView(model, { metricField: "rating" });
   assert.equal(evaluate(constant.paint["circle-radius"], { rating: 4 }), 8);
   assert.equal(evaluate(constant.paint["circle-radius"], { rating: null }), 4);
 });
 
-test("One date remains selectable while high-cardinality groups and empty measures are omitted", () => {
+test("Point without a measure uses a fixed color and default radius while group filters still work", () => {
+  const model = createPointModel([record("A", 0), record("B", 100)], columns.filter(column => column.role !== "measure"), bindings);
+  const view = buildPointView(model, { selectedValues: ["A"] }, {}, { color: "#123456" });
+  assert.equal(view.metric, null);
+  assert.equal(view.selection.metricField, null);
+  assert.equal(view.paint["circle-color"], "#123456");
+  assert.equal(evaluate(view.paint["circle-radius"], {}, 10), 6);
+  assert.equal(view.data.features.length, 1);
+  assert.equal(view.data.features[0].properties.type, "A");
+});
+
+test("One date remains selectable; an all-null measure remains selected without fixed-color fallback", () => {
   const records = Array.from({ length: 81 }, (_, index) => record(`G${index}`, null, { day: "2026-07-01" }));
   const model = createPointModel(records, columns.filter(column => !["rating", "name"].includes(column.name)).concat({ name: "day", role: "time" }), bindings);
   assert.equal(model.groups.length, 0);
-  assert.equal(model.measures.length, 0);
+  assert.equal(model.measures.length, 1);
   assert.equal(model.timeColumn.name, "day");
   const view = buildPointView(model);
   assert.equal(view.selection.mode, "all");
-  assert.equal(view.selection.metricField, null);
+  assert.equal(view.selection.metricField, "revenue");
   assert.equal(view.selection.time, "2026-07-01");
   assert.equal(view.data.features.length, 81);
-  assert.equal(evaluate(view.paint["circle-radius"], {}, 10), 6);
+  assert.equal(evaluate(view.paint["circle-color"], { revenue: null }), "rgba(0, 0, 0, 0)");
 });
 
 test("Selection normalizes stale groups and caps to eight; category values remain ordinary data", () => {
@@ -178,7 +191,7 @@ test("Selection normalizes stale groups and caps to eight; category values remai
   const view = buildPointView(model, selection);
   assert.equal(new Set(Object.values(view.colors)).size, 8);
   assert.equal(view.legendRows.find(row => row.key === "__proto__").color, view.colors.__proto__);
-  assert.equal(evaluate(view.paint["circle-color"], { type: "__proto__" }), view.colors.__proto__);
+  assert.equal(evaluate(view.paint["circle-color"], { type: "__proto__", revenue: 1 }), view.colors.__proto__);
   assert.equal(normalizePointSelection(model, { selectedValues: ["missing"] }).selectedValues.length, 5);
 });
 
@@ -206,13 +219,13 @@ test("Custom group colors match the legend, persist on metric changes and restor
   const styled = buildPointView(model, initial.selection, initial.paletteColors, { groupColors: { A: "#ff0000" } });
   assert.equal(styled.colors.A, "#ff0000");
   assert.equal(styled.legendRows.find(row => row.key === "A").color, "#ff0000");
-  assert.equal(evaluate(styled.paint["circle-color"], { type: "A" }), "#ff0000");
+  assert.equal(evaluate(styled.paint["circle-color"], { type: "A", revenue: 0 }), "#ff0000");
   const changed = buildPointView(model, { ...styled.selection, metricField: "rating" }, styled.paletteColors, { groupColors: { A: "#ff0000" } });
   assert.deepEqual(changed.colors, styled.colors);
   const reset = buildPointView(model, styled.selection, styled.paletteColors);
   assert.deepEqual(reset.colors, initial.colors);
   const all = buildPointView(model, { ...initial.selection, mode: "all" }, initial.paletteColors, { color: "#112233" });
-  assert.equal(all.paint["circle-color"], "#112233");
+  assert.equal(evaluate(all.paint["circle-color"], { revenue: 0 }), "#112233");
   assert.equal(all.legendRows[0].color, "#112233");
 });
 

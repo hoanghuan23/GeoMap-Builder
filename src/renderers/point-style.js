@@ -87,7 +87,7 @@ export function createPointModel(records, columns, { lat, lng }) {
   }
   return {
     data: { type: "FeatureCollection", features },
-    measures: measures.filter(column => features.some(feature => feature.properties[column.name] != null)).map(column => ({ ...column, label: fieldLabel(column) })),
+    measures: measures.map(column => ({ ...column, label: fieldLabel(column) })),
     groups, timeColumn, times,
     totalRecords: records.length,
     coordinateCount: features.length,
@@ -96,7 +96,8 @@ export function createPointModel(records, columns, { lat, lng }) {
 }
 
 export function normalizePointSelection(model, saved = {}) {
-  const metric = model.measures.find(column => column.name === saved.metricField) || model.measures[0];
+  const metric = model.measures.find(column => column.name === saved.metricField)
+    || model.measures.find(column => model.data.features.some(feature => feature.properties[column.name] != null)) || model.measures[0];
   const group = model.groups.find(column => column.name === saved.groupField)
     || model.groups.find(column => column.values.length > 1) || model.groups[0];
   const validKeys = new Set(group?.values.map(item => item.key));
@@ -143,7 +144,7 @@ function radiusExpression(metric, size = 100) {
 export function pointPaint(input = {}, metric = null, color = null) {
   const style = mergePointStyle(input);
   return {
-    "circle-color": color ?? style.color,
+    "circle-color": metric ? ["case", ["==", ["typeof", ["get", metric.field]], "number"], color ?? style.color, "rgba(0, 0, 0, 0)"] : color ?? style.color,
     "circle-radius": radiusExpression(metric, style.size),
     "circle-opacity": style.opacity,
     "circle-stroke-color": style.borderColor,
@@ -185,10 +186,10 @@ export function buildPointView(model, saved = {}, previousColors = {}, inputStyl
     const key = groupKey(feature.properties[selection.groupField]);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
-  const legendRows = selection.mode === "pick"
+  const legendRows = metric && selection.mode === "pick"
     ? selection.selectedValues.map(key => ({ key, label: key, color: colors[key], count: counts.get(key) || 0 }))
     : [{ key: "all", label: group ? `Tất cả ${group.label.toLocaleLowerCase("vi")}` : "Tất cả điểm", color: style.color, count: features.length }];
-  const color = selection.mode === "pick"
+  const color = metric && selection.mode === "pick"
     ? ["match", ["to-string", ["get", selection.groupField]], ...legendRows.flatMap(row => [row.key, row.color]), POINT_COLOR]
     : style.color;
   return {

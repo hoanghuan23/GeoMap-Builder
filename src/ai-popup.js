@@ -29,12 +29,23 @@ export function aiPopupRows(properties, columns) {
   });
 }
 
-export function createAiPopupContent(documentRef, feature, columns, geometryField) {
+export function createAiPopupContent(documentRef, feature, columns, geometryField, { records = [] } = {}) {
   const properties = feature?.properties || {};
   const card = documentRef.createElement("div");
   card.className = "weather-popup";
   const title = documentRef.createElement("strong");
   title.textContent = properties[geometryField] || properties.h3 || "Khu vực dữ liệu";
+  if (records.length > 1) {
+    const sections = documentRef.createElement("div");
+    sections.className = "popup-source-records";
+    for (const record of records) {
+      const section = createAiPopupContent(documentRef, { properties: record }, columns, geometryField);
+      section.className = "popup-source-record";
+      sections.append(section);
+    }
+    card.append(title, sections);
+    return card;
+  }
   const list = documentRef.createElement("dl");
   for (const detail of aiPopupRows(properties, columns)) {
     const row = documentRef.createElement("div");

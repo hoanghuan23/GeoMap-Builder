@@ -25,3 +25,12 @@ export function geographicLocationName(record, geometry) {
   return [name, ...(geometry.contextFields || []).map(field => String(record?.[field] ?? "").trim())]
     .filter(Boolean).join(", ");
 }
+
+// MapLibre may serialize array-valued GeoJSON properties in queried features.
+export function sourceLocationNames(properties) {
+  let value = properties?.__source_locations;
+  if (typeof value === "string") {
+    try { value = JSON.parse(value); } catch { return []; }
+  }
+  return Array.isArray(value) ? value.filter(name => typeof name === "string" && name.trim()) : [];
+}

@@ -65,7 +65,7 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
         };
     const metric = recordProperties[metricField];
     const hasMetric = isFiniteValue(metric);
-    if (!hasMetric && !includeMissingMetric) return [];
+    if (metricField && !hasMetric && !includeMissingMetric) return [];
     const boundaryProperties = { ...(boundary.properties || {}) };
     for (const column of columns || []) delete boundaryProperties[column?.name];
     const properties = {
@@ -83,4 +83,23 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
     return [{ type: "Feature", properties, geometry: boundary.geometry, bbox: boundary.bbox }];
   });
   return { type: "FeatureCollection", features };
+}
+
+/** Consolidate display geometry only; source rows and metric aggregation stay independent. */
+export function collapseCountryFeatures(data, locationField) {
+  const groups = new Map();
+  for (const [index, feature] of (data.features || []).entries()) {
+    const key = feature.properties?.__resolved_location_key || `feature:${index}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(feature);
+  }
+  return { ...data, features: [...groups.values()].map(features => {
+    if (features.length === 1) return features[0];
+    const feature = features[0];
+    const properties = feature.properties;
+    const name = properties.__resolved_location_name || properties.__location;
+    return { ...feature, properties: { ...properties, [locationField]: name, __location: name,
+      __source_locations: [...new Set(features.map(item => item.properties.__data_location || item.properties.__location))],
+      __record_count: features.reduce((sum, item) => sum + (item.properties.__record_count || 1), 0) } };
+  }) };
 }

@@ -1,8 +1,9 @@
 import polygonClipping from "polygon-clipping";
 import { normalizeDataSearchConfig, resolveDataSearchColumns } from "./data-search-config.js";
 import {
-  COUNTRY_BOUNDARY_SOURCES, loadCountryBoundaryData, resolveBoundaryCountry
+  COUNTRY_BOUNDARY_SOURCES, countryLookupName, loadCountryBoundaryData, resolveBoundaryCountry, resolvedCountryProperties
 } from "./country-boundary-sources.js";
+import { sourceLocationNames } from "./geographic-grain.js";
 
 const MAPTILER_GEOCODING_URL = "https://api.maptiler.com/geocoding";
 const VIETNAM_BBOX = "102.14,8.18,109.47,23.4";
@@ -116,8 +117,9 @@ export async function searchMapTilerBoundaries(query, options) {
 
 export function buildAdministrativeGeocodingUrl(name, apiKey, placeType = "region", country = "VNM") {
   const isCountry = placeType === "country";
-  const code = isCountry ? resolveBoundaryCountry(name) : null;
-  const query = code && String(name).trim().toUpperCase() === code ? COUNTRY_BOUNDARY_SOURCES[code].name : String(name).trim();
+  const lookupName = isCountry ? countryLookupName(name) : String(name).trim();
+  const code = isCountry ? resolveBoundaryCountry(lookupName) : null;
+  const query = code && lookupName.toUpperCase() === code ? COUNTRY_BOUNDARY_SOURCES[code].name : lookupName;
   const scope = isCountry ? null : resolveBoundaryCountry(country);
   const countryName = COUNTRY_BOUNDARY_SOURCES[scope]?.name || String(country ?? "").trim();
   const lastPart = query.split(",").at(-1).trim();
@@ -166,7 +168,7 @@ function provinceCandidateScore(feature, name) {
 
 const countryDisplayNames = ["vi", "en"].map(language => new Intl.DisplayNames([language], { type: "region" }));
 
-export function countryCandidateScore(feature, name) {
+function exactCountryCandidateScore(feature, name) {
   if (!feature?.place_type?.includes("country")) return 2;
   const properties = feature.properties || {};
   const code = String(properties.country_code || properties.short_code || feature.country_code || "").toUpperCase();
@@ -186,6 +188,13 @@ export function countryCandidateScore(feature, name) {
   return target && aliases.includes(target) ? 0 : 2;
 }
 
+export function countryCandidateScore(feature, name) {
+  const score = exactCountryCandidateScore(feature, name);
+  if (score === 0) return score;
+  const lookup = countryLookupName(name);
+  return lookup !== String(name).trim() && exactCountryCandidateScore(feature, lookup) === 0 ? 1 : 2;
+}
+
 export function boundaryMatchesCountry(feature, country) {
   if (!country) return true;
   const contexts = (feature?.context || []).filter(item => item.id?.startsWith("country.") || item.place_type?.includes("country"));
@@ -197,12 +206,16 @@ export function boundaryMatchesCountry(feature, country) {
   return !contexts.length || contexts.some(context => countryCandidateScore({ ...context, place_type: ["country"] }, country) === 0);
 }
 
-export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeType = "region", country = "VNM", signal, fetchImpl = fetch } = {}) {
+export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeType = "region", country = "VNM", signal, fetchImpl = fetch, onAmbiguous } = {}) {
   if (!apiKey) throw new Error("MAPTILER_API_KEY_MISSING");
-  const normalizedName = placeType === "country" ? resolveBoundaryCountry(name) || normalizePlaceName(name) : normalizedAdministrativeName(name);
+  const lookupName = placeType === "country" ? countryLookupName(name) : name;
+  const normalizedName = placeType === "country" ? resolveBoundaryCountry(lookupName) || normalizePlaceName(lookupName) : normalizedAdministrativeName(name);
   const scope = placeType === "country" ? "global" : resolveBoundaryCountry(country) || normalizePlaceName(country) || "global";
   const cacheKey = `${scope}:${placeType}:${normalizedName}`;
-  if (fetchImpl === fetch && mapTilerBoundaryCache.has(cacheKey)) return mapTilerBoundaryCache.get(cacheKey);
+  const bindSource = feature => ({ ...feature, properties: { ...feature.properties,
+    ...resolvedCountryProperties(feature), __data_location: String(name), __data_place_type: placeType } });
+  const cached = fetchImpl === fetch && mapTilerBoundaryCache.get(cacheKey);
+  if (cached && (placeType !== "country" || countryCandidateScore(cached, name) < 2)) return bindSource(cached);
   const response = await fetchImpl(buildAdministrativeGeocodingUrl(name, apiKey, placeType, country), { signal });
   if (!response.ok) {
     const error = new Error(`MapTiler administrative lookup failed (${response.status})`);
@@ -218,7 +231,8 @@ export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeTyp
     .sort((a, b) => score(a, target) - score(b, target));
   const candidate = candidates[0];
   if (!candidate || score(candidate, target) > 1) return null;
-  if (candidates.some(other => other.id !== candidate.id && score(other, target) === score(candidate, target))) return null;
+  const best = [...new Map(candidates.filter(other => score(other, target) === score(candidate, target)).map(other => [other.id, other])).values()];
+  if (best.length > 1) { onAmbiguous?.(best); return null; }
   const detail = isBoundaryFeature(candidate)
     ? candidate
     : await getMapTilerFeature(candidate.id, { apiKey, signal, fetchImpl });
@@ -234,8 +248,9 @@ export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeTyp
       boundary_source: "MapTiler"
     }
   };
+  if (placeType === "country" && countryCandidateScore(boundary, target) > 1) return null;
   if (fetchImpl === fetch) mapTilerBoundaryCache.set(cacheKey, boundary);
-  return boundary;
+  return bindSource(boundary);
 }
 
 export async function getMapTilerProvinceBoundary(name, options = {}) {
@@ -517,16 +532,20 @@ function dataSearchValue(value) {
   return ["string", "number", "boolean"].includes(typeof value) ? String(value).trim() : "";
 }
 
-function dataSearchEntityKey(properties, fields) {
+function dataSearchEntityKey(properties, fields, locationKeys = {}) {
   const primary = dataSearchValue(properties?.[fields[0].name]);
   if (!primary) return null;
+  const countryCode = fields[0].geoLevel === "country" ? resolveBoundaryCountry(countryLookupName(primary)) : null;
+  const identity = fields[0].geoLevel === "country"
+    ? properties?.__resolved_location_key || (Object.hasOwn(locationKeys, primary) ? locationKeys[primary] : null)
+      || (countryCode ? `country:${countryCode}` : primary) : primary;
   const context = fields[0].role === "id" ? [] : fields.slice(1).filter(column => column.role === "geo");
-  return JSON.stringify([primary, ...context.map(column => dataSearchValue(properties?.[column.name]))]);
+  return JSON.stringify([identity, ...context.map(column => dataSearchValue(properties?.[column.name]))]);
 }
 
 /** Index only uploaded fields. AI supplies defaults; filtering never calls AI/geocoding. */
 export function buildDataSearchIndex({ data, columns = [], titleField, chartType, search_bar, search_fields,
-  filtered = false, sourceRecords, minFilteredObjects = 5 } = {}) {
+  filtered = false, sourceRecords, locationKeys = {}, minFilteredObjects = 5 } = {}) {
   const config = normalizeDataSearchConfig({ ...(search_bar === undefined ? {} : { search_bar }),
     ...(search_fields === undefined ? {} : { search_fields }) }, columns);
   const fields = resolveDataSearchColumns({ columns, titleField, chartType, search_fields: config.search_fields });
@@ -535,7 +554,7 @@ export function buildDataSearchIndex({ data, columns = [], titleField, chartType
   const entries = (data?.features || []).flatMap(feature => {
     if (!featureCenter(feature)) return [];
     const properties = feature.properties || {};
-    const entityKey = dataSearchEntityKey(properties, fields);
+    const entityKey = dataSearchEntityKey(properties, fields, locationKeys);
     if (!entityKey) return [];
     const values = fields.flatMap(column => {
       const value = dataSearchValue(properties[column.name]);
@@ -544,19 +563,21 @@ export function buildDataSearchIndex({ data, columns = [], titleField, chartType
     const label = values[0].value;
     const aliases = values.flatMap(({ column, value }) => {
       if (column.geoLevel !== "country") return [value];
-      const code = resolveBoundaryCountry(value);
+      const lookupName = countryLookupName(value);
+      const code = resolveBoundaryCountry(lookupName) || properties.__resolved_country_code;
       const source = COUNTRY_BOUNDARY_SOURCES[code];
-      return [value, code, source?.name, ...(source?.aliases || [])].filter(Boolean);
+      return [value, lookupName, code, properties.__resolved_location_name, ...sourceLocationNames(properties),
+        source?.name, ...(source?.aliases || [])].filter(Boolean);
     });
     const terms = [...new Set(aliases.map(normalizePlaceName).filter(Boolean))];
     if (!terms.length) return [];
-    const subtitle = values.filter(item => item.value !== label).slice(0, 2)
+    const subtitle = sourceLocationNames(properties).length > 1 ? `${sourceLocationNames(properties).length} dòng thông tin` : values.filter(item => item.value !== label).slice(0, 2)
       .map(item => `${item.column.labelVi || item.column.name}: ${item.value}`).join(" · ") || primary.labelVi || primary.name;
     return [{ feature, label, subtitle, terms, entityKey }];
   });
   const uniqueCount = new Set(entries.map(entry => entry.entityKey)).size;
   const totalCount = Array.isArray(sourceRecords)
-    ? new Set(sourceRecords.map(record => dataSearchEntityKey(record, fields)).filter(Boolean)).size : null;
+    ? new Set(sourceRecords.map(record => dataSearchEntityKey(record, fields, locationKeys)).filter(Boolean)).size : null;
   const reducedByFilter = filtered && (totalCount == null || uniqueCount < totalCount);
   const enabled = config.search_bar !== false && uniqueCount > 0
     && (!reducedByFilter || uniqueCount >= minFilteredObjects);
@@ -585,7 +606,7 @@ export function buildGroupDataSearchIndex(layers = [], options = {}) {
 
 function sameSearchData(previous, next) {
   if (!previous || previous.groupId !== next.groupId) return false;
-  const keys = ['data', 'columns', 'titleField', 'chartType', 'search_bar', 'search_fields', 'filtered', 'sourceRecords', 'layerId', 'groupId', 'layerTitle'];
+  const keys = ['data', 'columns', 'titleField', 'chartType', 'search_bar', 'search_fields', 'filtered', 'sourceRecords', 'locationKeys', 'layerId', 'groupId', 'layerTitle'];
   if (Array.isArray(next.layers)) return Array.isArray(previous.layers) && previous.layers.length === next.layers.length
     && next.layers.every((layer, index) => keys.every(key => previous.layers[index][key] === layer[key]));
   return !previous.layers && keys.every(key => previous[key] === next[key]);

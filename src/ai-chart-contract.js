@@ -238,7 +238,7 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
   const coordinateLine = raw.chartType === "map_line" && b.lat && b.lng;
   const nativeKind = raw.chartType === "choropleth" ? "area" : raw.chartType === "map_line" ? "line" : null;
   const nativeGeometry = profile?.spatial?.nativeGeometry === true && profile.spatial.geometryKinds?.includes(nativeKind);
-  const required = nativeGeometry ? [] : coordinateLine ? ["lat", "lng"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["region", "value"]
+  const required = nativeGeometry ? [] : coordinateLine ? ["lat", "lng"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["region"]
     : raw.chartType === "point" ? ["lat", "lng"]
       : raw.chartType === "hex_h3" ? ["lat", "lng", "value"]
         : raw.chartType === "line" ? ["x", "y"] : ["x", "y"];
@@ -251,15 +251,15 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
     }
     const names = list(value).filter(name => typeof name === "string" && name);
     if (!names.length || names.some(name => !fieldNames.has(name) || !spec.slots[slot]?.includes(roleOf.get(name)))) return null;
-    if (raw.chartType === "map_line" && !coordinateLine && slot === "region" && names.some(name => !["category", "geo"].includes(roleOf.get(name)))) return null;
     normalizedBindings[slot] = slot === "y" && raw.chartType === "line" ? [...new Set(names)] : names[0];
   }
-  for (const slot of nativeGeometry ? ["region", "value"] : coordinateLine ? ["region", "x", "value"] : raw.chartType === "point" ? ["region"] : []) {
+  for (const slot of nativeGeometry ? ["region", "value"] : coordinateLine ? ["region", "x", "value"] : raw.chartType === "point" ? ["region"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["value"] : []) {
     if (b[slot] == null || b[slot] === "") continue;
     const roles = nativeGeometry && slot === "region" ? ["geo", "category", "id", "text"] : spec.slots[slot];
     if (typeof b[slot] !== "string" || !fieldNames.has(b[slot]) || !roles?.includes(roleOf.get(b[slot]))) return null;
     normalizedBindings[slot] = b[slot];
   }
+  if (["choropleth", "map_line"].includes(raw.chartType)) normalizedBindings.value ??= null;
   if (raw.chartType === "line" && typeof b.series === "string" && b.series) {
     if (!fieldNames.has(b.series) || !spec.slots.series.includes(roleOf.get(b.series))) return null;
     normalizedBindings.series = b.series;
@@ -270,10 +270,10 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
     chartType: raw.chartType,
     title: typeof raw.title === "string" && raw.title.trim() ? raw.title.trim() : raw.chartType,
     bindings: normalizedBindings,
-    agg: AGG_VALUES.includes(raw.agg) ? raw.agg : null,
+    agg: ["choropleth", "map_line"].includes(raw.chartType) && !normalizedBindings.value ? null : AGG_VALUES.includes(raw.agg) ? raw.agg : null,
     confidence: Math.min(1, Math.max(0, Number(raw.confidence) || 0)),
     reason: typeof raw.reason === "string" ? raw.reason.trim() : "",
-    legend: raw.chartType === "choropleth" ? raw.legend ?? null : null,
+    legend: raw.chartType === "choropleth" && normalizedBindings.value ? raw.legend ?? null : null,
     popupSuggestions: normalizePopupSuggestions(raw.popupSuggestions),
     source: "ai"
   };

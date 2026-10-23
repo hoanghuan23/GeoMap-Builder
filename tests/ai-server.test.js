@@ -244,7 +244,7 @@ test("native geometry without attribute columns still receives an AI decision", 
       assert.equal(calls, 1);
       assert.equal(response.body.source, "ai");
       assert.equal(response.body.suggestions[0].chartType, chartType);
-      assert.deepEqual(response.body.suggestions[0].bindings, {});
+      assert.deepEqual(response.body.suggestions[0].bindings, { value: null });
     }
   } finally { globalThis.fetch = originalFetch; }
 });

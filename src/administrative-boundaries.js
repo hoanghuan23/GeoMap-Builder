@@ -2,7 +2,7 @@ import {
   administrativeNameAliases, boundaryMatchesCountry, countryCandidateScore, getMapTilerAdministrativeBoundary, getMapTilerRegion, isBoundaryFeature, normalizedAdministrativeName,
   localBoundaryNameAliases, normalizePlaceName, normalizePlaceWords, searchLocalBoundaries, searchMapTilerBoundaries
 } from "./map-search.js";
-import { COUNTRY_BOUNDARY_SOURCES, resolveBoundaryCountry } from "./country-boundary-sources.js";
+import { COUNTRY_BOUNDARY_SOURCES, countryLookupName, resolveBoundaryCountry, resolvedCountryProperties } from "./country-boundary-sources.js";
 
 function provinceName(feature) {
   const region = feature.context?.find(item => item.id?.startsWith("region.") || item.place_type?.includes("region"));
@@ -35,7 +35,7 @@ async function describeCandidates(features, options) {
 }
 
 function administrativeQuery(value, placeType, country) {
-  const [label, ...context] = String(value ?? "").split(",");
+  const [label, ...context] = placeType === "country" ? [String(value ?? "").trim()] : String(value ?? "").split(",");
   const words = normalizePlaceWords(label);
   const prefix = /^(tinh|thanh pho|tp|thu do|thi xa|thi tran|phuong|xa|quan|huyen)\s+(?=\S)/.exec(words);
   const type = prefix?.[1].replace(/ /g, "");
@@ -44,15 +44,15 @@ function administrativeQuery(value, placeType, country) {
     : ["huyen", "quan", "thixa"].includes(type) ? "district"
     : ["xa", "phuong", "thitran"].includes(type) ? "commune" : null;
   return {
-    name: normalizePlaceName(placeType === "country" ? resolveBoundaryCountry(label) || label : prefix ? words.slice(prefix[0].length) : label),
-    kind, type, placeType,
+    name: normalizePlaceName(placeType === "country" ? resolveBoundaryCountry(countryLookupName(label)) || countryLookupName(label) : prefix ? words.slice(prefix[0].length) : label),
+    kind, type, placeType, ...(placeType === "country" ? { countryName: label } : {}),
     parents: context.filter(part => !resolveBoundaryCountry(part) && normalizePlaceName(part) !== normalizePlaceName(country))
       .map(normalizedAdministrativeName).filter(Boolean)
   };
 }
 
 function mapTilerScore(feature, query, allowAlternateLevel = false) {
-  if (query.placeType === "country") return countryCandidateScore(feature, query.name);
+  if (query.placeType === "country") return countryCandidateScore(feature, query.countryName);
   const label = feature.text || feature.place_name?.split(",")[0] || feature.properties?.name;
   const candidate = administrativeQuery(label, feature.place_type?.[0]);
   if (query.kind && candidate.kind && query.kind !== candidate.kind
@@ -74,7 +74,7 @@ function mapTilerScore(feature, query, allowAlternateLevel = false) {
 
 function withSource(feature, name, source) {
   return { ...feature, properties: {
-    ...(feature.properties || {}), __data_location: name,
+    ...(feature.properties || {}), ...resolvedCountryProperties(feature), __data_location: name,
     __data_place_type: feature.place_type?.[0], boundary_source: source
   } };
 }
@@ -110,7 +110,7 @@ async function resolveCandidates(name, { apiKey, placeType, country, signal, fet
   const requestedCountry = placeType === "country";
   const lookupCountry = requestedCountry ? null : country === undefined
     ? resolveBoundaryCountry(String(name).split(",").at(-1)) || "VNM" : country;
-  const code = requestedCountry ? resolveBoundaryCountry(name) : resolveBoundaryCountry(lookupCountry);
+  const code = requestedCountry ? resolveBoundaryCountry(countryLookupName(name)) : resolveBoundaryCountry(lookupCountry);
   const cityState = !requestedCountry && COUNTRY_BOUNDARY_SOURCES[code]?.cityState
     && resolveBoundaryCountry(String(name).split(",")[0]) === code;
   const isCountry = requestedCountry || cityState;
@@ -118,16 +118,18 @@ async function resolveCandidates(name, { apiKey, placeType, country, signal, fet
   // MapTiler autocomplete returns point-only places for this abbreviated province name.
   const providerName = code === "VNM" && placeType === "region" && normalizePlaceWords(name) === "tp ho chi minh"
     ? "Hồ Chí Minh" : name;
-  const query = administrativeQuery(providerName, effectivePlaceType, lookupCountry);
+  const query = administrativeQuery(cityState ? COUNTRY_BOUNDARY_SOURCES[code].name : providerName, effectivePlaceType, lookupCountry);
   // Provider lookup works for every country; local files are an optional fallback.
   if (apiKey) {
     try {
       let candidates;
       const narrowLookup = isCountry || !query.parents.length && (!query.kind || query.kind === "region");
       if (narrowLookup) {
+        let ambiguous;
         const boundary = await getMapTilerAdministrativeBoundary(cityState ? COUNTRY_BOUNDARY_SOURCES[code].name : providerName, { apiKey, country: lookupCountry,
-          placeType: query.kind === "region" ? "region" : effectivePlaceType, signal, fetchImpl });
-        candidates = boundary ? [boundary] : [];
+          placeType: query.kind === "region" ? "region" : effectivePlaceType, signal, fetchImpl,
+          onAmbiguous: matches => { ambiguous = matches; } });
+        candidates = boundary ? [boundary] : isCountry ? ambiguous || [] : [];
       } else {
         // Use the same administrative search as the search bar for explicit district/commune names.
         candidates = await searchMapTilerBoundaries(providerName, { apiKey, country: lookupCountry, signal, fetchImpl });
@@ -154,7 +156,7 @@ async function resolveCandidates(name, { apiKey, placeType, country, signal, fet
       // Keep local ADM files available when the provider is unavailable.
     }
   }
-  return code ? localCandidates(name, query, { country: code, signal, fetchImpl }) : [];
+  return code ? localCandidates(requestedCountry ? countryLookupName(name) : name, query, { country: code, signal, fetchImpl }) : [];
 }
 
 export async function loadAdministrativeBoundaries(names, {
@@ -164,6 +166,7 @@ export async function loadAdministrativeBoundaries(names, {
   const uniqueNames = [...new Set((names || []).map(name => String(name ?? "").trim()).filter(Boolean))];
   const results = new Array(uniqueNames.length);
   const candidates = {};
+  const countryLookups = new Map();
   // Share local file loads across workers, including when a custom fetch implementation is used.
   const localFiles = new Map();
   const sharedFetch = (url, options) => {
@@ -185,11 +188,16 @@ export async function loadAdministrativeBoundaries(names, {
       const locationCountry = Object.hasOwn(contexts[sourceName] || {}, "country") ? contexts[sourceName].country : country;
       try {
         const selected = selections[sourceName];
-        const matches = isBoundaryFeature(selected) ? [selected]
-          : await resolveCandidates(queryName, { apiKey, placeType, country: locationCountry, signal, fetchImpl: fetchImpl === fetch ? fetch : sharedFetch });
+        const lookupKey = placeType === "country" ? resolveBoundaryCountry(countryLookupName(queryName)) || normalizePlaceName(countryLookupName(queryName)) : null;
+        const resolve = () => resolveCandidates(queryName, { apiKey, placeType, country: locationCountry, signal, fetchImpl: fetchImpl === fetch ? fetch : sharedFetch });
+        if (!isBoundaryFeature(selected) && lookupKey && !countryLookups.has(lookupKey)) countryLookups.set(lookupKey, resolve());
+        let matches = isBoundaryFeature(selected) ? [selected]
+          : lookupKey ? await countryLookups.get(lookupKey) : await resolve();
+        // An exact full-name match must not authorize a different qualifier with no matching country identity.
+        if (!isBoundaryFeature(selected) && lookupKey && matches.length && !matches.some(feature => countryCandidateScore(feature, queryName) < 2)) matches = await resolve();
         if (signal?.aborted) throw new DOMException("Boundary loading aborted", "AbortError");
         if (matches.length === 1) results[index] = { ...matches[0], properties: {
-          ...(matches[0].properties || {}), __data_location: sourceName, __data_query: queryName,
+          ...(matches[0].properties || {}), ...resolvedCountryProperties(matches[0]), __data_location: sourceName, __data_query: queryName,
           ...(locationCountry ? { __data_country: locationCountry } : {})
         } };
         else if (matches.length > 1) candidates[sourceName] = await describeCandidates(matches, {
@@ -206,7 +214,9 @@ export async function loadAdministrativeBoundaries(names, {
   const unmatched = uniqueNames.filter((_, index) => !results[index]);
   if (strict && unmatched.length) throw new Error(`Chưa tìm được ranh giới duy nhất cho: ${unmatched.join(", ")}`);
   const features = results.filter(Boolean);
-  return { type: "FeatureCollection", features, candidates, unmatched,
+  const locationKeys = Object.fromEntries(features.flatMap(feature => feature.properties.__resolved_location_key
+    ? [[feature.properties.__data_location, feature.properties.__resolved_location_key]] : []));
+  return { type: "FeatureCollection", features, candidates, unmatched, locationKeys,
     matched: uniqueNames.filter((_, index) => Boolean(results[index])),
     matchRate: features.length / Math.max(1, uniqueNames.length) };
 }
