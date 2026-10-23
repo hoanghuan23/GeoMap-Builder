@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
   // Cho phép dùng MAPTILER_API_KEY từ .env trong mã phía trình duyệt.
   envPrefix: ["VITE_", "MAPTILER_"],
   plugins: [aiMapRecommendationPlugin(env)],
+  worker: { format: "es" },
   build: {
     rollupOptions: {
       input: {

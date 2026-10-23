@@ -32,7 +32,8 @@ import { polygonLegendKey, polygonLegendTarget } from "./polygon-legend-contract
 import { createMapSearch, focusMapOnFeature, landOnlyBoundary } from "./map-search.js";
 import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "./administrative-boundaries.js";
 import { clipGeoJSONToPolygon, featureCount, geometryKinds, pointGeoJSONToRecords } from "./geojson-layers.js";
-import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
+import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis, requestAiTextAnalysis } from "./ai-data-analysis.js";
+import { parseTextDocumentFile } from "./text-document-worker-client.js";
 import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
 import { administrativeContextFields, geographicLocationName, applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
@@ -1458,7 +1459,8 @@ async function parseSpreadsheetUpload(file, options) {
   const workbook = globalThis.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
   const sheetNames = workbook.SheetNames || [];
   if (!options.sheetName && sheetNames.length > 1) return { needsSheet: true, sheetNames };
-  const selectedSheet = options.sheetName && sheetNames.includes(options.sheetName) ? options.sheetName : sheetNames[0];
+  if (options.sheetName && !sheetNames.includes(options.sheetName)) throw new Error(`Không tìm thấy bảng (sheet) "${options.sheetName}" trong file Excel. Hãy chọn lại bảng cần phân tích.`);
+  const selectedSheet = options.sheetName || sheetNames[0];
   const records = globalThis.XLSX.utils.sheet_to_json(workbook.Sheets[selectedSheet], { defval: "", raw: true });
   return { records, profile: typeof summarizeTabularData === "function" ? summarizeTabularData(records, { includeSamples: options.includeSamples }) : null };
 }
@@ -1466,7 +1468,20 @@ async function parseSpreadsheetUpload(file, options) {
 async function readSpatialFile(file, { sheetName = null, signal } = {}) {
   if (options.preparsedResults?.has(file)) return options.preparsedResults.get(file);
   const extension = file.name.toLowerCase().split(".").pop();
+  if (extension === "doc") throw new Error("Chưa hỗ trợ file .doc. Hãy mở bằng Word và lưu lại thành .docx.");
   if (extension === "zip") throw new Error("ZIP/Shapefile sẽ được hỗ trợ ở phiên bản tiếp theo.");
+  if (["txt", "docx"].includes(extension)) {
+    setStatus(`Đang đọc văn bản từ ${file.name}…`);
+    const { text } = await parseTextDocumentFile(file, { signal });
+    setStatus(`Đang trích dữ liệu và phân tích ${file.name} bằng AI…`);
+    const pipeline = await requestAiTextAnalysis(text, { signal, source: { fileName: file.name, extension } });
+    let spatialData = null;
+    try { spatialData = recordsToPointGeoJSON(pipeline.records); } catch { /* Text data without coordinates. */ }
+    return { kind: "ai-pipeline", pipeline: { ...pipeline, spatialData } };
+  }
+  if (!["xlsx", "xls", "csv", "json", "geojson"].includes(extension)) {
+    throw new Error("Định dạng chưa hỗ trợ. Hãy chọn CSV, Excel, JSON, GeoJSON, TXT hoặc DOCX.");
+  }
   if (["xlsx", "xls", "csv"].includes(extension)) {
     const parsed = await parseSpreadsheetUpload(file, {
       extension,

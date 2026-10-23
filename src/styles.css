@@ -3053,9 +3053,10 @@ th:last-child {
 .layer-legends > .layer-overlay-title { color: #263a52; margin: 0; text-shadow: 0 1px 4px #fff; }
 .layer-legends:not(:has(> div:not([hidden]))) { display: none; }
 .map-legends { max-height: min(48%, 420px); overflow-y: auto; scrollbar-width: thin; }
-.upload-sheet-choice { display: flex; gap: 6px; flex-basis: 100%; margin-top: 8px; }
-.upload-sheet-choice select { min-width: 0; flex: 1; border: 1px solid #d8e2ef; border-radius: 5px; padding: 5px; }
-.uploaded-layer-list li:has(.upload-sheet-choice) { flex-wrap: wrap; }
+.upload-sheet-choice { grid-column: 1 / -1; display: grid; gap: 6px; min-width: 0; margin-top: 8px; }
+.upload-sheet-choice label { color: var(--ink); font-size: 10px; font-weight: 600; }
+.upload-sheet-choice select { width: 100%; min-width: 0; border: 1px solid #d8e2ef; border-radius: 5px; padding: 7px; font: inherit; font-size: 11px; }
+.upload-sheet-choice .secondary-button { width: 100%; }
 .workspace-tables { min-height: 0; }
 .workspace-tables .data-panel { max-height: 290px; }
 @media (max-width: 720px) {

@@ -22,7 +22,8 @@ export function parseSpreadsheetBuffer(buffer, { extension = "xlsx", sheetName =
   const sheetNames = workbook.SheetNames || [];
   if (!sheetNames.length) throw new Error("Workbook không có sheet dữ liệu.");
   if (!sheetName && sheetNames.length > 1) return { needsSheet: true, sheetNames };
-  const selectedSheet = sheetName && sheetNames.includes(sheetName) ? sheetName : sheetNames[0];
+  if (sheetName && !sheetNames.includes(sheetName)) throw new Error(`Không tìm thấy bảng (sheet) "${sheetName}" trong file Excel. Hãy chọn lại bảng cần phân tích.`);
+  const selectedSheet = sheetName || sheetNames[0];
   const records = XLSX.utils.sheet_to_json(workbook.Sheets[selectedSheet], { defval: "", raw: true });
   if (!records.length) throw new Error(`Sheet "${selectedSheet}" không có bản ghi dữ liệu.`);
   assertStandardHeaders(records);

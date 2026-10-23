@@ -44,13 +44,21 @@ OPENAI_BASE_URL=https://api.vilao.ai/v1
 
 ### AI Chart Pipeline v2 và quyền riêng tư
 
-Để đánh giá prompt trên các tập dữ liệu, đặt `AI_DEBUG=true` trong `.env` rồi khởi động lại server. Log phân tích và composition ghi instructions, hồ sơ/input, phản hồi AI gốc và kết quả sau kiểm tra để phân biệt quyết định của prompt với giới hạn renderer. Tùy chọn gửi mẫu vẫn được tôn trọng. Kiểm thử tự động dùng phản hồi AI mô phỏng để kiểm tra luồng; chất lượng prompt cần đánh giá bằng các lượt gọi AI thực tế.
+Để đánh giá prompt trên các tập dữ liệu, đặt `AI_DEBUG=true` trong `.env` rồi khởi động lại server. Log phân tích ghi đầu vào, phản hồi AI gốc và kết quả sau kiểm tra; không in instructions. Với TXT/DOCX, debug chỉ gồm `text`, `rawOutput` và `normalizedOutput`; với dữ liệu bảng, đầu vào là `profile`. Tùy chọn gửi mẫu vẫn được tôn trọng cho dữ liệu bảng. Kiểm thử tự động dùng phản hồi AI mô phỏng để kiểm tra luồng; chất lượng prompt cần đánh giá bằng các lượt gọi AI thực tế.
 
 Composition hiện chỉ quyết định các lớp hiển thị chung; không join bảng, tính chỉ số mới hay đồng bộ thời gian giữa các tập dữ liệu. Bảng chỉ có khóa tham chiếu sang geometry ở file khác sẽ giữ nguyên nếu chưa có bindings hiển thị hợp lệ; ứng dụng không tự ghép theo tên cột hay tên bộ dữ liệu.
 
-Excel/CSV được parse và profile trong Web Worker bằng package SheetJS đi cùng source. Workbook nhiều sheet yêu cầu chọn sheet trước khi phân tích. Raw records vẫn nằm trong trình duyệt; server không lưu dataset và không nhận toàn bộ file.
+Excel/CSV được parse và profile trong Web Worker bằng package SheetJS đi cùng source. Excel nhiều sheet hiện bộ **Chọn bảng (sheet) để phân tích** ngay trong danh sách tệp, không phải chờ tải nền bản đồ. Mỗi file giữ lựa chọn riêng; chọn bảng rồi bấm **Phân tích bảng đã chọn** mới gửi bảng đó cho AI. File một sheet vẫn xử lý trực tiếp. Raw records vẫn nằm trong trình duyệt; server không lưu dataset và không nhận toàn bộ file.
 
-Tùy chọn **“Gửi giá trị mẫu cho AI”** mặc định bật. Request AI chứa tên cột, kiểu suy luận, thống kê như tỷ lệ null, số giá trị phân biệt, min/max cùng tối đa 5 mẫu cho mỗi cột và 8 dòng đầu; chuỗi được loại control character và cắt ở 160 ký tự. AI dùng các dòng mẫu để nhận diện cấp quan sát và quan hệ địa lý giữa các cột. Khi tắt tùy chọn này, request không có trường `samples` hoặc `head`.
+Tùy chọn **“Gửi giá trị mẫu cho AI”** mặc định bật và chỉ áp dụng cho dữ liệu bảng (Excel/CSV/JSON và thuộc tính GeoJSON). Request AI chứa tên cột, kiểu suy luận, thống kê như tỷ lệ null, số giá trị phân biệt, min/max cùng tối đa 5 mẫu cho mỗi cột và 8 dòng đầu; chuỗi được loại control character và cắt ở 160 ký tự. AI dùng các dòng mẫu để nhận diện cấp quan sát và quan hệ địa lý giữa các cột. Khi tắt tùy chọn này, request không có trường `samples` hoặc `head`.
+
+Ứng dụng nhận thêm **TXT (UTF-8, có hoặc không có BOM)** và **Word DOCX** qua chọn file hoặc kéo thả nhiều file cùng các định dạng hiện có. DOCX dùng Mammoth tải khi cần để trích văn bản trong Web Worker; không chuyển nội dung thành HTML và không đọc số liệu trong ảnh. File `.doc` cũ cần mở bằng Word rồi lưu thành `.docx`. PDF và tài liệu scan chưa được hỗ trợ.
+
+TXT/DOCX gửi **toàn bộ văn bản trích xuất** tới AI, kể cả khi tắt gửi mẫu. Giới hạn là **50.000 ký tự**, được kiểm tra ở trình duyệt và server; tài liệu vượt giới hạn bị từ chối, không cắt ngắn. File gốc không gửi lên server và không lưu dataset. Dữ liệu Excel/CSV/JSON vẫn dùng parser và prompt hiện tại.
+
+Văn bản đi qua `POST /api/ai/analyze-map-text` với `{ text, source }`. Một lượt gọi AI dùng prompt riêng để trả bảng `fields`/`rows` cùng `analysis` theo hợp đồng chung. Server kiểm tra bảng, chuyển thành records, tạo profile và chuẩn hóa metadata; trả `{ records, analysis }`. Client chuẩn hóa số/thời gian rồi dùng cùng pipeline bản đồ, chú giải, nút chỉ số, tìm kiếm, popup và xuất bảng. Không gọi lại prompt phân tích bảng; composition nhiều lớp vẫn là bước riêng. Không có dữ liệu thì báo rõ; bảng hợp lệ nhưng đề xuất lỗi vẫn được giữ để xem dữ liệu.
+
+Prompt giữ số liệu, đơn vị và kỳ quan sát được nêu rõ; ô thiếu dùng `null`, không suy ra số từ mô tả so sánh hoặc tự thêm năm/tọa độ. Ví dụ đoạn tháng 9/2026 về Hà Nội (29°C, 120mm), Đà Nẵng (31°C, 85mm) và TP.HCM (32°C, 150mm) tạo ba dòng với các cột `Tỉnh thành`, `Nhiệt độ (°C)`, `Lượng mưa (mm)` và `Tháng` (`2026-09`).
 
 Mỗi dataset tạo một request phân tích nội dung OpenAI; đánh giá tổ hợp giữa các dataset là bước riêng theo từng đợt import. Server tự đưa registry được phép vào prompt, coi tên cột và mẫu là dữ liệu không tin cậy, rồi kiểm tra structured output trước khi trả về client. Đầu vào chỉ hỗ trợ ba kiểu bản đồ:
 

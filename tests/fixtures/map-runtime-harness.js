@@ -14,7 +14,8 @@ import * as coordinates from "../../src/coordinate-data.js";
 import * as roadMap from "../../src/road-map-data.js";
 import * as timeValues from "../../src/time-values.js";
 import { AI_CHART_REGISTRY } from "../../src/ai-chart-contract.js";
-import { displayFilterValue, comparableFilterValue } from "../../src/ai-data-analysis.js";
+import { displayFilterValue, comparableFilterValue, requestAiTextAnalysis } from "../../src/ai-data-analysis.js";
+import { parseTextDocumentFile } from "../../src/text-document-worker-client.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "../../src/tabular-worker-client.js";
 import { trafficAiAnalysis } from "./road-traffic-fixture.js";
 import { jsonDatasets } from "../../src/json-datasets.js";
@@ -52,6 +53,7 @@ export function createHarness() {
     ...capabilities, ...polygonStyle, ...pointStyle, ...geojsonLayers, ...layerOrder, PointRenderer, PolygonRenderer,
     ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, ...polygonLegend, ...legendContract,
     jsonDatasets, nativeMapDataset, nativeMapView, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue, profileRecordsInWorker, parseSpreadsheetFile,
+    requestAiTextAnalysis, parseTextDocumentFile,
     requestAiDataAnalysis: async records => ({ analysis: { ...trafficAiAnalysis, source: "ai" }, records, validRowRate: 1 }),
     roadNetworkUrl: () => "/roads/hanoi_roads.json",
     fetch: async () => ({ ok: true, json: async () => ({ type: "FeatureCollection", features: [{
