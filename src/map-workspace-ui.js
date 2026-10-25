@@ -274,10 +274,16 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       remove.addEventListener('click', () => removeUpload(id)); row.append(name, detail, remove);
       if (upload.sheets) {
         const select = document.createElement('select'); select.setAttribute('aria-label', `Chọn sheet cho ${upload.file.name}`);
-        select.append(...upload.sheets.map(sheet => Object.assign(document.createElement('option'), { textContent: sheet, value: sheet })));
+        select.append(...upload.sheets.map(sheet => Object.assign(document.createElement('option'), { textContent: sheet, value: sheet, title: sheet })));
+        select.value = upload.sheets.includes(upload.selectedSheet) ? upload.selectedSheet : upload.sheets[0];
+        select.title = select.value;
+        select.addEventListener('change', () => { upload.selectedSheet = select.value; select.title = select.value; });
         const apply = textNode('button', 'Phân tích sheet', 'secondary-button'); apply.type = 'button';
         apply.addEventListener('click', () => { apply.disabled = true; enqueue(() => processUploads([{ id, upload, sheetName: select.value }])); });
-        const field = textNode('div', '', 'upload-sheet-choice'); field.append(select, apply); row.append(field);
+        const field = textNode('div', '', 'upload-sheet-choice');
+        const label = textNode('label', '', 'upload-sheet-label');
+        label.append(textNode('span', `Chọn sheet dữ liệu (${upload.sheets.length})`), select);
+        field.append(label, apply); row.append(field);
       }
       list.append(row);
     }
