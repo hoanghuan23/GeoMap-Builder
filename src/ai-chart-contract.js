@@ -27,7 +27,7 @@ export function normalizeMetricButtons(raw, columns, suggestion, profile) {
   const seen = new Set(); const buttons = [];
   for (const item of Array.isArray(raw) ? raw : []) {
     const column = byName.get(item?.field);
-    const category = suggestion.chartType === "map_line" && column?.role === "category"
+    const category = ["map_line", "choropleth"].includes(suggestion.chartType) && column?.role === "category"
       && Number(profiles.get(item.field)?.uniqueCount) > 0 && Number(profiles.get(item.field)?.uniqueCount) <= 12;
     if (!column || seen.has(item.field) || excluded.has(item.field) || item.field.startsWith("__")
       || ["point_lat", "point_lng", "h3"].includes(column.geoLevel) || column.role !== "measure" && !category) continue;
@@ -45,7 +45,7 @@ export function normalizeMetricButtons(raw, columns, suggestion, profile) {
 export const AI_CHART_REGISTRY = Object.freeze({
   choropleth: Object.freeze({
     label: "Bản đồ Polygon",
-    slots: Object.freeze({ region: Object.freeze(["geo"]), value: Object.freeze(["measure"]) }),
+    slots: Object.freeze({ region: Object.freeze(["geo"]), value: Object.freeze(["measure", "category"]) }),
     icon: "polygon",
     renderer: "MapLibre"
   }),
@@ -218,11 +218,11 @@ function normalizeColumn(raw, fallback) {
     country: raw.role === "geo" && typeof raw.country === "string" && raw.country.trim() ? raw.country.trim().toUpperCase() : null,
     timeParse: cleanOptional(raw.timeParse, ["iso", "excel_serial", "unix_s", "unix_ms", "text"]) || (raw.role === "time" ? fallback.timeParse : null),
     granularity: cleanOptional(raw.granularity, TIME_GRANULARITIES) || (raw.role === "time" ? fallback.granularity : null),
-    unit: normalizeLegendUnit(raw.unit),
-    unitSource: !normalizeLegendUnit(raw.unit) ? "unknown" : ["explicit", "inferred", "unknown"].includes(raw.unitSource) ? raw.unitSource : "inferred",
-    aggDefault: cleanOptional(raw.aggDefault, AGG_VALUES),
+    unit: raw.role === "category" ? null : normalizeLegendUnit(raw.unit),
+    unitSource: raw.role === "category" || !normalizeLegendUnit(raw.unit) ? "unknown" : ["explicit", "inferred", "unknown"].includes(raw.unitSource) ? raw.unitSource : "inferred",
+    aggDefault: raw.role === "category" ? null : cleanOptional(raw.aggDefault, AGG_VALUES),
     semanticType: raw.role === "measure" && typeof raw.semanticType === "string" && raw.semanticType.trim() ? raw.semanticType.trim().slice(0, 120) : null,
-    legend: raw.role === "measure" ? raw.legend ?? null : null,
+    legend: ["measure", "category"].includes(raw.role) ? raw.legend ?? null : null,
     source: raw.source === "rule" ? "rule" : "ai"
   };
 }
@@ -270,7 +270,7 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
     chartType: raw.chartType,
     title: typeof raw.title === "string" && raw.title.trim() ? raw.title.trim() : raw.chartType,
     bindings: normalizedBindings,
-    agg: ["choropleth", "map_line"].includes(raw.chartType) && !normalizedBindings.value ? null : AGG_VALUES.includes(raw.agg) ? raw.agg : null,
+    agg: ["choropleth", "map_line"].includes(raw.chartType) && (!normalizedBindings.value || roleOf.get(normalizedBindings.value) === "category") ? null : AGG_VALUES.includes(raw.agg) ? raw.agg : null,
     confidence: Math.min(1, Math.max(0, Number(raw.confidence) || 0)),
     reason: typeof raw.reason === "string" ? raw.reason.trim() : "",
     legend: raw.chartType === "choropleth" && normalizedBindings.value ? raw.legend ?? null : null,

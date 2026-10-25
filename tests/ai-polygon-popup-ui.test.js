@@ -18,12 +18,14 @@ import * as polygonStyle from "../src/renderers/polygon-style.js";
 import * as weatherStyle from "../src/renderers/weather-style.js";
 import * as polygonLegend from "../src/polygon-legend.js";
 import * as legendContract from "../src/polygon-legend-contract.js";
+import * as categoricalColor from "../src/categorical-color.js";
 import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 import { storeColumns, storeRecords, storeSuggestions } from "./fixtures/store-points-fixture.js";
 import { normalizeTabularRecords, profileTabularData } from "../src/tabular-data.js";
 import { trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED } from "./fixtures/road-traffic-fixture.js";
 import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 import { descriptiveColumns, descriptiveCountryFetch, descriptiveRecords, descriptiveSuggestion } from "./fixtures/descriptive-countries-fixture.js";
+import { accessField, accessLegend, categoricalCountryFixture } from "./fixtures/categorical-countries-fixture.js";
 
 class Element {
   constructor() {
@@ -124,7 +126,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
     popupSuggestions: popupSuggestions.map(item => ({ ...item })) }));
   if (metricButtons !== null) dataset.suggestions.find(suggestion => suggestion.id === dataset.selectedSuggestionId).metricButtons = metricButtons;
   const context = vm.createContext({
-    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract,
+    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract, ...categoricalColor,
     fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, collapseCountryFeatures, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
@@ -154,6 +156,44 @@ const polygonMetricButtons = [
   { field: "temperature", label: "Nhiệt độ trung bình", icon: "🌡️", color: "#f59e0b" },
   { field: "minimum", label: "Nhiệt độ thấp nhất", icon: "❄️", color: "#3b82f6" }
 ];
+
+test("categorical country map shows exact AI colors, a distinct combination swatch and both original popup records", async () => {
+  const fixture = categoricalCountryFixture();
+  const analysis = validateAndNormalizeAnalysis({ columns: fixture.columns, suggestions: [fixture.suggestion], search_bar: true, search_fields: ["Điểm đến"] }, profileTabularData(fixture.records));
+  const boundaries = await loadAdministrativeBoundaries(fixture.records.map(row => row["Điểm đến"]), { apiKey: "key", placeType: "country", fetchImpl: descriptiveCountryFetch() });
+  const h = harness({ thematic: true });
+  Object.assign(h.dataset, { records: fixture.records, analysis, suggestions: analysis.suggestions.map(suggestion => ({ ...suggestion, available: true })),
+    selectedSuggestionId: fixture.suggestion.id, boundaries, popupSelections: {} });
+  h.run("dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]); populateAiFilters(dataset);");
+  await h.run("filteredAiBoundary()");
+  assert.equal(h.sources.get("polygon-data").data.features.length, 51);
+  assert.equal(h.get("weather-legend").hidden, false);
+  assert.equal(h.get("weather-legend-scale").hidden, true);
+  assert.equal(h.get("weather-legend-title").textContent, accessField);
+  const rows = h.get("weather-legend-labels").children;
+  assert.equal(rows.length, 5);
+  assert.deepEqual(rows.slice(0, 4).map(row => row.children[0].style.background), accessLegend.stops.map(stop => stop.color));
+  const mixed = rows.at(-1);
+  assert.equal(mixed.children[0].style.background, "#be185d");
+  assert.equal(mixed.children[1].textContent, "Bao gồm Miễn thị thực và Thị thực khi đến");
+  assert.equal(mixed.children[2].textContent, "1");
+  const china = h.sources.get("polygon-data").data.features.find(feature => feature.properties.__resolved_country_code === "CHN");
+  const paint = h.layers.get("polygon-fill").paint["fill-color"];
+  const keyIndex = paint.indexOf(china.properties.__category_color_key);
+  assert.ok(keyIndex > 1);
+  assert.equal(paint[keyIndex + 1], "#be185d");
+  h.run("openMapPopup(state.boundary.features.find(feature => feature.properties.__resolved_country_code === 'CHN'), [105,21])");
+  const sections = h.popups.at(-1).card.querySelectorAll(".popup-source-record");
+  assert.equal(sections.length, 2);
+  assert.match(sections[0].querySelectorAll("*").map(node => node.textContent).join(" | "), /Miễn thị thực/);
+  assert.match(sections[1].querySelectorAll("*").map(node => node.textContent).join(" | "), /Thị thực khi đến/);
+  h.run("fitBoundary = () => {};");
+  const categoryFilter = h.all(".ai-generated-filter").find(control => control.dataset.field === accessField);
+  categoryFilter.value = "Miễn thị thực"; await h.change(categoryFilter);
+  assert.equal(h.get("weather-legend-labels").children.length, 4);
+  assert.ok(h.get("weather-legend-labels").children.every(row => !row.children[1].textContent.startsWith("Bao gồm")));
+  assert.equal(h.dataset.records.length, 52);
+});
 
 test("descriptive countries render with the fixed color and preserve both source records in the popup", async () => {
   const h = harness({ thematic: true, boundaryLoader: (names, options) => loadAdministrativeBoundaries(names, {

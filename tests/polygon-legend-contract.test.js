@@ -14,7 +14,7 @@ test("compact legends preserve arbitrary AI stops, generic semantics and units a
   assert.equal(normalizeLegendUnit(null), null);
   const unknown = legendFixture({ unit: null });
   assert.equal(normalizePolygonLegendRecommendation(unknown, { ...target, unit: null }).unit, null);
-  assert.deepEqual(POLYGON_LEGEND_SCHEMA.anyOf.map(schema => schema.properties.type.enum[0]), ["continuous", "diverging"]);
+  assert.deepEqual(POLYGON_LEGEND_SCHEMA.anyOf.map(schema => schema.properties.type.enum[0]), ["continuous", "diverging", "categorical"]);
   assert.deepEqual(POLYGON_LEGEND_SCHEMA.anyOf[1].properties.mode.enum, ["semantic"]);
 });
 

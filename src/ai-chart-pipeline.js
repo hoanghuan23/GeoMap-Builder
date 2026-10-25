@@ -33,6 +33,7 @@ function first(value) {
 
 export function resolveAggregation(suggestion, columns) {
   if (["choropleth", "map_line"].includes(suggestion?.chartType) && !suggestion.bindings?.value) return null;
+  if (["choropleth", "map_line"].includes(suggestion?.chartType) && columnMap(columns).get(suggestion.bindings.value)?.role === "category") return null;
   if (AGGREGATIONS.has(suggestion?.agg)) return suggestion.agg;
   const valueName = suggestion?.bindings?.value || first(suggestion?.bindings?.y);
   const column = columnMap(columns).get(valueName);

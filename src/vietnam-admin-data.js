@@ -1,5 +1,6 @@
 import { summarizeFeatureProperties } from "./feature-properties.js";
 import { geographicLocationName } from "./geographic-grain.js";
+import { categoryColorProperties, categoryValue, featureCategoryValues } from "./categorical-color.js";
 
 function normalizedName(value) {
   return String(value ?? "").split(",").map(part => part
@@ -36,6 +37,7 @@ function aggregate(values, aggregation) {
 
 export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters = {}, columns = null, includeMissingMetric = false } = {}) {
   const { metricField } = recommendation;
+  const categorical = columns?.find(column => column.name === metricField)?.role === "category";
   const locationField = recommendation.geometry.field;
   const byLocation = new Map((boundaries?.features || []).map(feature => [
     normalizedName(feature.properties?.__data_location || feature.text || feature.place_name?.split(",")[0]),
@@ -44,7 +46,7 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
   const selected = records.filter(record => Object.entries(filters).every(([field, selectedValue]) =>
     matchesFilter(record[field], selectedValue)
   ));
-  const aggregation = recommendation.aggregation || recommendation.agg;
+  const aggregation = categorical ? null : recommendation.aggregation || recommendation.agg;
   const groups = aggregation ? [...selected.reduce((groups, record) => {
     const location = geographicLocationName(record, recommendation.geometry);
     if (!location) return groups;
@@ -64,7 +66,7 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
           ...(aggregation ? { [metricField]: aggregate(group.records.map(record => record[metricField]).filter(value => value != null), aggregation) } : {})
         };
     const metric = recordProperties[metricField];
-    const hasMetric = isFiniteValue(metric);
+    const hasMetric = categorical ? categoryValue(metric) !== null : isFiniteValue(metric);
     if (metricField && !hasMetric && !includeMissingMetric) return [];
     const boundaryProperties = { ...(boundary.properties || {}) };
     for (const column of columns || []) delete boundaryProperties[column?.name];
@@ -73,7 +75,8 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
       ...recordProperties,
       __location: String(group.records[0]?.[locationField] ?? "").trim(),
       ...(recommendation.geometry.contextFields?.length ? { __location_context: recommendation.geometry.contextFields } : {}),
-      __metric: hasMetric ? Number(metric) : null,
+      __metric: !categorical && hasMetric ? Number(metric) : null,
+      ...(categorical ? categoryColorProperties(metricField, group.records.map(record => record[metricField])) : {}),
       __record_count: group.records.length,
       boundary_source: boundary.properties?.boundary_source || "MapTiler"
     };
@@ -86,10 +89,10 @@ export function joinRecordsToMapTilerBoundaries(records, boundaries, recommendat
 }
 
 /** Consolidate display geometry only; source rows and metric aggregation stay independent. */
-export function collapseCountryFeatures(data, locationField) {
+export function collapseCountryFeatures(data, locationField, { categoryField = null } = {}) {
   const groups = new Map();
   for (const [index, feature] of (data.features || []).entries()) {
-    const key = feature.properties?.__resolved_location_key || `feature:${index}`;
+    const key = feature.properties?.__resolved_location_key || (categoryField ? feature.properties?.__data_location : null) || `feature:${index}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(feature);
   }
@@ -99,7 +102,8 @@ export function collapseCountryFeatures(data, locationField) {
     const properties = feature.properties;
     const name = properties.__resolved_location_name || properties.__location;
     return { ...feature, properties: { ...properties, [locationField]: name, __location: name,
-      __source_locations: [...new Set(features.map(item => item.properties.__data_location || item.properties.__location))],
+      __source_locations: [...new Set(features.map(item => item.properties.__location || item.properties.__data_location))],
+      ...(categoryField ? categoryColorProperties(categoryField, features.flatMap(item => featureCategoryValues(item.properties, categoryField))) : {}),
       __record_count: features.reduce((sum, item) => sum + (item.properties.__record_count || 1), 0) } };
   }) };
 }

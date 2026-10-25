@@ -27,6 +27,7 @@ import { PointRenderer } from "./renderers/point-renderer.js";
 import { buildPointView, createPointModel, DEFAULT_POINT_STYLE, mergePointStyle, normalizePointSelection, pointPaint, POINT_DEFAULT_GROUPS, POINT_GROUP_LIMIT } from "./renderers/point-style.js";
 import { PolygonRenderer } from "./renderers/polygon-renderer.js";
 import { polygonColorField, polygonFillExpression, polygonLegendScale } from "./renderers/polygon-style.js";
+import { categoryColorProperties, featureCategoryValues } from "./categorical-color.js";
 import { polygonLegendLabels, resolvePolygonLegendConfig } from "./polygon-legend.js";
 import { polygonLegendKey, polygonLegendTarget } from "./polygon-legend-contract.js";
 import { createMapSearch, focusMapOnFeature, landOnlyBoundary } from "./map-search.js";
@@ -308,6 +309,11 @@ function usesDefaultPolygonColor() {
   return Boolean(suggestion) && !suggestion.bindings.value;
 }
 
+function usesCategoricalPolygonColor() {
+  const field = activePolygonSuggestion()?.bindings.value;
+  return Boolean(field) && state.aiDataset.analysis.columns.some(column => column.name === field && column.role === "category");
+}
+
 function activePolygonLegendScale() {
   const suggestion = activePolygonSuggestion();
   if (!suggestion?.bindings.value || state.mapType !== "polygon") return null;
@@ -364,40 +370,67 @@ function renderWeatherLegend(resolvedScale = activePolygonLegendScale()) {
   if (!show) return;
   const mode = $("weather-legend-mode");
   mode.hidden = !resolvedScale;
-  $("weather-legend-labels").classList.toggle("positioned", Boolean(resolvedScale));
   const data = state.mapType === "h3" ? state.h3Data : state.boundary;
   const scale = polygonLegendScale(data, state.dataProfile, state.polygonPalette, resolvedScale);
   if (!scale) { legend.hidden = true; return; }
+  const categorical = scale.type === "categorical";
+  $("weather-legend-labels").classList.toggle("positioned", Boolean(resolvedScale) && !categorical);
+  $("weather-legend-labels").classList.toggle("categorical", categorical);
+  $("weather-legend-scale").hidden = categorical;
   const metric = state.aiDataset.recommendation.metricField;
   const column = state.aiDataset.analysis.columns.find(item => item.name === metric);
   const unit = resolvedScale ? scale.unit : column?.unit || "";
   const title = resolvedScale ? scale.title : column?.labelVi || metric;
   $("weather-legend-title").textContent = `${title}${unit && !title.includes(unit) ? ` (${unit})` : ""}`;
-  mode.textContent = scale.source === "technical-fallback" ? "Chú giải dự phòng"
+  mode.textContent = categorical ? "Theo phân loại" : scale.source === "technical-fallback" ? "Chú giải dự phòng"
     : scale.mode === "semantic" ? "Theo ngữ nghĩa" : "Theo dữ liệu";
   mode.title = scale.reason || "";
-  $("weather-legend-scale").style.background = scale.gradient;
-  const labels = resolvedScale ? polygonLegendLabels(scale, Math.max(100, (legend.clientWidth || 330) - 40))
-    : scale.values.map(value => ({ value, text: Number(value.toFixed(1)).toLocaleString("vi-VN") }));
-  $("weather-legend-scale").replaceChildren(...labels.filter(item => item.position != null).map(item => {
-    const tick = document.createElement("i");
-    tick.className = "polygon-legend-tick";
-    tick.style.left = `${item.position}%`;
-    return tick;
-  }));
-  $("weather-legend-labels").style.height = resolvedScale ? `${(Math.max(0, ...labels.map(item => item.row)) + 1) * 14}px` : "";
-  $("weather-legend-labels").replaceChildren(...labels.map(item => {
-    const label = document.createElement("span");
-    label.textContent = item.text;
-    if (item.position != null) {
-      label.style.left = item.offset ? `calc(${item.position}% + ${item.offset}px)` : `${item.position}%`;
-      label.style.top = `${item.row * 14}px`;
-    }
-    return label;
-  }));
+  if (categorical) renderCategoricalPolygonLegend(scale);
+  else {
+    $("weather-legend-scale").style.background = scale.gradient;
+    const labels = resolvedScale ? polygonLegendLabels(scale, Math.max(100, (legend.clientWidth || 330) - 40))
+      : scale.values.map(value => ({ value, text: Number(value.toFixed(1)).toLocaleString("vi-VN") }));
+    $("weather-legend-scale").replaceChildren(...labels.filter(item => item.position != null).map(item => {
+      const tick = document.createElement("i");
+      tick.className = "polygon-legend-tick";
+      tick.style.left = `${item.position}%`;
+      return tick;
+    }));
+    $("weather-legend-labels").style.height = resolvedScale ? `${(Math.max(0, ...labels.map(item => item.row)) + 1) * 14}px` : "";
+    $("weather-legend-labels").replaceChildren(...labels.map(item => {
+      const label = document.createElement("span");
+      label.textContent = item.text;
+      if (item.position != null) {
+        label.style.left = item.offset ? `calc(${item.position}% + ${item.offset}px)` : `${item.position}%`;
+        label.style.top = `${item.row * 14}px`;
+      }
+      return label;
+    }));
+  }
   const time = state.aiDataset.analysis.columns.find(item => item.role === "time");
   const period = time && state.aiDataset.filters?.[time.name] ? formatTimeValue(state.aiDataset.filters[time.name], time) : "";
-  $("weather-legend-note").textContent = [period, isRegionHexMode() ? `Dữ liệu tải lên · H3 res ${state.regionHexResolution}` : state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon"].filter(Boolean).join(" · ");
+  $("weather-legend-note").textContent = [period,
+    categorical && scale.mixed.some(entry => !entry.color) ? "Chưa có màu AI cho một số tổ hợp phân loại." : "",
+    categorical && scale.unmappedValues.length ? `Chưa có màu AI cho: ${scale.unmappedValues.join(", ")}.` : "",
+    isRegionHexMode() ? `Dữ liệu tải lên · H3 res ${state.regionHexResolution}` : state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon"].filter(Boolean).join(" · ");
+}
+
+function renderCategoricalPolygonLegend(scale) {
+  const rows = [...scale.entries.map(entry => ({ label: entry.value, background: entry.color, count: entry.count })),
+    ...scale.mixed.map(entry => {
+      const values = entry.values;
+      return { label: `Bao gồm ${values.slice(0, -1).join(", ")} và ${values.at(-1)}${entry.color ? "" : " (chưa có màu AI)"}`,
+        background: entry.color || scale.noDataColor, count: entry.count, mixed: true };
+    })];
+  $("weather-legend-labels").style.height = "";
+  $("weather-legend-labels").replaceChildren(...rows.map(item => {
+    const row = document.createElement("div"); row.className = "categorical-legend-row";
+    if (item.mixed) row.className += " categorical-legend-mixed";
+    const swatch = document.createElement("i"); swatch.style.background = item.background; swatch.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span"); label.textContent = item.label;
+    const count = document.createElement("b"); count.textContent = String(item.count);
+    row.append(swatch, label, count); return row;
+  }));
 }
 
 function applyStyle() {
@@ -829,7 +862,7 @@ function aiWeatherPopupContent(feature) {
     return column.role === "time" && recommendation.filters?.some(filter => filter.field === column.name && filter.control === "datetime-select")
       ? { ...column, granularity: "datetime" } : column;
   });
-  const records = !recommendation.metricField && feature.properties?.__source_locations
+  const records = (!recommendation.metricField || usesCategoricalPolygonColor()) && feature.properties?.__source_locations
     ? popupRegionRecords(applyPipelineFilters(state.aiDataset.records, state.aiDataset.filters || {}), feature,
       recommendation.geometry.field, { chartType: "choropleth", columns, bindings: activePolygonSuggestion()?.bindings }) : [];
   return createAiPopupContent(document, feature, displayedColumns,
@@ -1569,7 +1602,8 @@ function mapMetricColumns(dataset, suggestion) {
     !column.name.startsWith("__") && !["point_lat", "point_lng", "h3"].includes(column.geoLevel)
     && (!isCoordinateLine(suggestion) || ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name)));
   return suggestion.chartType === "map_line" ? roadValueColumns(columns, dataset.records, suggestion.bindings.region)
-    : columns.filter(column => column.role === "measure");
+    : columns.filter(column => column.role === "measure" || suggestion.chartType === "choropleth" && column.role === "category"
+      && (column.legend?.type === "categorical" || column.name === suggestion.bindings.value));
 }
 
 function mapMetricButtons(dataset, suggestion) {
@@ -2694,13 +2728,15 @@ async function filteredAiBoundary({ fit = false } = {}) {
   const searchBoundary = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, {
     filters, columns: state.aiDataset.analysis.columns, includeMissingMetric: true
   });
-  const data = recommendation.metricField
+  const categorical = usesCategoricalPolygonColor();
+  const joined = categorical ? collapseCountryFeatures(searchBoundary, recommendation.geometry.field, { categoryField: recommendation.metricField }) : searchBoundary;
+  const data = categorical ? { ...joined, features: joined.features.filter(feature => featureCategoryValues(feature.properties, recommendation.metricField).length) } : recommendation.metricField
     ? { ...searchBoundary, features: searchBoundary.features.filter(feature => Number.isFinite(feature.properties.__metric)) }
     : collapseCountryFeatures(searchBoundary, recommendation.geometry.field);
-  state.aiDataset.searchBoundary = recommendation.metricField ? searchBoundary : data;
+  state.aiDataset.searchBoundary = categorical ? joined : recommendation.metricField ? searchBoundary : data;
   state.boundary = data; state.sourceBoundary = data;
   state.baselineCount = null;
-  const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)].filter(Boolean);
+  const numericFields = [recommendation.metricField, ...recommendation.numericFields].filter((field, index, fields) => recommendation.numericFields.includes(field) && fields.indexOf(field) === index);
   state.dataProfile = analyzeSpatialData(data, { numericFields, hasArea: true });
   map.getSource("polygon-data")?.setData(data);
   map.getSource("vietnam-boundary")?.setData(data);
@@ -2783,7 +2819,7 @@ async function activateAiChoropleth(suggestion) {
     return false;
   }
   const data = joinRecordsToMapTilerBoundaries(records, boundaries, recommendation, { filters: initialFilters, columns: dataset.analysis.columns });
-  const numericFields = [recommendation.metricField, ...recommendation.numericFields.filter(field => field !== recommendation.metricField)].filter(Boolean);
+  const numericFields = [recommendation.metricField, ...recommendation.numericFields].filter((field, index, fields) => recommendation.numericFields.includes(field) && fields.indexOf(field) === index);
   // A period with no metric values still supports switching to another period or metric.
   const profile = analyzeSpatialData(data, { numericFields, hasArea: true });
   await replaceBoundary(data, name, profile, { preservePolygons: true, preserveAi: true });
@@ -2994,9 +3030,12 @@ function refreshNativeMap({ fit = false } = {}) {
   const dataset = state.aiDataset;
   dataset.filters = selectedAiFilters();
   const data = nativeMapView(dataset, dataset.filters);
+  if (usesCategoricalPolygonColor()) for (const feature of data.features) feature.properties = { ...feature.properties,
+    ...categoryColorProperties(dataset.recommendation.metricField, featureCategoryValues(feature.properties, dataset.recommendation.metricField)) };
   state.boundary = data;
   state.sourceBoundary = { type: "FeatureCollection", features: dataset.nativeGeometry.features };
-  state.dataProfile = analyzeSpatialData(data, { numericFields: [dataset.recommendation.metricField, ...dataset.recommendation.numericFields].filter(Boolean) });
+  state.dataProfile = analyzeSpatialData(data, { numericFields: [dataset.recommendation.metricField, ...dataset.recommendation.numericFields]
+    .filter((field, index, fields) => dataset.recommendation.numericFields.includes(field) && fields.indexOf(field) === index) });
   if (state.mapType === "line") {
     state.lineData = data; dataset.roadStyle = aiLineStyle(data, activeRoadSuggestion());
     map.getSource("line-data")?.setData(data);

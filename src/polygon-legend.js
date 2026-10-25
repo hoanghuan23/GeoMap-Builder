@@ -1,5 +1,6 @@
 import { normalizePolygonLegendRecommendation, polygonLegendTarget } from "./polygon-legend-contract.js";
 import { resolveAggregation } from "./ai-chart-pipeline.js";
+import { categoryColorProperties, featureCategoryValues } from "./categorical-color.js";
 
 export const POLYGON_NO_DATA_COLOR = "rgba(0, 0, 0, 0)";
 const FALLBACK_COLORS = ["#e2e8f0", "#94a3b8", "#475569"];
@@ -33,6 +34,7 @@ export function samplePolygonLegendColor(stops, value) {
 }
 
 export function polygonLegendLabels(scale, width = 280) {
+  if (scale.type === "categorical") return [];
   if (!scale.hasData || !scale.stops.length) return [];
   const position = value => scale.min === scale.max ? 50 : (value - scale.min) / (scale.max - scale.min) * 100;
   const format = value => new Intl.NumberFormat("vi-VN", { maximumSignificantDigits: 5 }).format(value);
@@ -78,6 +80,30 @@ export function resolvePolygonLegendConfig({ suggestion, columnMetadata, aggrega
       onFallback: (reason, code) => failures.push({ code, reason })
     });
     if (recommendation) break;
+  }
+  if (column?.role === "category") {
+    const counts = new Map(); const singleCounts = new Map(); const combinations = new Map();
+    for (const feature of featuresOf(aggregatedFeatures)) {
+      const values = featureCategoryValues(feature.properties, field);
+      for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+      if (values.length === 1) singleCounts.set(values[0], (singleCounts.get(values[0]) || 0) + 1);
+      if (values.length > 1) {
+        const key = categoryColorProperties(field, values).__category_color_key;
+        combinations.set(key, (combinations.get(key) || 0) + 1);
+      }
+    }
+    const entries = (recommendation?.stops || []).map(stop => ({ ...stop, count: singleCounts.get(stop.value) || 0 }));
+    const known = new Set(entries.map(entry => entry.value));
+    const unmappedValues = [...counts.keys()].filter(value => !known.has(value));
+    const mixed = [...combinations].map(([key, count]) => ({ key, values: JSON.parse(key), count,
+      color: recommendation?.combinations.find(combination => JSON.stringify(combination.values) === key)?.color || null }));
+    const colors = [...entries.map(entry => entry.color), ...mixed.map(entry => entry.color).filter(Boolean)];
+    return { field, aggregation: null, type: "categorical", mode: "semantic", source: recommendation ? "ai" : "technical-fallback",
+      status: !counts.size ? "no-data" : unmappedValues.length || mixed.some(entry => !entry.color) ? "incomplete" : "ready", title: recommendation?.title || column.labelVi || field,
+      unit: null, reason: recommendation?.reason || "Chưa có bảng màu phân loại do AI đề xuất.",
+      entries, mixed, unmappedValues, stops: entries.map(entry => [entry.value, entry.color]), colors: entries.map(entry => entry.color),
+      gradient: colors.length < 2 ? colors[0] || "" : `linear-gradient(90deg, ${colors.join(", ")})`,
+      hasData: counts.size > 0, noDataColor: POLYGON_NO_DATA_COLOR };
   }
   const scale = {
     field, aggregation: effectiveAggregation ?? null, type: recommendation?.type || "continuous", mode: recommendation?.mode || "auto",

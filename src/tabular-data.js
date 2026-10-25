@@ -1,4 +1,5 @@
 import { inferTimeGranularity, normalizeTimeValue, timeValueInfo } from "./time-values.js";
+import { countryLookupName, resolveBoundaryCountry } from "./country-boundary-sources.js";
 
 function isDate(value) {
   return Object.prototype.toString.call(value) === "[object Date]" && !Number.isNaN(value.getTime());
@@ -99,6 +100,47 @@ function updateSample(state, value, maxSamples) {
   if (pick < maxSamples) state.samples[pick] = value;
 }
 
+// Expose complete category sets and observed combinations in the same analysis request.
+// These are candidates; the AI still chooses the entity, color field and geographic grain.
+function categoryGroupSummary(records, columns) {
+  const categories = columns.filter(column => column.categoryValues?.length > 1 && column.categoryValues.every(value => value.length <= 500));
+  if (!categories.length) return [];
+  const entities = columns.filter(column => column.inferredType === "text" && !column.uniqueCountCapped && column.uniqueCount > 0);
+  const identities = new Map(); const result = [];
+  for (const entity of entities) {
+    const keys = records.map(record => {
+      const raw = record?.[entity.name];
+      if (raw == null || typeof raw === "object" || !String(raw).trim()) return null;
+      const label = String(raw).trim();
+      if (!identities.has(label)) {
+        const name = countryLookupName(label);
+        identities.set(label, { key: resolveBoundaryCountry(name) || name, label: name });
+      }
+      return identities.get(label);
+    });
+    for (const category of categories) {
+      if (category.name === entity.name) continue;
+      const groups = new Map();
+      for (let index = 0; index < records.length; index++) {
+        const identity = keys[index]; const value = records[index]?.[category.name];
+        if (!identity || value == null || !String(value).trim()) continue;
+        if (!groups.has(identity.key)) groups.set(identity.key, { label: identity.label, values: new Set() });
+        groups.get(identity.key).values.add(String(value));
+      }
+      const combinations = new Map();
+      for (const group of groups.values()) {
+        if (group.values.size < 2) continue;
+        const values = [...group.values].sort(); const key = JSON.stringify(values);
+        if (!combinations.has(key)) combinations.set(key, { values, entities: [] });
+        const examples = combinations.get(key).entities;
+        if (examples.length < 3) examples.push(group.label);
+      }
+      if (combinations.size) result.push({ entityField: entity.name, categoryField: category.name, combinations: [...combinations.values()] });
+    }
+  }
+  return result;
+}
+
 export function profileTabularData(records, { includeSamples = true, maxSamples = 5, maxHead = 8, uniqueCap = 10_000 } = {}) {
   if (!Array.isArray(records) || !records.length) throw new Error("File không có bản ghi dữ liệu.");
   const states = new Map();
@@ -185,11 +227,18 @@ export function profileTabularData(records, { includeSamples = true, maxSamples 
       temporalGranularity: hint ? state.temporalGranularity || inferTimeGranularity(state.name) : null,
       commaDecimal
     };
-    if (includeSamples) column.samples = state.samples.map(jsonValue);
+    if (includeSamples) {
+      column.samples = state.samples.map(jsonValue);
+      if (inferredType === "text" && !state.uniqueCountCapped && state.uniques.size <= 12) column.categoryValues = [...state.uniques].map(value => value.slice(value.indexOf(":") + 1));
+    }
     return column;
   });
   const profile = { rowCount: records.length, columns, samplesIncluded: Boolean(includeSamples) };
-  if (includeSamples) profile.head = head;
+  if (includeSamples) {
+    profile.head = head;
+    const groups = categoryGroupSummary(records, columns);
+    if (groups.length) profile.categoryGroups = groups;
+  }
   return profile;
 }
 

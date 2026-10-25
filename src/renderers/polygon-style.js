@@ -1,3 +1,5 @@
+import { categoryColorProperties } from "../categorical-color.js";
+
 export const POLYGON_COLOR_RAMPS = Object.freeze({
   diverging: Object.freeze(["#313695", "#74add1", "#ffffbf", "#f46d43", "#a50026"]),
   viridis: Object.freeze(["#440154", "#31688e", "#35b779", "#fde725"]),
@@ -36,6 +38,11 @@ export function polygonColorField(data, profile = {}) {
 export function polygonFillExpression(data, profile, rampName, fallbackColor, resolvedScale = null) {
   if (resolvedScale) {
     const noDataColor = resolvedScale.noDataColor || fallbackColor;
+    if (resolvedScale.type === "categorical") {
+      const entries = [...resolvedScale.entries.map(entry => ({ key: categoryColorProperties(resolvedScale.field, [entry.value]).__category_color_key, color: entry.color })),
+        ...resolvedScale.mixed.filter(entry => entry.color)];
+      return entries.length ? ["match", ["get", "__category_color_key"], ...entries.flatMap(entry => [entry.key, entry.color]), noDataColor] : noDataColor;
+    }
     if (!resolvedScale.hasData || !resolvedScale.stops.length) return noDataColor;
     const value = ["get", resolvedScale.field];
     // GeoJSON from this pipeline stores numbers. Missing values must not become zero.
@@ -59,6 +66,7 @@ export function polygonFillExpression(data, profile, rampName, fallbackColor, re
 }
 
 export function polygonLegendScale(data, profile, rampName, resolvedScale = null) {
+  if (resolvedScale?.type === "categorical") return resolvedScale.hasData ? resolvedScale : null;
   if (resolvedScale) return resolvedScale.hasData && resolvedScale.stops.length ? resolvedScale : null;
   const colors = POLYGON_COLOR_RAMPS[rampName];
   const colorField = colors && polygonColorField(data, profile);

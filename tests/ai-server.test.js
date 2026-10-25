@@ -3,12 +3,42 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { aiMapRecommendationPlugin } from "../server/ai-map-recommendation.js";
 import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
+import { profileTabularData } from "../src/tabular-data.js";
+import { accessField, accessLegend, categoricalCountryFixture } from "./fixtures/categorical-countries-fixture.js";
 
 function middlewareFor(env) {
   let middleware;
   aiMapRecommendationPlugin(env).configureServer({ middlewares: { use(value) { middleware = value; } } });
   return middleware;
 }
+
+test("one analysis request carries all category values and observed combinations, and returns AI colors unchanged", async () => {
+  const fixture = categoricalCountryFixture();
+  const profile = profileTabularData(fixture.records);
+  const originalFetch = globalThis.fetch; let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++;
+    const payload = JSON.parse(options.body); const input = JSON.parse(payload.input);
+    assert.match(payload.instructions, /Cấp độ tiếp cận/);
+    assert.match(payload.instructions, /role category/);
+    assert.match(payload.instructions, /không phải measure/);
+    assert.match(payload.instructions, /combinations/);
+    assert.match(payload.instructions, /màu HEX riêng do AI đề xuất/);
+    assert.match(payload.instructions, /Bao gồm … và …/);
+    assert.match(payload.instructions, /Không dùng sọc/);
+    assert.ok(input.profile.categoryGroups.some(group => group.entityField === "Điểm đến" && group.categoryField === accessField));
+    assert.equal(payload.text.format.schema.properties.columns.items.properties.legend.anyOf.filter(schema => schema.type === "object").length, 3);
+    return { ok: true, json: async () => ({ output_text: JSON.stringify({ columns: fixture.columns, suggestions: [fixture.suggestion], search_bar: true, search_fields: ["Điểm đến"] }) }) };
+  };
+  try {
+    const result = await call(middlewareFor({ OPENAI_API_KEY: "test" }), { profile });
+    assert.equal(result.status, 200);
+    assert.equal(calls, 1);
+    assert.deepEqual(result.body.validationErrors, []);
+    assert.equal(result.body.suggestions[0].bindings.value, accessField);
+    assert.deepEqual(result.body.columns.find(column => column.name === accessField).legend, accessLegend);
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 async function call(middleware, body, path = "/api/ai/analyze-map-data") {
   const request = Readable.from([Buffer.from(JSON.stringify(body))]);

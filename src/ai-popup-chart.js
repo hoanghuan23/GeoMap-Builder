@@ -71,7 +71,8 @@ export function popupFeaturesMatch(feature, other, regionField, { chartType = "c
   if (locations.length || otherLocations.length) {
     const left = locations.length ? locations : [popupRegionValue(feature, regionField)];
     const right = otherLocations.length ? otherLocations : [popupRegionValue(other, regionField)];
-    return left.some(name => right.some(otherName => regionKey(name) === regionKey(otherName)));
+    return left.some(name => right.some(otherName => regionKey(name) === regionKey(otherName)))
+      && administrativeContextFields(columns, regionField).every(field => regionKey(feature?.properties?.[field]) === regionKey(other?.properties?.[field]));
   }
   if (regionKey(popupRegionValue(feature, regionField)) !== regionKey(popupRegionValue(other, regionField))) return false;
   const fields = administrativeContextFields(columns, regionField);

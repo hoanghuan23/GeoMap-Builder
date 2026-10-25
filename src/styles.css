@@ -2932,6 +2932,12 @@ th:last-child {
 .weather-legend-scale.viridis { background: linear-gradient(90deg, #440154, #31688e, #35b779, #90d743, #fde725); }
 .weather-legend-scale.blue { background: linear-gradient(90deg, #eff6ff, #bfdbfe, #60a5fa, #2563eb, #1e3a8a); }
 .weather-legend-labels { display: flex; justify-content: space-between; margin-top: 5px; color: #cbd5e1; font-size: 10px; }
+.weather-legend-labels.categorical { display: grid; gap: 10px; margin-top: 14px; font-size: 12px; }
+.categorical-legend-row { display: flex; align-items: center; gap: 9px; }
+.categorical-legend-row > i { flex: 0 0 18px; width: 18px; height: 18px; border: 1px solid #ffffff38; border-radius: 4px; }
+.categorical-legend-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.categorical-legend-row > b { flex: 0 0 auto; color: #a5b4c8; font-size: 11px; font-weight: 500; }
+.categorical-legend-mixed { padding-top: 10px; border-top: 1px solid #ffffff20; }
 .weather-legend-labels.positioned { display: block; position: relative; height: 29px; font-variant-numeric: tabular-nums; }
 .weather-legend-labels.positioned span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .weather-legend-labels.positioned span:first-child:not(:only-child) { transform: none; }
