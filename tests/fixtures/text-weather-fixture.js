@@ -35,6 +35,34 @@ export function textWeatherOutput() {
   return { fields: [...weatherFields], rows: weatherRows.map(row => [...row]), analysis: textWeatherAnalysis() };
 }
 
+export const comparativeWeatherText = `Báo cáo tổng hợp tình hình thời tiết tại một số tỉnh, thành phố Việt Nam tháng 9 năm 2026.
+Tại khu vực miền Bắc, Hà Nội ghi nhận nhiệt độ trung bình 29°C, độ ẩm trung bình 82% và lượng mưa trung bình 180mm. Hải Phòng có nhiệt độ trung bình thấp hơn Hà Nội 1°C, độ ẩm trung bình đạt 85%, trong khi lượng mưa trung bình cao hơn Hà Nội 15%. Quảng Ninh ghi nhận nhiệt độ trung bình 27,5°C, độ ẩm trung bình 87% và lượng mưa trung bình 230mm.
+Ở khu vực trung du và miền núi phía Bắc, Lào Cai có nhiệt độ trung bình 25°C, thấp hơn Hà Nội 4°C. Độ ẩm trung bình tại đây đạt 88%, trong khi lượng mưa trung bình ghi nhận 260mm. Tuyên Quang có nhiệt độ trung bình cao hơn Lào Cai 2°C, độ ẩm trung bình thấp hơn Lào Cai 3 điểm phần trăm và lượng mưa trung bình thấp hơn Lào Cai 40mm.
+Tại miền Trung, Đà Nẵng ghi nhận nhiệt độ trung bình 30°C, độ ẩm trung bình 78% và lượng mưa trung bình 120mm. Huế có nhiệt độ trung bình thấp hơn Đà Nẵng 2°C, độ ẩm trung bình cao hơn Đà Nẵng 8 điểm phần trăm, trong khi lượng mưa trung bình đạt 235mm. Quảng Ngãi ghi nhận nhiệt độ trung bình 29°C, độ ẩm trung bình 80% và lượng mưa trung bình bằng 75% so với Đà Nẵng. Gia Lai có nhiệt độ trung bình 26°C, độ ẩm trung bình 83% và lượng mưa trung bình 170mm.`;
+
+export const comparativeWeatherFields = ["Tỉnh thành", "Nhiệt độ (°C)", "Độ ẩm (%)", "Lượng mưa (mm)", "Tháng"];
+export const comparativeWeatherRows = [
+  ["Hà Nội", 29, 82, 180, "2026-09"],
+  ["Hải Phòng", 28, 85, 207, "2026-09"],
+  ["Quảng Ninh", 27.5, 87, 230, "2026-09"],
+  ["Lào Cai", 25, 88, 260, "2026-09"],
+  ["Tuyên Quang", 27, 85, 220, "2026-09"],
+  ["Đà Nẵng", 30, 78, 120, "2026-09"],
+  ["Huế", 28, 86, 235, "2026-09"],
+  ["Quảng Ngãi", 29, 80, 90, "2026-09"],
+  ["Gia Lai", 26, 83, 170, "2026-09"]
+];
+export const comparativeWeatherRecords = comparativeWeatherRows.map(row => Object.fromEntries(comparativeWeatherFields.map((field, i) => [field, row[i]])));
+
+export function comparativeWeatherOutput() {
+  const analysis = textWeatherAnalysis();
+  analysis.columns.splice(2, 0, { ...analysis.columns[1], name: "Độ ẩm (%)", unit: "%", semanticType: "relative_humidity",
+    legend: legendFixture({ unit: "%", mode: "auto", title: "Độ ẩm", domain: [0, 1],
+      stops: [{ value: 0, color: "#cffafe" }, { value: 1, color: "#0e7490" }] }) });
+  analysis.suggestions[0].metricButtons.splice(1, 0, { field: "Độ ẩm (%)", label: "Độ ẩm", icon: "💧", color: "#0891b2" });
+  return { fields: [...comparativeWeatherFields], rows: comparativeWeatherRows.map(row => [...row]), analysis };
+}
+
 // Build test documents in memory so no sample data files are needed on disk.
 export function weatherDocumentFile(extension, text = weatherText) {
   let bytes = new TextEncoder().encode(text);

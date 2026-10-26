@@ -396,11 +396,11 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
     const coordinateRate = records.length ? coordinateRows.length / records.length : 0;
     const cells = new Set(coordinateRows.flatMap(record => {
       const latitude = Number(record?.[lat]); const longitude = Number(record?.[lng]);
-      return isFiniteValue(record?.[value]) ? [latLngToCell(latitude, longitude, h3Resolution)] : [];
+      return [latLngToCell(latitude, longitude, h3Resolution)];
     }));
     feasibilityScore = Math.min(feasibilityScore, coordinateRate);
     if (coordinateRate < .7) { available = false; unavailableReason = "Ít hơn 70% dòng có tọa độ hợp lệ."; }
-    else if (cells.size < 2) { available = false; unavailableReason = "Cần ít nhất hai ô H3 có giá trị hợp lệ."; }
+    else if (cells.size < 2) { available = false; unavailableReason = "Cần ít nhất hai ô H3 có tọa độ hợp lệ."; }
   }
   const effectiveConfidence = Math.min(1, Math.max(0, suggestion.confidence));
   return { ...suggestion, feasibilityScore, effectiveConfidence, available, unavailableReason };

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { recordsToAggregatedH3, recordsToPointGeoJSON } from "../src/h3-utils.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
+import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
 
 test("Point GeoJSON dùng binding tọa độ và giữ đủ thuộc tính cho popup", () => {
   const data = recordsToPointGeoJSON([{
@@ -53,4 +55,30 @@ test("H3 giữ thuộc tính schema và đánh dấu giá trị phân loại kh�
     { lat: 21.02851, lng: 105.85421, value: 4, orders: 5, channel: "Cửa hàng" }
   ], { latField: "lat", lngField: "lng", valueField: "value", aggregation: "sum", resolution: 7, columns });
   assert.equal(mixed.data.features[0].properties.channel, "Nhiều giá trị (2)");
+});
+
+test("H3 retains missing-value cells and other measures while aggregating only valid selected values", () => {
+  const columns = [{ name: "name", role: "text" }, { name: "lat", role: "geo" }, { name: "lng", role: "geo" },
+    { name: "metric", role: "measure", aggDefault: "mean" }, { name: "other", role: "measure", aggDefault: "sum" }];
+  const records = [
+    { name: "Điểm A", lat: 21, lng: 105, metric: null, other: 7 },
+    { name: "Điểm A", lat: 21, lng: 105, metric: " ", other: 5 },
+    { name: "Điểm B", lat: 20, lng: 106, metric: 0, other: 8 },
+    { name: "Điểm C", lat: 19, lng: 107, metric: 14, other: 9 }
+  ];
+  for (const aggregation of ["sum", "mean", "min", "max"]) {
+    const result = recordsToAggregatedH3(records, { latField: "lat", lngField: "lng", valueField: "metric", aggregation, resolution: 7, columns });
+    assert.equal(result.stats.cellCount, 3);
+    assert.deepEqual(result.data.features.map(feature => feature.properties.metric), [null, 0, 14]);
+    const index = buildDataSearchIndex({ data: result.data, columns, search_bar: true, search_fields: ["name"] });
+    const missing = searchDataIndex(index, "Điểm A")[0].feature;
+    assert.equal(missing.properties.__metric, null);
+    assert.equal(missing.properties.other, 12);
+    assert.equal(missing.properties.__record_count, 2);
+    assert.equal(index.uniqueCount, 3);
+  }
+  const empty = records.map(record => ({ ...record, metric: null }));
+  const [suggestion] = prepareSuggestions({ columns, suggestions: [{ id: "h3", chartType: "hex_h3", confidence: .9,
+    bindings: { lat: "lat", lng: "lng", value: "metric" } }] }, empty, { lat: 1, lng: 1, metric: 0 });
+  assert.equal(suggestion.available, true, "missing measures do not invalidate known locations");
 });

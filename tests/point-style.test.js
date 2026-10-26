@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildPointView, createPointModel, DEFAULT_POINT_STYLE, mergePointStyle, normalizePointSelection, pointPaint, POINT_COLOR, POINT_COLORS } from "../src/renderers/point-style.js";
 import { storeColumns, storeRecords, storeBindings } from "./fixtures/store-points-fixture.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
+import { MAP_NO_DATA_COLOR } from "../src/map-value.js";
 
 const columns = [
   { name: "code", role: "id" },
@@ -57,6 +59,7 @@ test("Point defaults use valid measures and top five categories without includin
   assert.equal(view.stats.totalCount, 8);
   assert.equal(view.stats.coordinateRate, 8 / 9);
   assert.deepEqual(model.measures.map(column => column.name), ["empty", "revenue", "rating"]);
+  assert.equal(buildPointView(model, { metricField: "empty" }).selection.metricField, "empty");
   assert.equal(model.timeColumn, null);
 });
 
@@ -169,7 +172,34 @@ test("Point without a measure uses a fixed color and default radius while group 
   assert.equal(view.data.features[0].properties.type, "A");
 });
 
-test("One date remains selectable; an all-null measure remains selected without fixed-color fallback", () => {
+test("Point missing measures stay uncolored and searchable in every group mode and across metric changes", () => {
+  const records = [0, null, undefined, "", " ", false, NaN, Infinity].map((value, index) =>
+    record("A", value, { code: String(index), name: `Điểm ${index}` }));
+  const model = createPointModel(records, [{ name: "empty", role: "measure" }, ...columns], bindings);
+  for (const mode of ["all", "pick"]) {
+    const view = buildPointView(model, { metricField: "revenue", groupField: "type", mode });
+    assert.equal(view.data.features.length, records.length);
+    assert.equal(view.metric.min, 0);
+    assert.equal(view.metric.max, 0);
+    const index = buildDataSearchIndex({ data: view.data, columns, chartType: "point", search_fields: ["name"], search_bar: true });
+    assert.equal(index.enabled, true);
+    assert.equal(index.uniqueCount, records.length);
+    for (const [position, feature] of view.data.features.entries()) {
+      const color = evaluate(view.paint["circle-color"], feature.properties);
+      if (position === 0) assert.notEqual(color, MAP_NO_DATA_COLOR);
+      else assert.equal(color, MAP_NO_DATA_COLOR);
+      assert.equal(searchDataIndex(index, feature.properties.name)[0].feature, feature);
+    }
+    const changed = buildPointView(model, { ...view.selection, metricField: "rating" });
+    assert.ok(changed.data.features.every(feature => evaluate(changed.paint["circle-color"], feature.properties) !== MAP_NO_DATA_COLOR));
+    const empty = buildPointView(model, { ...view.selection, metricField: "empty" });
+    assert.equal(empty.selection.metricField, "empty");
+    assert.ok(empty.data.features.every(feature => evaluate(empty.paint["circle-color"], feature.properties) === MAP_NO_DATA_COLOR));
+    assert.deepEqual(empty.data, view.data);
+  }
+});
+
+test("One date and an empty measure remain selectable while high-cardinality groups are omitted", () => {
   const records = Array.from({ length: 81 }, (_, index) => record(`G${index}`, null, { day: "2026-07-01" }));
   const model = createPointModel(records, columns.filter(column => !["rating", "name"].includes(column.name)).concat({ name: "day", role: "time" }), bindings);
   assert.equal(model.groups.length, 0);
@@ -180,7 +210,8 @@ test("One date remains selectable; an all-null measure remains selected without 
   assert.equal(view.selection.metricField, "revenue");
   assert.equal(view.selection.time, "2026-07-01");
   assert.equal(view.data.features.length, 81);
-  assert.equal(evaluate(view.paint["circle-color"], { revenue: null }), "rgba(0, 0, 0, 0)");
+  assert.equal(evaluate(view.paint["circle-color"], {}), MAP_NO_DATA_COLOR);
+  assert.equal(evaluate(view.paint["circle-radius"], {}, 10), 4);
 });
 
 test("Selection normalizes stale groups and caps to eight; category values remain ordinary data", () => {

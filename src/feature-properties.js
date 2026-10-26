@@ -1,3 +1,5 @@
+import { numericMapValue } from "./map-value.js";
+
 function isEmpty(value) {
   return value == null || typeof value === "string" && value.trim() === "";
 }
@@ -16,7 +18,7 @@ function distinctKey(value) {
 
 function aggregate(values, aggregation) {
   if (aggregation === "count") return values.length;
-  const numbers = values.map(Number).filter(Number.isFinite);
+  const numbers = values.map(numericMapValue).filter(value => value != null);
   if (!numbers.length) return null;
   if (aggregation === "sum") return numbers.reduce((sum, value) => sum + value, 0);
   if (aggregation === "min") return Math.min(...numbers);

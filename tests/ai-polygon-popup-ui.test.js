@@ -10,10 +10,12 @@ import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from
 import { createAiPopupContent } from "../src/ai-popup.js";
 import { createInfoImagePopup } from "../src/info-image-popup.js";
 import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
 import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
 import { analyzeSpatialData } from "../src/data-capabilities.js";
 import * as roadMap from "../src/road-map-data.js";
 import * as coordinates from "../src/coordinate-data.js";
+import * as h3Utils from "../src/h3-utils.js";
 import * as pointStyle from "../src/renderers/point-style.js";
 import * as polygonStyle from "../src/renderers/polygon-style.js";
 import * as weatherStyle from "../src/renderers/weather-style.js";
@@ -127,7 +129,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
     popupSuggestions: popupSuggestions.map(item => ({ ...item })) }));
   if (metricButtons !== null) dataset.suggestions.find(suggestion => suggestion.id === dataset.selectedSuggestionId).metricButtons = metricButtons;
   const context = vm.createContext({
-    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract, ...categoricalColor,
+    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...h3Utils, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract, ...categoricalColor,
     fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, createInfoImagePopup, collapseCountryFeatures, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
@@ -410,6 +412,62 @@ test("map metric controls collapse, refresh for new data and hide outside maps o
   assert.equal(list.children.length, 0);
 });
 
+for (const [geoLevel, locationField, metric, otherMetric, names] of [
+  ['country', 'Quốc gia', 'Tử vong', 'Ca ước tính', ['Lào', 'Việt Nam', 'Malaysia']],
+  ['admin1', 'Tỉnh', 'Lượng mưa', 'Nhiệt độ', ['Hà Nội', 'Hải Phòng', 'Cà Mau']],
+  ['admin2', 'district_key', 'metric.with.dots', 'another_metric', ['Khu A', 'Khu B', 'Khu C']]
+]) {
+  test(`missing selected metrics stay transparent and searchable across metric switches (${geoLevel})`, async () => {
+    const h = harness({ thematic: true });
+    const columns = [{ name: locationField, role: 'geo', geoLevel },
+      ...[otherMetric, metric].map(name => ({ name, role: 'measure', aggDefault: 'sum' }))];
+    const records = names.map((name, index) => ({ [locationField]: name, [metric]: [null, 0, 14][index], [otherMetric]: 100 + index }));
+    h.run(`
+      dataset.records = ${JSON.stringify(records)};
+      dataset.analysis.columns = ${JSON.stringify(columns)};
+      dataset.analysis.search_bar = true; dataset.analysis.search_fields = [${JSON.stringify(locationField)}];
+      dataset.filters = {};
+      dataset.suggestions = [{...dataset.suggestions[1],
+        bindings:{region:${JSON.stringify(locationField)},value:${JSON.stringify(otherMetric)}},
+        metricButtons:${JSON.stringify([otherMetric, metric].map(field => ({ field, label: field, icon: '●', color: '#123456' })))}
+      }];
+      dataset.boundaries = {type:'FeatureCollection', features:dataset.records.map((record,index)=>({
+        type:'Feature', properties:{__data_location:record[${JSON.stringify(locationField)}]},
+        geometry:{type:'Polygon',coordinates:[[[index,0],[index+1,0],[index+1,1],[index,1],[index,0]]]}
+      }))};
+      dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]);
+      populateAiFilters(dataset);
+    `);
+    await h.run("filteredAiBoundary()");
+    h.run("renderMapMetricControls()");
+    const buttons = h.get("map-metric-list").children;
+    await h.get("map-metric-list").events.click({ target: buttons.find(button => button.dataset.metricField === metric) });
+    assert.equal(h.run("activePolygonLegendScale().field"), metric);
+    assert.equal(h.run("activePolygonLegendScale().dataMin"), 0);
+    assert.equal(h.run("activePolygonLegendScale().dataMax"), 14);
+    const paint = h.layers.get("polygon-fill").paint["fill-color"];
+    assert.deepEqual(JSON.parse(JSON.stringify(paint[1])), ["==", ["typeof", ["get", metric]], "number"]);
+    assert.equal(paint[3], "rgba(0, 0, 0, 0)");
+    const index = buildDataSearchIndex(h.run("currentDataSearch()"));
+    assert.equal(index.enabled, true);
+    assert.equal(index.uniqueCount, 3);
+    const feature = searchDataIndex(index, names[0])[0]?.feature;
+    assert.equal(feature?.properties[locationField], names[0]);
+    assert.equal(feature.properties[metric] ?? null, null);
+    assert.equal(feature.properties.__metric, null);
+    assert.equal(feature.properties[otherMetric], 100);
+    assert.equal(searchDataIndex(index, names[1])[0].feature.properties[metric], 0);
+    assert.equal(h.sources.get("polygon-data").data.features.length, 3);
+    await h.run(`changeAiMapMetric(${JSON.stringify(otherMetric)})`);
+    assert.equal(h.run("activePolygonLegendScale().field"), otherMetric);
+    assert.equal(searchDataIndex(buildDataSearchIndex(h.run("currentDataSearch()")), names[0])[0].feature.properties[otherMetric], 100);
+    h.run(`dataset.records.forEach(record=>record[${JSON.stringify(metric)}]=null)`);
+    await h.run(`changeAiMapMetric(${JSON.stringify(metric)})`);
+    assert.equal(h.layers.get("polygon-fill").paint["fill-color"], "rgba(0, 0, 0, 0)");
+    assert.equal(buildDataSearchIndex(h.run("currentDataSearch()")).uniqueCount, 3);
+  });
+}
+
 test("Point metric buttons sync size and sidebar without changing groups, map time or popup metrics", async () => {
   const h = harness({ point: true, metricButtons: [
     { field: "doanh_thu_vnd", label: "Doanh thu", icon: "💰", color: "#16a34a" },
@@ -427,6 +485,53 @@ test("Point metric buttons sync size and sidebar without changing groups, map ti
   assert.equal(buttons[1].attributes["aria-pressed"], "true");
   const sidebar = h.all(".ai-point-metric")[0]; sidebar.value = "doanh_thu_vnd"; await h.change(sidebar);
   assert.equal(buttons[0].attributes["aria-pressed"], "true");
+});
+
+test("H3 missing-value cells and their searchable source points follow the active filters", async () => {
+  const h = harness({ thematic: true });
+  h.run(`
+    dataset.analysis.columns = [
+      {name:'name',role:'text'}, {name:'period',role:'category'},
+      {name:'lat',role:'geo',geoLevel:'point_lat'}, {name:'lng',role:'geo',geoLevel:'point_lng'},
+      {name:'metric',role:'measure',aggDefault:'sum'}
+    ];
+    dataset.analysis.search_bar = true; dataset.analysis.search_fields = ['name'];
+    dataset.records = ['A','B'].flatMap(period=>[0,1,2,3,4].map(index=>({
+      name:period+index,period,lat:20+index,lng:105,metric:index===0?null:index
+    })));
+    dataset.suggestions = [{id:'h3',chartType:'hex_h3',available:true,
+      bindings:{lat:'lat',lng:'lng',value:'metric'},filters:[{column:'period',control:'select'}]}];
+    dataset.selectedSuggestionId = 'h3';
+    dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]);
+    dataset.recommendation.filters.push({field:'period',control:'select'});
+    populateAiFilters(dataset);
+  `);
+  for (const period of ['A', 'B']) {
+    const control = h.all('.ai-generated-filter').find(control => control.dataset.field === 'period');
+    control.value = period;
+    await h.run("refreshAiH3()");
+    assert.equal(h.run("state.h3Data.features.length"), 5);
+    const index = buildDataSearchIndex(h.run("currentDataSearch()"));
+    assert.equal(index.enabled, true);
+    assert.equal(index.uniqueCount, 5);
+    assert.equal(searchDataIndex(index, `${period}0`)[0].feature.properties.metric, null);
+    assert.equal(searchDataIndex(index, `${period === 'A' ? 'B' : 'A'}0`).length, 0);
+    assert.equal(h.layers.get('h3-fill').paint['fill-color'][3], 'rgba(0, 0, 0, 0)');
+  }
+});
+
+test("Heatmap excludes missing selected measures from its weight without dropping searchable points", () => {
+  const h = harness({ point: true });
+  h.layers.set('point-heatmap', {paint:{}});
+  h.run(`state.pointData = {type:'FeatureCollection',features:[null,0,10].map((metric,index)=>({
+    type:'Feature',properties:{metric,name:'Điểm '+index},geometry:{type:'Point',coordinates:[105+index,21]}
+  }))}; state.dataProfile = {numericFields:['metric']}; applyHeatmapWeight();`);
+  const weight = h.layers.get('point-heatmap').paint['heatmap-weight'];
+  assert.equal(weight[0], 'case');
+  assert.equal(weight[3], 0);
+  assert.equal(weight[2][3], 0);
+  assert.equal(weight[2].at(-2), 10);
+  assert.equal(h.run('state.pointData.features.length'), 3);
 });
 
 test("Line metric buttons retain filters and the same eligible fields as the sidebar", async () => {
@@ -1213,7 +1318,7 @@ test("coordinate Line keeps coordinate/order fields out of metric controls and a
   const before = h.rendered.length;
   const control = h.get("road-style-colors").querySelector(".road-style-color");
   control.value = "#123456"; h.get("road-style-controls").events.change({ target: control });
-  assert.equal(JSON.stringify(h.run("dataset.roadStyle.color")), JSON.stringify(["case", ["==", ["typeof", ["get", "speed"]], "number"], "#123456", "rgba(0, 0, 0, 0)"]));
+  assert.equal(h.run("dataset.roadStyle.color[2]"), "#123456");
   assert.equal(h.rendered.length, before, "changing map color does not rebuild popup charts");
 });
 
