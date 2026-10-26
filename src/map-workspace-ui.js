@@ -7,8 +7,7 @@ import { describeWorkspaceLayer, geometryExtent, layerData, tableRecords, csvFor
 import { createMapSearch } from './map-search.js';
 import { CONFIG } from './config.js';
 import { expandJsonUpload } from './json-datasets.js';
-import { joinedPopupSources } from './attribute-joins.js';
-import { countryRegionMatches, filterCountryRegionData } from './country-regions.js';
+import { keepSelectOpenAfterMouseClick } from './select-control.js';
 
 const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
@@ -45,7 +44,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   const showTable = textNode('button', 'Xem dữ liệu lớp đang chọn', 'secondary-button'); showTable.type = 'button'; showTable.disabled = true; showTable.hidden = true;
   sidebar.children[1].append(groupField, compositionNote, retry, showTable);
   $('sheet-selector-field').hidden = true;
-  document.querySelector('.drop-zone small').textContent = 'CSV, Excel, JSON, GeoJSON · AI đánh giá hiển thị nhiều lớp';
+  document.querySelector('.drop-zone small').textContent = 'CSV, Excel, JSON, GeoJSON, TXT, DOCX · AI đánh giá hiển thị nhiều lớp';
   const map = new globalThis.maplibregl.Map({ container: 'map', style: styles.liberty, center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
   let readyResolve; const ready = new Promise(resolve => { readyResolve = resolve; });
   let uploadSequence = 0; let scheduled = false; let tableShown = false; let queue = Promise.resolve();
@@ -330,17 +329,22 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         row.append(view);
       }
       if (upload.sheets) {
-        const select = document.createElement('select'); select.setAttribute('aria-label', `Chọn sheet cho ${upload.file.name}`);
+        const label = textNode('label', 'Chọn bảng (sheet) để phân tích'); label.className = 'upload-sheet-label'; label.htmlFor = `upload-sheet-${id}`;
+        const select = keepSelectOpenAfterMouseClick(document.createElement('select')); select.id = label.htmlFor;
+        select.setAttribute('aria-label', `Chọn bảng (sheet) cho ${upload.file.name}`);
+        select.append(Object.assign(document.createElement('option'), { textContent: 'Chọn bảng dữ liệu…', value: '' }));
         select.append(...upload.sheets.map(sheet => Object.assign(document.createElement('option'), { textContent: sheet, value: sheet, title: sheet })));
-        select.value = upload.sheets.includes(upload.selectedSheet) ? upload.selectedSheet : upload.sheets[0];
-        select.title = select.value;
-        select.addEventListener('change', () => { upload.selectedSheet = select.value; select.title = select.value; });
-        const apply = textNode('button', 'Phân tích sheet', 'secondary-button'); apply.type = 'button';
-        apply.addEventListener('click', () => { apply.disabled = true; enqueue(() => processUploads([{ id, upload, sheetName: select.value }])); });
-        const field = textNode('div', '', 'upload-sheet-choice');
-        const label = textNode('label', '', 'upload-sheet-label');
-        label.append(textNode('span', `Chọn sheet dữ liệu (${upload.sheets.length})`), select);
-        field.append(label, apply); row.append(field);
+        select.value = upload.selectedSheet || ''; select.title = select.value; select.disabled = upload.processing === true;
+        const apply = textNode('button', 'Phân tích bảng đã chọn', 'secondary-button'); apply.type = 'button';
+        apply.disabled = upload.processing === true || !select.value;
+        select.addEventListener('change', () => { upload.selectedSheet = select.value; select.title = select.value; apply.disabled = !select.value; });
+        apply.addEventListener('click', () => {
+          const sheetName = upload.selectedSheet;
+          if (upload.processing || !upload.sheets.includes(sheetName)) return;
+          upload.processing = true; renderUploads();
+          enqueue(() => processUploads([{ id, upload, sheetName }]));
+        });
+        const field = textNode('div', '', 'upload-sheet-choice'); field.append(label, select, apply); row.append(field);
       }
       list.append(row);
     }
@@ -360,26 +364,41 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   }
 
   async function processUploads(entries) {
-    await ready;
     // A bounded worker pool avoids opening every workbook and AI request at once.
     const results = new Array(entries.length); let next = 0;
     await Promise.all(Array.from({ length: Math.min(3, entries.length) }, async () => {
       while (next < entries.length) {
         const index = next++; const entry = entries[index];
         if (!uploads.has(entry.id)) continue;
-        entry.upload.status = 'Đang phân tích'; entry.upload.message = ''; entry.upload.sheets = null; renderUploads();
+        entry.upload.processing = true;
+        entry.upload.status = entry.sheetName ? `Đang phân tích bảng ${entry.sheetName}` : 'Đang đọc dữ liệu';
+        entry.upload.message = ''; renderUploads();
         try { results[index] = { ...entry, result: await readUpload(entry.upload, entry.sheetName) }; }
         catch (error) { results[index] = { ...entry, error }; }
       }
     }));
-    const newIds = [];
+    const readyEntries = [];
     for (const entry of results.filter(Boolean)) {
       const { id, upload, result, error } = entry;
       if (!uploads.has(id)) continue;
       if (error) {
+        upload.processing = false;
         upload.status = 'Lỗi'; upload.message = error.message || 'Không thể đọc file'; keys.delete(upload.key); renderUploads(); continue;
       }
-      if (result.kind === 'sheet-selection') { upload.status = 'Chờ chọn sheet'; upload.sheets = result.sheetNames; renderUploads(); continue; }
+      if (result.kind === 'sheet-selection') {
+        upload.processing = false;
+        upload.status = `${result.sheetNames.length} bảng · Chờ chọn bảng cần phân tích`;
+        upload.sheets = result.sheetNames;
+        if (!upload.sheets.includes(upload.selectedSheet)) upload.selectedSheet = '';
+        renderUploads(); continue;
+      }
+      readyEntries.push(entry);
+    }
+    // Choosing a workbook sheet does not depend on the basemap being available.
+    if (readyEntries.length) await ready;
+    const newIds = [];
+    for (const { id, upload, result } of readyEntries) {
+      if (!uploads.has(id)) continue;
       let item;
       try {
         const runtimeId = `layer-${workspace.sequence + 1}`;
@@ -396,11 +415,13 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         runtimes.set(layer.id, item);
         sidebars.append(item.panel); metrics.append(item.metric); legendOriginal.append(item.legends); tables.append(item.table);
         document.querySelector('.map-panel').append(item.chart);
+        upload.processing = false; upload.sheets = null;
         upload.layerId = layer.id; upload.status = layer.sourceKind === 'attribute' ? 'Chờ liên kết' : state.mapType ? 'Sẵn sàng' : 'Chưa có bản đồ';
         upload.message = layer.sourceKind === 'attribute' ? `Chờ liên kết${state.aiDataset?.fallbackReason ? ` · ${state.aiDataset.fallbackReason}` : ''}`
           : state.aiDataset?.fallbackReason || (state.mapType ? title : 'AI chưa đề xuất được bản đồ khả dụng.');
         newIds.push(layer.id);
       } catch (error) {
+        upload.processing = false;
         item?.api.dispose(); item?.manager.dispose(); item?.dom.dispose();
         keys.delete(upload.key);
         upload.status = 'Lỗi'; upload.message = error.message || 'Không thể dựng bản đồ';
@@ -414,7 +435,9 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     if (pendingIds.length) await compose(pendingIds);
     sync();
     const addedCount = pendingIds.filter(id => workspace.layersById[id]).length;
-    status(addedCount ? `Đã thêm ${addedCount} lớp dữ liệu. Chọn bản đồ hoặc tab để chỉnh cấu hình.` : uploads.size ? 'Đã xử lý các file. Kiểm tra trạng thái từng file trong danh sách.' : 'Đã xóa dữ liệu.');
+    const waitingForSheet = [...uploads.values()].some(upload => upload.sheets && !upload.processing);
+    status(waitingForSheet ? 'Hãy chọn bảng (sheet) cần phân tích trong từng file Excel rồi bấm Phân tích bảng đã chọn.'
+      : addedCount ? `Đã thêm ${addedCount} lớp dữ liệu. Chọn bản đồ hoặc tab để chỉnh cấu hình.` : uploads.size ? 'Đã xử lý các file. Kiểm tra trạng thái từng file trong danh sách.' : 'Đã xóa dữ liệu.');
   }
 
   async function compose(newIds) {

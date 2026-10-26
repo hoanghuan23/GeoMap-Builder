@@ -27,6 +27,7 @@ test("workbook nhiều sheet yêu cầu chọn trước khi trả records", () =
   assert.deepEqual(inspected.sheetNames, ["Data", "Guide"]);
   const parsed = parseSpreadsheetBuffer(buffer, { sheetName: "Data", includeSamples: false });
   assert.deepEqual(parsed.records, [{ region: "A", value: 1 }]);
+  assert.throws(() => parseSpreadsheetBuffer(buffer, { sheetName: "Missing" }), /Không tìm thấy bảng.*Missing/);
 });
 
 test("bảng có header nhiều dòng được từ chối với hướng dẫn chuẩn hóa", () => {

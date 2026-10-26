@@ -1,6 +1,7 @@
 import { AI_MAP_REGISTRY, fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
 import { normalizeTabularRecords, profileTabularData } from "./tabular-data.js";
 import { administrativeContextFields } from "./geographic-grain.js";
+import { validateDocumentText } from "./text-data.js";
 
 
 function isDate(value) {
@@ -19,6 +20,29 @@ export function summarizeTabularData(records, { maxSamples = 5, maxUnique = 10_0
 
 export function fallbackMapRecommendation() {
   return null;
+}
+
+export async function requestAiTextAnalysis(text, { signal, source = null } = {}) {
+  const content = validateDocumentText(text);
+  const response = await fetch("/api/ai/analyze-map-text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: content, ...(source ? { source } : {}) }),
+    signal
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || `AI HTTP ${response.status}`);
+  const result = await response.json();
+  const records = result?.records;
+  if (!Array.isArray(records) || !records.length || records.some(record => !record || typeof record !== "object" || Array.isArray(record))) {
+    throw new Error("AI không trả về bản ghi văn bản hợp lệ.");
+  }
+  // The entire document has already been analyzed. Do not send another profile request.
+  const profile = profileTabularData(records, { includeSamples: false });
+  const analysis = validateAndNormalizeAnalysis(result.analysis, profile);
+  analysis.suggestions = analysis.suggestions.filter(item => Object.hasOwn(AI_MAP_REGISTRY, item.chartType));
+  const normalized = normalizeTabularRecords(records, analysis.columns);
+  return { analysis, profile, ...normalized, rawRecords: records,
+    fallbackReason: analysis.source === "ai" ? "" : analysis.validationErrors?.join("; ") || "AI không có đề xuất hợp lệ." };
 }
 
 export async function requestAiDataAnalysis(records, { signal, includeSamples = true, profile: suppliedProfile = null, source = null } = {}) {

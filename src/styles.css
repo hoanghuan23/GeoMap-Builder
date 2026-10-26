@@ -3149,7 +3149,7 @@ th:last-child {
 .layer-legends:not(:has(> div:not([hidden]))) { display: none; }
 .map-legends { max-height: min(48%, 420px); overflow-y: auto; scrollbar-width: thin; }
 .uploaded-layer-list .upload-sheet-choice { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 100%; min-width: 0; margin-top: 8px; }
-.upload-sheet-choice > .upload-sheet-label, .upload-sheet-choice > .secondary-button { flex: none; width: 100%; }
+.upload-sheet-choice > .upload-sheet-label, .upload-sheet-choice > select, .upload-sheet-choice > .secondary-button { flex: none; width: 100%; }
 .upload-sheet-label { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; min-width: 0; color: #34445d; font-size: 10px; }
 .upload-sheet-choice select { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; min-height: 34px; border: 1px solid #d8e2ef; border-radius: 6px; background: #fff; padding: 6px 8px; color: #34445d; font: inherit; font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .upload-sheet-choice .secondary-button { box-sizing: border-box; width: 100%; min-width: 0; margin: 0; white-space: normal; overflow-wrap: anywhere; }
