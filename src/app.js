@@ -36,6 +36,7 @@ import { clipGeoJSONToPolygon, featureCount, geometryKinds, pointGeoJSONToRecord
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "./ai-data-analysis.js";
 import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
+import { createInfoImagePopup } from "./info-image-popup.js";
 import { administrativeContextFields, geographicLocationName, applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
 import { compareTimeValues, filterTimeRange, formatTimeValue, timeValueInfo, uniqueTimeValues } from "./time-values.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
@@ -894,16 +895,21 @@ function activePolygonSuggestion() {
 function activeMapPopupSuggestion() {
   const dataset = state.aiDataset;
   const suggestion = dataset?.suggestions?.find(item => item.id === dataset.selectedSuggestionId);
-  return ["choropleth", "map_line", "point"].includes(suggestion?.chartType) ? suggestion : null;
+  if (!["choropleth", "map_line", "point"].includes(suggestion?.chartType)) return null;
+  const metadata = options.popupMetadata?.() || {};
+  return { ...suggestion, popupContent: dataset.analysis?.popupContent,
+    hasJoinedImages: metadata.hasJoinedImages,
+    popupSuggestions: [...(suggestion.popupSuggestions || []), ...(metadata.popupSuggestions || [])] };
 }
 
 function popupSelectionFor(suggestion = activeMapPopupSuggestion()) {
+  suggestion = activeMapPopupSuggestion()?.id === suggestion?.id ? activeMapPopupSuggestion() : suggestion;
   const dataset = state.aiDataset;
   dataset.popupSelections ||= {};
   const available = popupDisplayOptions(suggestion, dataset.analysis.columns).filter(item => item.available);
   const selection = dataset.popupSelections[suggestion.id] ||= { mode: available[0].name, bar: null, line: null };
   if (!available.some(item => item.name === selection.mode)) selection.mode = available[0].name;
-  if (selection.mode !== "info" && !selection[selection.mode]) {
+  if (["bar", "line"].includes(selection.mode) && !selection[selection.mode]) {
     const metric = suggestion.chartType === "point" ? pointSelectionFor(suggestion).metricField : dataset.recommendation.metricField;
     selection[selection.mode] = createPopupChartSelection(dataset.records, dataset.analysis.columns, metric, selection.mode, suggestion.bindings);
   }
@@ -929,9 +935,28 @@ function renderMapPopup(view) {
   clearMapPopupChart(view);
   const dataset = state.aiDataset;
   const selection = popupSelectionFor();
-  const card = selection.mode === "info" ? aiWeatherPopupContent(view.feature) : document.createElement("div");
+  const chartMode = ["bar", "line"].includes(selection.mode);
+  const joined = options.popupSources?.(view.feature) || [];
+  let card;
+  if (selection.mode === "info_image") {
+    const content = dataset.analysis.popupContent || {};
+    const titleField = content.titleField || dataset.nativeTitleField || (activeMapPopupSuggestion()?.chartType === "point"
+      ? pointTitleField(dataset.analysis.columns) || dataset.analysis.search_fields?.[0] : dataset.recommendation.geometry?.field);
+    const baseRecords = popupRegionRecords(dataset.records, view.feature, dataset.recommendation.geometry?.field,
+      { chartType: activeMapPopupSuggestion().chartType, columns: dataset.analysis.columns, bindings: activeMapPopupSuggestion().bindings });
+    card = createInfoImagePopup(document, { sources: [{ title: dataset.fileName || dataset.analysis.datasetTitle,
+      columns: dataset.analysis.columns, popupContent: { ...content, titleField }, records: baseRecords.length ? baseRecords : [view.feature.properties || {}] }, ...joined],
+      coordinates: view.feature.geometry?.type === "Point" ? view.feature.geometry.coordinates : null,
+      onLayout: () => { if (mapPopupView === view) sizeMapPopup(view); } });
+  } else card = chartMode ? document.createElement("div") : aiWeatherPopupContent(view.feature);
+  if (selection.mode === "info" && joined.length) {
+    const sources = document.createElement("div"); sources.className = "popup-source-records popup-joined-records";
+    for (const source of joined) for (const record of source.records) sources.append(createAiPopupContent(document, { properties: record }, source.columns,
+      source.popupContent.titleField, { datasetTitle: source.title }));
+    card.append(sources);
+  }
   let chart;
-  if (selection.mode !== "info") {
+  if (chartMode) {
     card.className = "weather-popup ai-popup-chart-only";
     const dimensionFilters = Object.fromEntries(Object.entries(dataset.filters || {}).filter(([field]) =>
       dataset.analysis.columns.some(column => column.name === field && column.role !== "time")));
@@ -947,7 +972,8 @@ function renderMapPopup(view) {
   }
   view.popup.setDOMContent(card);
   const popupElement = view.popup.getElement();
-  popupElement.classList.toggle("has-popup-chart", selection.mode !== "info");
+  popupElement.classList.toggle("has-popup-chart", chartMode);
+  popupElement.classList.toggle("has-info-image", selection.mode === "info_image");
   sizeMapPopup(view);
   if (chart?.config) chartRenderer(selection.mode).render(view.chartContainer, chart.config);
 }
@@ -1902,6 +1928,7 @@ function aiSelect(className, choices, value) {
 }
 
 function buildMapPopupControls(dataset, suggestion) {
+  suggestion = activeMapPopupSuggestion()?.id === suggestion.id ? activeMapPopupSuggestion() : suggestion;
   const columns = dataset.analysis.columns;
   const selection = popupSelectionFor(suggestion);
   const group = document.createElement("div");
@@ -1913,6 +1940,7 @@ function buildMapPopupControls(dataset, suggestion) {
   const subject = suggestion.chartType === "map_line" ? "tuyến" : suggestion.chartType === "point" ? "điểm" : "vùng";
   const labels = {
     info: ["Chỉ hiển thị thông tin", "Hiển thị các chỉ số dưới dạng thẻ thông tin", null],
+    info_image: ["Thông tin kèm hình ảnh", "Xem hình ảnh và thông tin của đối tượng", null],
     bar: ["Biểu đồ cột", `Hiển thị biểu đồ cột của ${subject} được chọn`, "singleBar"],
     line: ["Biểu đồ đường", `Hiển thị biểu đồ đường của ${subject} được chọn`, "line"]
   };
@@ -1943,7 +1971,7 @@ function buildMapPopupControls(dataset, suggestion) {
   }
   group.append(caption, types);
   const nodes = [group];
-  if (selection.mode !== "info") nodes.push(buildMapPopupSettings(dataset, selection));
+  if (["bar", "line"].includes(selection.mode)) nodes.push(buildMapPopupSettings(dataset, selection));
   return nodes;
 }
 
@@ -2417,7 +2445,7 @@ function renderPointStyleControls() {
   const grouped = Boolean(view?.metric) && view.selection.mode === "pick";
   $("point-fixed-color-field").hidden = grouped;
   $("point-group-color-field").hidden = !grouped;
-  $("point-show-legend-field").hidden = !view?.metric;
+  $("point-show-legend-field").hidden = !view;
   $("point-group-colors").replaceChildren(...(grouped ? view.legendRows.map(item => {
     const row = document.createElement("label"); row.className = "bar-color-row";
     const label = document.createElement("span"); label.textContent = item.label; label.title = item.label;
@@ -2452,7 +2480,7 @@ function refreshPointStyle() {
 function renderPointLegend() {
   const legend = $("point-legend");
   const view = state.aiDataset?.activePointView;
-  legend.hidden = !activePointSuggestion() || !view?.metric || !state.pointStyle.showLegend || !$("show-map-layers").checked || !view.stats.visibleCount;
+  legend.hidden = !activePointSuggestion() || !view || !state.pointStyle.showLegend || !$("show-map-layers").checked || !view.stats.visibleCount;
   if (legend.hidden) return;
   const heading = document.createElement("div"); heading.className = "point-legend-heading";
   const title = document.createElement("strong"); title.textContent = view.legendTitle;
@@ -2506,10 +2534,9 @@ function renderRoadLegend() {
   if (legend.hidden) return;
   const dataset = state.aiDataset;
   const field = suggestion.bindings.value || dataset.recommendation.metricField;
-  if (!field) { legend.hidden = true; return; }
   const column = dataset.analysis.columns.find(column => column.name === field);
   const heading = document.createElement("div"); heading.className = "point-legend-heading";
-  const title = document.createElement("strong"); title.textContent = column?.labelVi || field || "Chuỗi tọa độ";
+  const title = document.createElement("strong"); title.textContent = column?.labelVi || field || suggestion.title || dataset.analysis.datasetTitle || "Tuyến đường";
   heading.append(title);
   const rows = document.createElement("div"); rows.className = "point-legend-rows";
   for (const item of dataset.roadStyle?.rows || []) {
@@ -3656,10 +3683,18 @@ async function init() {
 // Runtime public API. Every callback closes over this layer's state and DOM.
 return {
   state, readSpatialFile, applyReadResult, processSpatialFiles, removeUploadedFile,
+  resizePopup() { if (mapPopupView) sizeMapPopup(mapPopupView); },
   closePopup() { closeMapPopup(); cellPopup?.remove(); pointPopup?.remove(); },
   openPopup(feature, center) {
     if (state.aiDataset) openMapPopup(feature, center, state.mapType === "point" ? "point-marker" : state.mapType === "line" ? "data-lines" : "polygon-fill");
     else showUploadedFeaturePopup(feature, { name: state.fileName || "Dữ liệu", role: state.mapType }, center);
+  },
+  refreshPopupMetadata() {
+    if (activeMapPopupSuggestion()) {
+      if (activeMapPopupSuggestion().chartType === "point") populatePointControls(activeMapPopupSuggestion());
+      else populateAiFilters(state.aiDataset);
+      if (mapPopupView) renderMapPopup(mapPopupView);
+    }
   },
   searchData: currentDataSearch,
   setVisible(value) { $("show-map-layers").checked = value; $("show-map-layers-status").textContent = value ? "Đang bật" : "Đang tắt"; applyMapLayerVisibility(); },

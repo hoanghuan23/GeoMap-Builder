@@ -7,6 +7,7 @@ import { describeWorkspaceLayer, geometryExtent, layerData, tableRecords, csvFor
 import { createMapSearch } from './map-search.js';
 import { CONFIG } from './config.js';
 import { expandJsonUpload } from './json-datasets.js';
+import { joinedPopupSources } from './attribute-joins.js';
 import { countryRegionMatches, filterCountryRegionData } from './country-regions.js';
 
 const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
@@ -48,6 +49,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   const map = new globalThis.maplibregl.Map({ container: 'map', style: styles.liberty, center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
   let readyResolve; const ready = new Promise(resolve => { readyResolve = resolve; });
   let uploadSequence = 0; let scheduled = false; let tableShown = false; let queue = Promise.resolve();
+  let selectedAttributeId = null;
   let selectedSignature = ''; let compositionController; let currentStyle = 'liberty'; let statusTimer; let styleReady = false;
   const mounted = new Set();
   const search = createMapSearch({ map, minFilteredObjects: CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS,
@@ -94,6 +96,11 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     metric.dataset.layerId = id;
     const api = createRuntime({ id, document: dom.document, map: manager.map, nativeMap: map, maplibregl: manager.popupLibrary(globalThis.maplibregl), preparsedResults,
       managedWorkspace: true, onStatus: status,
+      popupSources: feature => joinedPopupSources(workspace, id, feature),
+      popupMetadata() {
+        const joins = workspace.attributeJoins.filter(join => join.targetLayerId === id && join.popupContent.imageFields.length);
+        return { hasJoinedImages: joins.length > 0, popupSuggestions: joins.flatMap(join => join.popupSuggestions) };
+      },
       onChange: schedule, onVisibility(value) {
         const group = activeMapGroup(workspace); if (!group) return;
         group.visible = value;
@@ -115,8 +122,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
 
   function selectLayer(id) {
     const group = activeMapGroup(workspace);
-    if (!group?.layerIds.includes(id) || group.activeLayerId === id) return;
-    group.activeLayerId = id; schedule();
+    if (!group?.layerIds.includes(id) || group.activeLayerId === id && !selectedAttributeId) return;
+    selectedAttributeId = null; group.activeLayerId = id; schedule();
   }
 
   function saveViewport(group) {
@@ -128,7 +135,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
 
   function selectGroup(id) {
     const previous = activeMapGroup(workspace);
-    if (!workspace.groupsById[id] || workspace.activeGroupId === id) return;
+    if (!workspace.groupsById[id] || workspace.activeGroupId === id && !selectedAttributeId) return;
+    selectedAttributeId = null;
     saveViewport(previous); closePopups();
     workspace.activeGroupId = id; tableShown = false;
     sync();
@@ -150,6 +158,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
 
   function sync() {
     const group = activeMapGroup(workspace);
+    if (!workspace.layersById[selectedAttributeId]) selectedAttributeId = null;
+    const hasSelection = Boolean(group || selectedAttributeId);
     const searches = (group?.visible ? group.layerIds : []).map(id => {
       const layer = workspace.layersById[id];
       return { ...runtimes.get(id).api.searchData(), ...(!layer.searchEnabled ? { search_bar: false } : {}),
@@ -157,10 +167,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     });
     search.setData({ layers: searches, groupId: group?.id, regionId: group?.regionId || '' });
     if (group?.visible) group.regionId = search.getState().regionId;
-    empty.hidden = Boolean(group);
-    groupField.hidden = !group; compositionNote.hidden = !group; actions.hidden = !group;
-    showTable.hidden = !group; showTable.disabled = !group;
-    if (!group) { tableShown = false; showTable.textContent = 'Xem dữ liệu lớp đang chọn'; }
+    empty.hidden = hasSelection;
+    groupField.hidden = !group; compositionNote.hidden = !group; actions.hidden = !hasSelection;
+    showTable.hidden = !hasSelection; showTable.disabled = !hasSelection;
+    if (!hasSelection) { tableShown = false; showTable.textContent = 'Xem dữ liệu lớp đang chọn'; }
     const signature = JSON.stringify(workspace.groupOrder.map(id => [id, workspace.groupsById[id].title, workspace.groupsById[id].layerIds.length]));
     if (signature !== selectedSignature) {
       selector.replaceChildren(...workspace.groupOrder.map(id => {
@@ -175,7 +185,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     selector.disabled = !group; selector.value = group?.id || '';
     const visibleIds = new Set(group?.layerIds || []);
     for (const [id, item] of runtimes) {
-      const active = group?.activeLayerId === id;
+      const active = selectedAttributeId ? selectedAttributeId === id : group?.activeLayerId === id;
       const isVisible = visibleIds.has(id);
       const config = item.api.searchData();
       const regionId = isVisible ? group.regionId || '' : '';
@@ -205,24 +215,29 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       item.legendHeading.textContent = workspace.layersById[id]?.title || '';
       const otherLegend = [...item.legends.children].some(node => node !== item.genericLegend && node.tagName === 'DIV' && !node.hidden);
       const count = filterCountryRegionData(layerData(item.api.state), config, regionId)?.features?.length || 0;
-      item.genericLegend.hidden = otherLegend || !count;
+      const legendEnabled = item.api.state.mapType === 'point' ? item.api.state.pointStyle.showLegend
+        : item.api.state.mapType === 'line' ? item.api.state.roadDisplayStyle.showLegend : true;
+      item.genericLegend.hidden = !legendEnabled || otherLegend || !count;
       if (!item.genericLegend.hidden) item.genericLegend.textContent = `${workspace.layersById[id]?.title} · ${count.toLocaleString('vi-VN')} đối tượng`;
       item.chart.hidden = true;
       item.table.hidden = !active || !tableShown;
       const toggle = item.dom.elements.get('show-map-layers'); toggle.checked = group?.visible ?? true;
       item.dom.elements.get('show-map-layers-status').textContent = toggle.checked ? 'Đang bật' : 'Đang tắt';
       if (active) {
-        item.heading.hidden = group.layerIds.length < 2;
+        item.heading.hidden = !group || Boolean(selectedAttributeId) || group.layerIds.length < 2;
         // Native geometry layers still need a place for the group tabs.
-        if (group.layerIds.length > 1) item.dom.elements.get('ai-data-filters').hidden = false;
-        renderLayerTabs(item, group);
+        if (group && !selectedAttributeId) {
+          if (group.layerIds.length > 1) item.dom.elements.get('ai-data-filters').hidden = false;
+          renderLayerTabs(item, group);
+        }
         if (tableShown) renderTable(item, workspace.layersById[id].title);
       }
     }
-    document.querySelector('.content-area').classList.toggle('table-hidden', !tableShown || !group);
+    document.querySelector('.content-area').classList.toggle('table-hidden', !tableShown || !hasSelection);
     orderWorkspaceMapLayers(map);
     const unknown = Object.values(workspace.groupsById).some(value => value.composition?.action === 'undetermined');
-    retry.hidden = !unknown || Object.keys(workspace.layersById).length < 2;
+    const waiting = Object.values(workspace.layersById).some(layer => layer.sourceKind === 'attribute' && !workspace.attributeJoins.some(join => join.sourceId === layer.id));
+    retry.hidden = !(unknown || waiting) || Object.keys(workspace.layersById).length < 2;
     compositionNote.textContent = group?.composition?.reason || (group ? `${group.layerIds.length} lớp dữ liệu trong bản đồ đang hiển thị.` : '');
   }
 
@@ -256,7 +271,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
 
   function renderTable(item, title) {
     const state = item.api.state; const data = layerData(state);
-    const regionId = activeMapGroup(workspace)?.regionId || '';
+    const regionId = workspace.layersById[item.id]?.sourceKind === 'attribute' ? '' : activeMapGroup(workspace)?.regionId || '';
     const signature = [data, state.page, state.pageSize, state.query, regionId];
     if (item.tableSnapshot && item.tableSnapshot.every((value, index) => signature[index] === value)) return;
     const config = item.api.searchData();
@@ -287,6 +302,21 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     const link = document.createElement('a'); link.href = url; link.download = `${title.replace(/[<>:"/\\|?*]/g, '_')}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  function refreshAttributePopups() {
+    for (const upload of uploads.values()) {
+      const layer = workspace.layersById[upload.layerId];
+      if (layer?.sourceKind !== 'attribute') continue;
+      const reports = workspace.attributeJoinReports.filter(report => report.sourceId === layer.id);
+      const joins = workspace.attributeJoins.filter(join => join.sourceId === layer.id);
+      upload.status = joins.length ? 'Đã liên kết' : 'Chờ liên kết';
+      upload.message = `${upload.status} · ` + (reports.length ? reports.map(report => report.stats
+        ? `${workspace.layersById[report.targetLayerId]?.title}: ${report.stats.matchedObjects} đối tượng khớp, ${report.stats.unmatchedObjects} chưa khớp; ${report.stats.matchedRows} dòng khớp, ${report.stats.unmatchedRows} chưa khớp${report.stats.ambiguousRows ? ` (${report.stats.ambiguousRows} khóa mơ hồ)` : ''}. ${report.reason}`
+        : report.reason).join(' · ') : layer.attributeReason || layer.runtime.state.aiDataset?.fallbackReason || 'Chưa có lớp không gian và khóa liên kết phù hợp.');
+    }
+    for (const item of runtimes.values()) item.api.refreshPopupMetadata();
+    renderUploads();
+  }
+
   function renderUploads() {
     const list = $('uploaded-layer-list'); list.replaceChildren();
     for (const [id, upload] of uploads) {
@@ -294,6 +324,11 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       const detail = textNode('em', upload.message || upload.status);
       const remove = textNode('button', '×', 'remove-uploaded-layer'); remove.type = 'button'; remove.setAttribute('aria-label', `Xóa ${upload.file.name}`);
       remove.addEventListener('click', () => removeUpload(id)); row.append(name, detail, remove);
+      if (workspace.layersById[upload.layerId]?.sourceKind === 'attribute') {
+        const view = textNode('button', 'Xem dữ liệu', 'secondary-button'); view.type = 'button';
+        view.addEventListener('click', () => { selectedAttributeId = upload.layerId; tableShown = true; closePopups(); sync(); map.resize(); });
+        row.append(view);
+      }
       if (upload.sheets) {
         const select = document.createElement('select'); select.setAttribute('aria-label', `Chọn sheet cho ${upload.file.name}`);
         select.append(...upload.sheets.map(sheet => Object.assign(document.createElement('option'), { textContent: sheet, value: sheet, title: sheet })));
@@ -361,8 +396,9 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         runtimes.set(layer.id, item);
         sidebars.append(item.panel); metrics.append(item.metric); legendOriginal.append(item.legends); tables.append(item.table);
         document.querySelector('.map-panel').append(item.chart);
-        upload.layerId = layer.id; upload.status = state.mapType ? 'Sẵn sàng' : 'Chưa có bản đồ';
-        upload.message = state.aiDataset?.fallbackReason || (state.mapType ? title : 'AI chưa đề xuất được bản đồ khả dụng.');
+        upload.layerId = layer.id; upload.status = layer.sourceKind === 'attribute' ? 'Chờ liên kết' : state.mapType ? 'Sẵn sàng' : 'Chưa có bản đồ';
+        upload.message = layer.sourceKind === 'attribute' ? `Chờ liên kết${state.aiDataset?.fallbackReason ? ` · ${state.aiDataset.fallbackReason}` : ''}`
+          : state.aiDataset?.fallbackReason || (state.mapType ? title : 'AI chưa đề xuất được bản đồ khả dụng.');
         newIds.push(layer.id);
       } catch (error) {
         item?.api.dispose(); item?.manager.dispose(); item?.dom.dispose();
@@ -385,13 +421,16 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     newIds = newIds.filter(id => workspace.layersById[id]);
     if (!newIds.length) return;
     const previous = workspace.activeGroupId;
-    if (Object.keys(workspace.layersById).length === 1) {
-      createWorkspaceGroup(workspace, newIds, workspace.layersById[newIds[0]].title);
+    if (Object.keys(workspace.layersById).length === 1 || Object.values(workspace.layersById).every(layer => layer.sourceKind === 'attribute')) {
+      for (const id of newIds) if (workspace.layersById[id].sourceKind !== 'attribute') createWorkspaceGroup(workspace, [id], workspace.layersById[id].title);
     } else {
-      status('AI đang đánh giá khả năng hiển thị các lớp cùng nhau...');
+      status('AI đang đánh giá hiển thị chung và liên kết thuộc tính...');
       const revision = workspace.revision;
       const input = { workspaceRevision: revision, activeGroupId: workspace.activeGroupId, newLayerIds: newIds,
-        layers: Object.values(workspace.layersById).map(layer => describeWorkspaceLayer(layer.id, runtimes.get(layer.id).api.state, layer.title)),
+        layers: Object.values(workspace.layersById).map(layer => {
+          layer.descriptor = describeWorkspaceLayer(layer.id, runtimes.get(layer.id).api.state, layer.title);
+          return layer.descriptor;
+        }),
         groups: workspace.groupOrder.map(id => ({ id, title: workspace.groupsById[id].title, layerIds: workspace.groupsById[id].layerIds })) };
       compositionController?.abort(); compositionController = new AbortController();
       let result;
@@ -399,12 +438,15 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       catch (error) {
         if (error.name !== 'AbortError') result = fallbackComposition(input, `Chưa xác định khả năng kết hợp: ${error.message}. Dữ liệu được giữ thành bản đồ riêng.`);
       }
+      for (const decision of result?.decisions || []) {
+        if (workspace.layersById[decision.layerId]?.sourceKind === 'attribute' && workspace.revision === revision) workspace.layersById[decision.layerId].attributeReason = decision.reason;
+      }
       if (!result || !applyWorkspaceComposition(workspace, result, newIds, revision)) {
         const remaining = newIds.filter(id => workspace.layersById[id] && !Object.values(workspace.groupsById).some(group => group.layerIds.includes(id)));
         if (remaining.length) return compose(remaining);
       }
     }
-    sync();
+    refreshAttributePopups(); sync();
     if (!previous && activeMapGroup(workspace)) fitGroup(activeMapGroup(workspace));
   }
 
@@ -435,7 +477,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       item.api.dispose(); item.manager.dispose(); item.dom.dispose();
       runtimes.delete(upload.layerId); mounted.delete(upload.layerId); removeWorkspaceLayer(workspace, upload.layerId);
     }
-    renderUploads(); sync();
+    refreshAttributePopups(); renderUploads(); sync();
     if (!Object.keys(workspace.layersById).length) compositionController?.abort();
     if (workspace.activeGroupId !== previousGroup && activeMapGroup(workspace)) {
       const group = activeMapGroup(workspace);
@@ -459,7 +501,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     });
     workspace.groupOrder = workspace.groupOrder.filter(id => workspace.groupsById[id]);
     if (!workspace.groupsById[workspace.activeGroupId]) workspace.activeGroupId = workspace.groupOrder[0] || null;
-    workspace.revision++; await compose(ids); sync();
+    ids.push(...Object.values(workspace.layersById).filter(layer => layer.sourceKind === 'attribute').map(layer => layer.id));
+    workspace.revision++; await compose([...new Set(ids)]); sync();
   }));
   $('spatial-file').addEventListener('change', event => { importFiles([...event.target.files]); event.target.value = ''; });
   const dropZone = document.querySelector('.drop-zone');
@@ -502,7 +545,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     console.warn('MapLibre:', event.error?.message);
     if (!styleReady) status('Chưa tải được nền bản đồ. Bạn có thể chọn nền khác để thử lại.');
   });
-  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => map.resize()).observe($('map'));
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { map.resize(); for (const item of runtimes.values()) item.api.resizePopup(); }).observe($('map'));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) map.resize(); });
   sync();
   return { workspace, map, importFiles, selectGroup, selectLayer, removeUpload };

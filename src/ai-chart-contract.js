@@ -4,9 +4,11 @@ import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegen
 import { normalizeDataSearchConfig } from "./data-search-config.js";
 import { COUNTRY_REGION_CATALOG, normalizeRegionNavigation } from "./country-regions.js";
 
+import { POPUP_CONTENT_SCHEMA, normalizePopupContent } from "./popup-content-contract.js";
+
 const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "text", "ignore"]);
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
-const POPUP_TYPES = Object.freeze(["info", "bar", "line"]);
+const POPUP_TYPES = Object.freeze(["info", "info_image", "bar", "line"]);
 
 export function normalizePopupSuggestions(raw) {
   const byName = new Map();
@@ -100,8 +102,9 @@ const LEGEND_SCHEMA = { anyOf: [...POLYGON_LEGEND_SCHEMA.anyOf, { type: "null" }
 export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["datasetTitle", "grain", "columns", "suggestions", "search_bar", "search_fields", "regionNavigation"],
+  required: ["datasetTitle", "grain", "columns", "suggestions", "search_bar", "search_fields", "regionNavigation", "popupContent"],
   properties: {
+    popupContent: POPUP_CONTENT_SCHEMA,
     datasetTitle: { type: "string" },
     grain: { type: "string" },
     search_bar: { type: "boolean", description: "Có nên bật tìm kiếm mặc định theo số đối tượng và lợi ích tìm nhanh; không dùng ngưỡng 30 cứng." },
@@ -348,6 +351,7 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     datasetTitle: typeof raw.datasetTitle === "string" && raw.datasetTitle.trim() ? raw.datasetTitle.trim() : fallback.datasetTitle,
     grain: typeof raw.grain === "string" && raw.grain.trim() ? raw.grain.trim() : fallback.grain,
     columns,
+    ...(raw.popupContent ? { popupContent: normalizePopupContent(raw.popupContent, columns) } : {}),
     suggestions: suggestions.map(suggestion => ({ ...suggestion, source })),
     ...normalizeDataSearchConfig(raw, columns),
     ...(Object.hasOwn(raw, "regionNavigation") ? { regionNavigation: source === "ai" ? normalizeRegionNavigation(raw.regionNavigation, columns) : null } : {}),

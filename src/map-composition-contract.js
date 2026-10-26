@@ -1,6 +1,9 @@
+import { POPUP_CONTENT_SCHEMA, normalizePopupContent } from "./popup-content-contract.js";
+import { normalizePopupSuggestions } from "./ai-chart-contract.js";
+
 const nullableString = { anyOf: [{ type: 'string', maxLength: 160 }, { type: 'null' }] };
 export const MAP_COMPOSITION_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['decisions', 'searchLayerIds'],
+  type: 'object', additionalProperties: false, required: ['decisions', 'searchLayerIds', 'attributeJoins'],
   properties: {
     decisions: { type: 'array', maxItems: 50, items: {
       type: 'object', additionalProperties: false,
@@ -10,6 +13,23 @@ export const MAP_COMPOSITION_SCHEMA = {
         action: { type: 'string', enum: ['append_to_group', 'create_group', 'undetermined'] },
         targetGroupId: nullableString, newGroupKey: nullableString,
         groupTitle: { type: 'string', minLength: 1, maxLength: 160 },
+        confidence: { type: 'number', minimum: 0, maximum: 1 }, reason: { type: 'string', maxLength: 800 }
+      }
+    } },
+    attributeJoins: { type: 'array', maxItems: 100, items: {
+      type: 'object', additionalProperties: false,
+      required: ['sourceId', 'targetLayerId', 'keyPairs', 'popupSuggestions', 'popupContent', 'confidence', 'reason'],
+      properties: {
+        sourceId: { type: 'string', maxLength: 160 }, targetLayerId: { type: 'string', maxLength: 160 },
+        keyPairs: { type: 'array', minItems: 1, maxItems: 8, items: {
+          type: 'object', additionalProperties: false, required: ['sourceField', 'targetField'],
+          properties: { sourceField: { type: 'string', maxLength: 160 }, targetField: { type: 'string', maxLength: 160 } }
+        } },
+        popupSuggestions: { type: 'array', maxItems: 4, items: {
+          type: 'object', additionalProperties: false, required: ['name', 'confidence'],
+          properties: { name: { type: 'string', enum: ['info', 'info_image', 'bar', 'line'] }, confidence: { type: 'number', minimum: 0, maximum: 1 } }
+        } },
+        popupContent: POPUP_CONTENT_SCHEMA,
         confidence: { type: 'number', minimum: 0, maximum: 1 }, reason: { type: 'string', maxLength: 800 }
       }
     } },
@@ -29,11 +49,13 @@ export function normalizeCompositionInput(raw) {
     if (!id || ids.has(id)) throw new Error('ID lớp bị thiếu hoặc trùng.');
     ids.add(id);
     const columns = (Array.isArray(layer.columns) ? layer.columns : []).filter(column => column && clean(column.name, 160)).slice(0, 200).map(column => ({
-      name: clean(column.name, 160), role: clean(column.role, 40), geoLevel: clean(column.geoLevel, 40), country: clean(column.country, 10),
+      name: column.name.slice(0, 160), labelVi: clean(column.labelVi, 160), role: clean(column.role, 40), geoLevel: clean(column.geoLevel, 40), country: clean(column.country, 10),
       unit: clean(column.unit, 40), semanticType: clean(column.semanticType, 80) }));
     const searchable = new Set(columns.filter(column => ['geo', 'category', 'text', 'id'].includes(column.role)
       && !['point_lat', 'point_lng', 'h3'].includes(column.geoLevel) && !column.name.startsWith('__')).map(column => column.name));
-    return { id, title: clean(layer.title, 160), grain: clean(layer.grain, 400),
+    return { id, sourceKind: layer.sourceKind === 'attribute' ? 'attribute' : 'spatial',
+      popupContent: normalizePopupContent(layer.popupContent, columns), popupSuggestions: normalizePopupSuggestions(layer.popupSuggestions),
+      title: clean(layer.title, 160), grain: clean(layer.grain, 400),
       chartType: ['point', 'choropleth', 'map_line', 'polygon', 'line', 'h3', 'mixed'].includes(layer.chartType) ? layer.chartType : null,
       available: layer.available === true,
       geometryKinds: Array.isArray(layer.geometryKinds) ? [...new Set(layer.geometryKinds.filter(kind => ['area', 'line', 'point'].includes(kind)))] : [],
@@ -41,8 +63,8 @@ export function normalizeCompositionInput(raw) {
         && layer.extent[0] >= -180 && layer.extent[2] <= 180 && layer.extent[1] >= -90 && layer.extent[3] <= 90
         && layer.extent[0] <= layer.extent[2] && layer.extent[1] <= layer.extent[3] ? layer.extent : null,
       columns,
-      time: layer.time ? { field: clean(layer.time.field, 160), granularity: clean(layer.time.granularity, 40), count: Math.max(0, Number(layer.time.count) || 0) } : null,
-      search_bar: layer.search_bar !== false, search_fields: [...new Set((Array.isArray(layer.search_fields) ? layer.search_fields : []).map(field => clean(field, 160)).filter(field => searchable.has(field)))].slice(0, 20)
+      time: layer.time ? { field: columns.some(column => column.name === layer.time.field) ? layer.time.field : '', granularity: clean(layer.time.granularity, 40), count: Math.max(0, Number(layer.time.count) || 0) } : null,
+      search_bar: layer.search_bar !== false, search_fields: [...new Set((Array.isArray(layer.search_fields) ? layer.search_fields : []).filter(field => typeof field === 'string' && searchable.has(field)))].slice(0, 20)
     };
   });
   const groupIds = new Set(); const assigned = new Set();
@@ -51,14 +73,14 @@ export function normalizeCompositionInput(raw) {
     if (!id || groupIds.has(id) || !Array.isArray(group.layerIds) || !group.layerIds.length) throw new Error('Nhóm bản đồ không hợp lệ.');
     groupIds.add(id);
     for (const key of group.layerIds) {
-      if (!ids.has(key) || assigned.has(key)) throw new Error('Thành viên nhóm không hợp lệ.');
+      if (!ids.has(key) || assigned.has(key) || layers.find(layer => layer.id === key).sourceKind === 'attribute') throw new Error('Thành viên nhóm không hợp lệ.');
       assigned.add(key);
     }
     return { id, title: clean(group.title, 160), layerIds: [...group.layerIds] };
   });
   const newLayerIds = [...new Set(raw.newLayerIds)];
   if (!newLayerIds.length || newLayerIds.length !== raw.newLayerIds.length || newLayerIds.some(id => !ids.has(id) || assigned.has(id))) throw new Error('Danh sách lớp mới không hợp lệ.');
-  if (layers.some(layer => !assigned.has(layer.id) && !newLayerIds.includes(layer.id))) throw new Error('Hồ sơ có lớp không thuộc phạm vi đánh giá.');
+  if (layers.some(layer => layer.sourceKind !== 'attribute' && !assigned.has(layer.id) && !newLayerIds.includes(layer.id))) throw new Error('Hồ sơ có lớp không thuộc phạm vi đánh giá.');
   return { workspaceRevision: Number.isSafeInteger(raw.workspaceRevision) ? raw.workspaceRevision : 0, layers, groups, newLayerIds,
     activeGroupId: groupIds.has(raw.activeGroupId) ? raw.activeGroupId : null };
 }
@@ -66,16 +88,17 @@ export function normalizeCompositionInput(raw) {
 export function fallbackComposition(input, reason = 'Chưa xác định khả năng kết hợp; dữ liệu được giữ thành bản đồ riêng.') {
   return { source: 'rule', decisions: input.newLayerIds.map(layerId => ({ layerId, action: 'undetermined', targetGroupId: null,
     newGroupKey: null, groupTitle: input.layers.find(layer => layer.id === layerId)?.title || 'Dữ liệu tải lên', confidence: 0, reason })),
-    searchLayerIds: input.layers.filter(layer => layer.search_bar !== false && layer.search_fields?.length).map(layer => layer.id) };
+    attributeJoins: [], attributeJoinIssues: [],
+    searchLayerIds: input.layers.filter(layer => layer.sourceKind !== 'attribute' && layer.search_bar !== false && layer.search_fields?.length).map(layer => layer.id) };
 }
 
 export function normalizeCompositionResult(raw, input) {
   const fallback = fallbackComposition(input);
-  if (!Array.isArray(raw?.decisions)) return fallback;
+  if (!raw || typeof raw !== 'object') return fallback;
   const layers = new Map(input.layers.map(layer => [layer.id, layer]));
   const groups = new Map(input.groups.map(group => [group.id, group]));
   const decisions = input.newLayerIds.map((id, index) => {
-    const matches = raw.decisions.filter(item => item?.layerId === id);
+    const matches = (Array.isArray(raw.decisions) ? raw.decisions : []).filter(item => item?.layerId === id);
     const item = matches[0];
     if (matches.length !== 1 || !['append_to_group', 'create_group', 'undetermined'].includes(item?.action)
       || typeof item.confidence !== 'number' || !Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1
@@ -93,6 +116,44 @@ export function normalizeCompositionResult(raw, input) {
   // Composition can recommend search layers, but omission must not disable
   // the valid search configuration already produced for an individual file.
   const recommended = Array.isArray(raw.searchLayerIds) ? raw.searchLayerIds.filter(id => searchable.has(id)) : [];
-  return { source: raw.source === 'rule' ? 'rule' : 'ai', decisions,
+  return { source: raw.source === 'rule' ? 'rule' : 'ai', decisions, ...normalizeAttributeJoins(raw, input),
     searchLayerIds: [...new Set([...recommended, ...searchable])] };
+}
+
+
+export function normalizeAttributeJoins(raw, input) {
+  const layers = new Map(input.layers.map(layer => [layer.id, layer]));
+  const attributeJoins = []; const seen = new Set();
+  const attributeJoinIssues = (Array.isArray(raw.attributeJoinIssues) ? raw.attributeJoinIssues : [])
+    .filter(issue => layers.has(issue?.sourceId) && typeof issue.reason === 'string')
+    .map(issue => ({ sourceId: issue.sourceId, reason: clean(issue.reason, 800) }));
+  for (const item of (Array.isArray(raw.attributeJoins) ? raw.attributeJoins : []).slice(0, 100)) {
+    const source = layers.get(item?.sourceId); const target = layers.get(item?.targetLayerId);
+    const pairId = JSON.stringify([item?.sourceId, item?.targetLayerId]);
+    const sourceFields = new Set(source?.columns?.map(column => column.name));
+    const targetFields = new Set(target?.columns?.map(column => column.name));
+    let reason = '';
+    if (source?.sourceKind !== 'attribute' || target?.sourceKind === 'attribute' || !target?.available) reason = 'Nguồn thuộc tính hoặc lớp không gian đích không hợp lệ.';
+    else if (!Array.isArray(item.keyPairs) || !item.keyPairs.length || item.keyPairs.length > 8
+      || item.keyPairs.some(pair => !sourceFields.has(pair?.sourceField) || !targetFields.has(pair?.targetField)
+        || pair.sourceField.startsWith('__') || pair.targetField.startsWith('__'))
+      || new Set(item.keyPairs.map(pair => pair.sourceField)).size !== item.keyPairs.length
+      || new Set(item.keyPairs.map(pair => pair.targetField)).size !== item.keyPairs.length) reason = 'Khóa liên kết thiếu, trùng hoặc không có trong dữ liệu.';
+    else if (!Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1) reason = 'Độ tin cậy liên kết không hợp lệ.';
+    else if (seen.has(pairId)) reason = 'Có nhiều đề xuất cho cùng nguồn và lớp đích; đã bỏ qua liên kết mơ hồ.';
+    if (reason) {
+      if (source) attributeJoinIssues.push({ sourceId: source.id, reason });
+      if (seen.has(pairId)) {
+        const index = attributeJoins.findIndex(join => join.sourceId === source?.id && join.targetLayerId === target?.id);
+        if (index >= 0) attributeJoins.splice(index, 1);
+      }
+      continue;
+    }
+    seen.add(pairId);
+    attributeJoins.push({ sourceId: source.id, targetLayerId: target.id,
+      keyPairs: item.keyPairs.map(pair => ({ sourceField: pair.sourceField, targetField: pair.targetField })),
+      popupContent: normalizePopupContent(item.popupContent || source.popupContent, source.columns),
+      popupSuggestions: normalizePopupSuggestions(item.popupSuggestions), confidence: item.confidence, reason: clean(item.reason, 800) });
+  }
+  return { attributeJoins, attributeJoinIssues };
 }

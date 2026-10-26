@@ -1,6 +1,9 @@
+import { normalizeAttributeJoins } from './map-composition-contract.js';
+import { buildAttributeJoin, workspaceLayerRecords } from './attribute-joins.js';
+
 /** Session-local ownership. UI focus never determines which layers are visible. */
 export function createMapWorkspace() {
-  return { revision: 0, sequence: 0, datasetsById: {}, layersById: {}, groupsById: {}, groupOrder: [], activeGroupId: null, importsById: {} };
+  return { revision: 0, sequence: 0, datasetsById: {}, layersById: {}, groupsById: {}, groupOrder: [], activeGroupId: null, importsById: {}, attributeJoins: [], attributeJoinReports: [] };
 }
 
 export function activeMapGroup(workspace) {
@@ -10,14 +13,14 @@ export function activeMapGroup(workspace) {
 export function addWorkspaceLayer(workspace, { dataset, runtime, title, fileKey, descriptor = {} }) {
   const id = `layer-${++workspace.sequence}`;
   workspace.datasetsById[id] = dataset;
-  workspace.layersById[id] = { id, datasetId: id, runtime, title, fileKey, descriptor, searchEnabled: true };
+  workspace.layersById[id] = { id, datasetId: id, runtime, title, fileKey, descriptor, sourceKind: descriptor.sourceKind || 'spatial', searchEnabled: true };
   workspace.revision++;
   return workspace.layersById[id];
 }
 
 export function createWorkspaceGroup(workspace, layerIds, title, composition = null) {
   const id = `group-${++workspace.sequence}`;
-  const members = [...new Set(layerIds)].filter(layerId => workspace.layersById[layerId]);
+  const members = [...new Set(layerIds)].filter(layerId => workspace.layersById[layerId]?.sourceKind !== 'attribute' && workspace.layersById[layerId]);
   if (!members.length) return null;
   if (Object.values(workspace.groupsById).some(group => group.layerIds.some(id => members.includes(id)))) throw new Error('Lớp dữ liệu đã thuộc một nhóm bản đồ.');
   const group = { id, title: title || members.map(key => workspace.layersById[key].title).join(' + '), layerIds: members,
@@ -36,7 +39,7 @@ export function applyWorkspaceComposition(workspace, result, newLayerIds, revisi
   const assigned = new Set(Object.values(workspace.groupsById).flatMap(group => group.layerIds));
   for (const id of newLayerIds) {
     const layer = workspace.layersById[id];
-    if (!layer || assigned.has(id)) continue;
+    if (!layer || layer.sourceKind === 'attribute' || assigned.has(id)) continue;
     const decision = result.decisions.find(item => item.layerId === id);
     let group = decision?.action === 'append_to_group' ? workspace.groupsById[decision.targetGroupId] : null;
     if (!group && decision?.action === 'create_group' && decision.newGroupKey) group = newGroups.get(decision.newGroupKey);
@@ -57,12 +60,15 @@ export function applyWorkspaceComposition(workspace, result, newLayerIds, revisi
       for (const id of group.layerIds) workspace.layersById[id].searchEnabled = result.searchLayerIds.includes(id);
     }
   }
+  applyWorkspaceAttributeJoins(workspace, result);
   return true;
 }
 
 export function removeWorkspaceLayer(workspace, id) {
   const layer = workspace.layersById[id];
   if (!layer) return null;
+  workspace.attributeJoins = workspace.attributeJoins.filter(join => join.sourceId !== id && join.targetLayerId !== id);
+  workspace.attributeJoinReports = workspace.attributeJoinReports.filter(join => join.sourceId !== id && join.targetLayerId !== id);
   delete workspace.layersById[id];
   delete workspace.datasetsById[layer.datasetId];
   for (const group of Object.values(workspace.groupsById)) {
@@ -80,4 +86,31 @@ export function removeWorkspaceLayer(workspace, id) {
   if (!workspace.groupsById[workspace.activeGroupId]) workspace.activeGroupId = workspace.groupOrder[0] || null;
   workspace.revision++;
   return layer;
+}
+
+
+export function applyWorkspaceAttributeJoins(workspace, result) {
+  const layers = Object.values(workspace.layersById).map(layer => ({ ...layer.descriptor, id: layer.id, sourceKind: layer.sourceKind }));
+  const normalized = normalizeAttributeJoins(result, { layers });
+  // Re-evaluate proposed pairs without dropping earlier valid relationships omitted by AI.
+  const proposed = new Set(normalized.attributeJoins.map(join => JSON.stringify([join.sourceId, join.targetLayerId])));
+  const updatedSources = new Set([...normalized.attributeJoins, ...normalized.attributeJoinIssues].map(join => join.sourceId));
+  workspace.attributeJoinReports = workspace.attributeJoinReports.filter(report => report.targetLayerId
+    ? !proposed.has(JSON.stringify([report.sourceId, report.targetLayerId])) : !updatedSources.has(report.sourceId));
+  workspace.attributeJoinReports.push(...normalized.attributeJoinIssues);
+  for (const proposal of normalized.attributeJoins) {
+    const source = workspace.layersById[proposal.sourceId]; const target = workspace.layersById[proposal.targetLayerId];
+    const join = buildAttributeJoin(proposal, source, target,
+      workspaceLayerRecords(source, workspace.datasetsById[source.datasetId]), workspaceLayerRecords(target, workspace.datasetsById[target.datasetId]));
+    const previousIndex = workspace.attributeJoins.findIndex(item => item.sourceId === source.id && item.targetLayerId === target.id);
+    const previous = workspace.attributeJoins[previousIndex];
+    const reason = join.stats.matchedRows ? proposal.reason : previous
+      ? 'Đề xuất mới không có bản ghi khớp; giữ liên kết hợp lệ hiện tại.' : 'Không có bản ghi khớp khóa hợp lệ; dữ liệu được giữ riêng.';
+    workspace.attributeJoinReports.push({ sourceId: source.id, targetLayerId: target.id, stats: join.stats.matchedRows ? join.stats : previous?.stats || join.stats, reason });
+    if (join.stats.matchedRows) {
+      if (previousIndex >= 0) workspace.attributeJoins[previousIndex] = join;
+      else workspace.attributeJoins.push(join);
+    }
+  }
+  workspace.revision++;
 }

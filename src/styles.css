@@ -3100,6 +3100,32 @@ th:last-child {
 .popup-info-note dt::before { content: "ⓘ"; margin-right: 8px; font-weight: 400; }
 .weather-popup .popup-info-note dd { margin-top: 6px; font-size: 13px; font-weight: 400; line-height: 1.65; white-space: pre-wrap; }
 .weather-popup-status { margin: 14px 0 0; color: #cbd5e1; }
+.ai-map-popup.has-info-image { width: min(360px, var(--popup-map-width, calc(100vw - 32px))); }
+.ai-map-popup.has-info-image .maplibregl-popup-content { padding: 0; overflow: hidden; background: #fff; color: #1e293b; border-radius: 14px; }
+.info-image-popup { display: flex; flex-direction: column; max-height: min(640px, var(--popup-map-height, calc(100dvh - 48px))); font: 13px/1.55 Inter, "Segoe UI", sans-serif; }
+.info-image-media { position: relative; flex: 0 0 auto; min-height: 0; aspect-ratio: 4 / 3; width: 100%; background: #f1f5f9; overflow: hidden; }
+.info-image-frame, .info-image-photo { width: 100%; height: 100%; }
+.info-image-photo { object-fit: cover; }
+.info-image-placeholder { position: absolute; inset: 0; display: grid; place-content: center; padding: 24px; margin: 0; text-align: center; color: #64748b; }
+.info-image-navigation { position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.info-image-navigation button { width: 36px; height: 36px; border: 0; border-radius: 50%; background: #fff; color: #0f172a; font-size: 25px; cursor: pointer; box-shadow: 0 2px 8px #0003; }
+.info-image-counter { padding: 3px 10px; border-radius: 16px; background: #0f172abf; color: #fff; }
+.info-image-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px 18px; overflow-wrap: anywhere; }
+.info-image-body h2 { margin: 0 24px 12px 0; font-size: 20px; line-height: 1.35; color: #0f172a; }
+.info-image-source + .info-image-source { margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0; }
+.info-image-source-label { margin: 0 0 8px; font-size: 11px; font-weight: 500; color: #64748b; }
+.info-image-address { color: #475569; }
+.info-image-description, .info-image-address { margin: 8px 0; white-space: pre-wrap; }
+.info-image-details { margin: 12px 0 0; }
+.info-image-details > div { margin-top: 8px; }
+.info-image-details dt { font-size: 11px; color: #64748b; }
+.info-image-details dd { margin: 2px 0 0; white-space: pre-wrap; }
+.info-image-links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; }
+.info-image-links a { color: #2563eb; }
+.info-image-actions { flex: 0 0 auto; padding: 12px 18px; border-top: 1px solid #e2e8f0; }
+.info-image-directions { display: block; padding: 9px 16px; text-align: center; border-radius: 8px; background: #2563eb; color: #fff; font-weight: 600; text-decoration: none; }
+.info-image-popup [hidden] { display: none; }
+.popup-joined-records { border-top: 1px solid #ffffff24; margin-top: 14px; }
 
 /* Workspace composition: one canvas, independent controls and legends per dataset. */
 .layer-sidebar[hidden], .layer-sidebar [hidden], .layer-legends[hidden], .workspace-metrics > [hidden], .workspace-tables > [hidden] { display: none !important; }

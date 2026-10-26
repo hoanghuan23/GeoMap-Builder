@@ -25,7 +25,7 @@ export function popupDisplayOptions(suggestion, columns = []) {
   const time = popupTimeColumn(chartColumns);
   const hasMeasure = chartColumns.some(column => column.role === "measure");
   const options = normalizePopupSuggestions(suggestion?.popupSuggestions).map(item => {
-    const unavailableReason = item.name !== "line" ? "" : !time ? "Cần cột thời gian để vẽ biểu đồ đường"
+    const unavailableReason = item.name === "info_image" ? (suggestion?.popupContent?.imageFields?.length || suggestion?.hasJoinedImages ? "" : "Chưa có trường hình ảnh hợp lệ") : item.name !== "line" ? "" : !time ? "Cần cột thời gian để vẽ biểu đồ đường"
       : !hasMeasure ? "Cần chỉ số đo hợp lệ để vẽ biểu đồ đường" : "";
     return { ...item, available: !unavailableReason, unavailableReason, fallback: false };
   });

@@ -116,10 +116,10 @@ test("popup recommendations have a compact per-map schema and survive server/cli
   const suggestionSchema = ANALYSIS_RESPONSE_SCHEMA.properties.suggestions.items;
   assert.ok(suggestionSchema.required.includes("popupSuggestions"));
   const schema = suggestionSchema.properties.popupSuggestions;
-  assert.equal(schema.minItems, 1); assert.equal(schema.maxItems, 3);
+  assert.equal(schema.minItems, 1); assert.equal(schema.maxItems, 4);
   assert.deepEqual(schema.items.required, ["name", "confidence"]);
   assert.equal(schema.items.additionalProperties, false);
-  assert.deepEqual(schema.items.properties.name.enum, ["info", "bar", "line"]);
+  assert.deepEqual(schema.items.properties.name.enum, ["info", "info_image", "bar", "line"]);
   assert.equal(schema.items.properties.confidence.minimum, 0);
   assert.equal(schema.items.properties.confidence.maximum, 1);
   const dataProfile = { ...profile, columns: [...profile.columns,

@@ -8,6 +8,7 @@ import * as times from "../src/time-values.js";
 import { AI_CHART_REGISTRY, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "../src/ai-data-analysis.js";
 import { createAiPopupContent } from "../src/ai-popup.js";
+import { createInfoImagePopup } from "../src/info-image-popup.js";
 import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
 import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
 import { analyzeSpatialData } from "../src/data-capabilities.js";
@@ -127,7 +128,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   if (metricButtons !== null) dataset.suggestions.find(suggestion => suggestion.id === dataset.selectedSuggestionId).metricButtons = metricButtons;
   const context = vm.createContext({
     ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract, ...categoricalColor,
-    fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, collapseCountryFeatures, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
+    fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, createInfoImagePopup, collapseCountryFeatures, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
     BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
     humanizeField: field => field, renderMapIcon() {}, renderChartIcon() {}, keepSelectOpenAfterMouseClick: value => value,
@@ -267,7 +268,7 @@ test("an all-null selected Polygon measure keeps its thematic configuration and 
   assert.equal(h.get("fixed-color").disabled, true);
 });
 
-test("Point and both Line providers retain default colors and controls without measures", async () => {
+test("Point and both Line providers keep color legends and toggles without measures", async () => {
   const point = harness({ point: true });
   point.run(`dataset.analysis.columns = dataset.analysis.columns.filter(column => column.role !== 'measure');
     dataset.pointModels = {}; dataset.pointSelections = {}; dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]);
@@ -275,7 +276,15 @@ test("Point and both Line providers retain default colors and controls without m
   assert.equal(point.run("dataset.activePointView.metric"), null);
   assert.equal(point.run("dataset.activePointView.paint['circle-color']"), point.run("state.pointStyle.color"));
   assert.equal(point.get("point-fixed-color-field").hidden, false);
+  assert.equal(point.get("point-show-legend-field").hidden, false);
+  assert.equal(point.get("point-legend").hidden, false);
+  assert.equal(point.get("point-legend").querySelector(".point-legend-row").children[0].style.background, point.run("state.pointStyle.color"));
+  point.run("state.pointStyle = {...state.pointStyle, color:'#123456'}; refreshPointStyle();");
+  assert.equal(point.get("point-legend").querySelector(".point-legend-row").children[0].style.background, "#123456");
+  point.run("state.pointStyle.showLegend = false; renderPointLegend();");
   assert.equal(point.get("point-legend").hidden, true);
+  point.run("state.pointStyle.showLegend = true; renderPointLegend();");
+  assert.equal(point.get("point-legend").hidden, false);
   assert.equal(point.sources.get("point-data").data.features.length, 2);
   for (const options of [{ road: true }, { path: true }]) {
     const h = harness(options);
@@ -284,7 +293,14 @@ test("Point and both Line providers retain default colors and controls without m
       populateAiFilters(dataset); refreshAiRoadMap(); renderRoadStyleControls(); renderRoadLegend();`);
     assert.equal(h.run("dataset.recommendation.metricField"), null);
     assert.equal(h.run("dataset.roadStyle.color"), "#00d084");
+    assert.equal(h.get("ai-line-legend").hidden, false);
+    assert.equal(h.get("ai-line-legend").querySelector(".point-legend-row").children[0].style.background, h.run("dataset.roadStyle.color"));
+    h.run("roadColorOverridesFor(dataset.suggestions[0]).path = '#123456'; refreshAiRoadMap();");
+    assert.equal(h.get("ai-line-legend").querySelector(".point-legend-row").children[0].style.background, "#123456");
+    h.run("state.roadDisplayStyle.showLegend = false; renderRoadLegend();");
     assert.equal(h.get("ai-line-legend").hidden, true);
+    h.run("state.roadDisplayStyle.showLegend = true; renderRoadLegend();");
+    assert.equal(h.get("ai-line-legend").hidden, false);
     assert.equal(h.get("road-style-colors").children.length, 1);
     assert.ok(h.sources.get("line-data").data.features.length > 0);
   }
@@ -1199,4 +1215,29 @@ test("coordinate Line keeps coordinate/order fields out of metric controls and a
   control.value = "#123456"; h.get("road-style-controls").events.change({ target: control });
   assert.equal(JSON.stringify(h.run("dataset.roadStyle.color")), JSON.stringify(["case", ["==", ["typeof", ["get", "speed"]], "number"], "#123456", "rgba(0, 0, 0, 0)"]));
   assert.equal(h.rendered.length, before, "changing map color does not rebuild popup charts");
+});
+
+
+test("image information follows AI rank, keeps image navigation out of chart settings, and switches modes without AI", () => {
+  const h = harness({ point: true, popupSuggestions: [{ name: "info_image", confidence: .99 }, { name: "info", confidence: .9 }, { name: "bar", confidence: .8 }] });
+  h.run(`dataset.analysis.columns.push({name:'photo',role:'text'}, {name:'description',role:'text'});
+    dataset.analysis.popupContent = {titleField:'ten_cua_hang',imageFields:['photo'],descriptionFields:['description']};
+    dataset.records.forEach(record => {record.photo='https://example.org/photo'; record.description='<b>Thông tin gốc</b>';});
+    dataset.popupSelections = {}; populatePointControls(activeMapPopupSuggestion());
+    openMapPopup({...state.pointData.features[0], geometry:{type:'Point',coordinates:[105.85,21.02]}}, [105.85,21.02], 'point-marker');`);
+  assert.equal(h.run('popupSelectionFor().mode'), 'info_image');
+  assert.equal(h.all('.ai-popup-settings').length, 0);
+  assert.equal(h.popups[0].card.className, 'info-image-popup');
+  assert.equal(h.run('popupSelectionFor().info_image'), undefined);
+  h.mode('bar'); assert.ok(h.all('.ai-popup-settings').length);
+  assert.equal(h.rendered.at(-1).kind, 'bar');
+  h.mode('info_image'); assert.equal(h.all('.ai-popup-settings').length, 0);
+  assert.equal(h.popups[0].card.className, 'info-image-popup');
+  h.run(`options.popupMetadata = () => ({hasJoinedImages: true, popupSuggestions:[{name:'info_image', confidence:1}]}); populatePointControls(activeMapPopupSuggestion());`);
+  assert.equal(h.run('popupSelectionFor().mode'), 'info_image');
+  h.mode('info');
+  h.run('populatePointControls(activeMapPopupSuggestion())');
+  assert.equal(h.run('popupSelectionFor().mode'), 'info', 'new suggestions preserve an available user choice');
+  h.run('dataset.analysis.popupContent = null; options.popupMetadata = () => ({}); populatePointControls(activeMapPopupSuggestion())');
+  assert.equal(h.run('popupSelectionFor().mode'), 'info');
 });

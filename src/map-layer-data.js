@@ -1,3 +1,4 @@
+import { normalizePopupContent } from './popup-content-contract.js';
 import { geometryKinds } from './geojson-layers.js';
 
 export function asFeatureCollection(data) {
@@ -35,13 +36,14 @@ export function describeWorkspaceLayer(id, state, title) {
   const analysis = dataset?.analysis || state.spatialAnalysis;
   const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
   const data = dataset?.nativeGeometry ? { type: 'FeatureCollection', features: dataset.nativeGeometry.features }
-    : dataset?.boundaries?.features?.length ? dataset.boundaries : state.sourceBoundary || layerData(state);
+    : dataset?.boundaries?.features?.length ? dataset.boundaries : dataset?.spatialData || state.sourceBoundary || layerData(state);
   const columns = analysis?.columns || [
     ...(state.dataProfile?.textFields || []).map(name => ({ name, role: 'text' })),
     ...(state.dataProfile?.numericFields || []).map(name => ({ name, role: 'measure' }))
   ];
   const time = columns.find(column => column.role === 'time');
-  return { id, title, grain: analysis?.grain || 'Đối tượng không gian từ geometry có sẵn', chartType: suggestion?.chartType || state.mapType,
+  const sourceKind = !geometryExtent(data) && dataset && !dataset.suggestions?.length ? 'attribute' : 'spatial';
+  return { id, title, sourceKind, popupContent: normalizePopupContent(analysis?.popupContent, columns), popupSuggestions: suggestion?.popupSuggestions || [], grain: analysis?.grain || 'Đối tượng không gian từ geometry có sẵn', chartType: suggestion?.chartType || state.mapType,
     available: Boolean(geometryExtent(data)) && (!dataset || suggestion?.available === true) && Boolean(state.mapType || state.uploadLayers?.length),
     geometryKinds: geometryKinds(data), extent: geometryExtent(data), columns,
     time: time ? { field: time.name, granularity: time.granularity || '', count: dataset?.profile?.columns?.find(column => column.name === time.name)?.uniqueCount || 0 } : null,
@@ -49,7 +51,7 @@ export function describeWorkspaceLayer(id, state, title) {
 }
 
 export function tableRecords(state) {
-  if (!layerData(state) && state.aiDataset) return state.aiDataset.records;
+  if (state.aiDataset && (!state.mapType || !geometryExtent(layerData(state)))) return state.aiDataset.records;
   return asFeatureCollection(layerData(state)).features.map(feature => feature.properties || {});
 }
 
