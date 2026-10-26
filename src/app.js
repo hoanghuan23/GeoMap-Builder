@@ -1940,7 +1940,7 @@ function buildMapPopupControls(dataset, suggestion) {
   const subject = suggestion.chartType === "map_line" ? "tuyến" : suggestion.chartType === "point" ? "điểm" : "vùng";
   const labels = {
     info: ["Chỉ hiển thị thông tin", "Hiển thị các chỉ số dưới dạng thẻ thông tin", null],
-    info_image: ["Thông tin kèm hình ảnh", "Xem hình ảnh và thông tin của đối tượng", null],
+    info_image: ["Thông tin kèm hình ảnh", "Xem hình ảnh và thông tin của đối tượng", "image"],
     bar: ["Biểu đồ cột", `Hiển thị biểu đồ cột của ${subject} được chọn`, "singleBar"],
     line: ["Biểu đồ đường", `Hiển thị biểu đồ đường của ${subject} được chọn`, "line"]
   };

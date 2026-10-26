@@ -1,4 +1,10 @@
 export const chartIcons = Object.freeze({
+  image: `
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#262626" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <circle cx="14.5" cy="9" r="1.5" />
+      <path d="M4 16L9 11L18 20" />
+    </svg>`,
   singleBar: `
     <svg width="24" height="24" viewBox="0 0 24 24" fill="#389e55" aria-hidden="true">
       <rect x="3" y="9" width="5" height="12" rx="1.5" />
