@@ -3,6 +3,9 @@ export function createMapLayerManager(nativeMap, id, { onChange = () => {}, onIn
   const prefix = `${id}--`;
   const sources = new Map(); const layers = new Map(); const listeners = []; const popups = new Set();
   let attached = false; let interactive = false; let disposed = false; let visible = true;
+  let dataFilter = null;
+  const sourceData = spec => spec.type === 'geojson' && dataFilter ? dataFilter(spec.data) : spec.data;
+  const sourceSpec = spec => spec.type === 'geojson' && dataFilter ? { ...spec, data: sourceData(spec) } : spec;
   const key = name => `${prefix}${name}`;
   const local = feature => ({ ...feature, layer: feature.layer ? { ...feature.layer, id: feature.layer.id.replace(prefix, '') } : undefined });
   const actualLayout = spec => ({ ...spec.layout, visibility: visible ? spec.layout?.visibility || 'visible' : 'none' });
@@ -15,13 +18,13 @@ export function createMapLayerManager(nativeMap, id, { onChange = () => {}, onIn
   const handlers = {
     addSource(name, spec) {
       sources.set(name, { ...spec });
-      if (attached && !nativeMap.getSource(key(name))) nativeMap.addSource(key(name), spec);
+      if (attached && !nativeMap.getSource(key(name))) nativeMap.addSource(key(name), sourceSpec(spec));
       notify(); return proxy;
     },
     getSource(name) {
       const spec = sources.get(name);
       if (!spec) return undefined;
-      return { ...spec, setData(data) { spec.data = data; if (attached) nativeMap.getSource(key(name))?.setData(data); notify(); } };
+      return { ...spec, setData(data) { spec.data = data; if (attached) nativeMap.getSource(key(name))?.setData(sourceData(spec)); notify(); } };
     },
     removeSource(name) {
       if (attached && nativeMap.getSource(key(name))) nativeMap.removeSource(key(name));
@@ -99,6 +102,13 @@ export function createMapLayerManager(nativeMap, id, { onChange = () => {}, onIn
   } });
   return {
     id, map: proxy, sources, layers,
+    setDataFilter(filter) {
+      if (filter === dataFilter) return;
+      dataFilter = filter;
+      if (attached) for (const [name, spec] of sources) {
+        if (spec.type === 'geojson') nativeMap.getSource(key(name))?.setData(sourceData(spec));
+      }
+    },
     setInteractive(value) { interactive = value; },
     setVisible(value) {
       visible = value;
@@ -107,7 +117,7 @@ export function createMapLayerManager(nativeMap, id, { onChange = () => {}, onIn
     attach() {
       if (disposed) return;
       attached = true;
-      for (const [name, spec] of sources) if (!nativeMap.getSource(key(name))) nativeMap.addSource(key(name), spec);
+      for (const [name, spec] of sources) if (!nativeMap.getSource(key(name))) nativeMap.addSource(key(name), sourceSpec(spec));
       for (const [name, spec] of layers) if (!nativeMap.getLayer(key(name))) nativeMap.addLayer({ ...spec, id: key(name), source: key(spec.source),
         layout: actualLayout(spec), metadata: { ...spec.metadata, workspaceLayer: id } });
     },

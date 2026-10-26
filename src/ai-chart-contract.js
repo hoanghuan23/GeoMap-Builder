@@ -2,6 +2,7 @@ import { TIME_GRANULARITIES } from "./time-values.js";
 import { measureAggregation } from "./measure-semantics.js";
 import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "./polygon-legend-contract.js";
 import { normalizeDataSearchConfig } from "./data-search-config.js";
+import { COUNTRY_REGION_CATALOG, normalizeRegionNavigation } from "./country-regions.js";
 
 const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "text", "ignore"]);
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
@@ -99,12 +100,21 @@ const LEGEND_SCHEMA = { anyOf: [...POLYGON_LEGEND_SCHEMA.anyOf, { type: "null" }
 export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["datasetTitle", "grain", "columns", "suggestions", "search_bar", "search_fields"],
+  required: ["datasetTitle", "grain", "columns", "suggestions", "search_bar", "search_fields", "regionNavigation"],
   properties: {
     datasetTitle: { type: "string" },
     grain: { type: "string" },
     search_bar: { type: "boolean", description: "Có nên bật tìm kiếm mặc định theo số đối tượng và lợi ích tìm nhanh; không dùng ngưỡng 30 cứng." },
     search_fields: { type: "array", items: { type: "string" }, description: "Tên cột gốc có thật để tìm đối tượng: tên định danh chính trước, ngữ cảnh sau; không chọn cột đo lường." },
+    regionNavigation: nullable({
+      type: "object", additionalProperties: false, required: ["countryField", "regions"],
+      description: "Dropdown lọc khu vực khi dữ liệu chứa tên/mã quốc gia; null khi không phù hợp. Dùng các ID khu vực có sẵn, theo thứ tự AI đề xuất.",
+      properties: {
+        countryField: { type: "string", description: "Tên cột gốc chứa quốc gia, role geo và geoLevel country." },
+        regions: { type: "array", minItems: 1, maxItems: COUNTRY_REGION_CATALOG.length,
+          items: { type: "string", enum: COUNTRY_REGION_CATALOG.map(region => region.id) } }
+      }
+    }),
     columns: {
       type: "array",
       items: {
@@ -340,6 +350,7 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     columns,
     suggestions: suggestions.map(suggestion => ({ ...suggestion, source })),
     ...normalizeDataSearchConfig(raw, columns),
+    ...(Object.hasOwn(raw, "regionNavigation") ? { regionNavigation: source === "ai" ? normalizeRegionNavigation(raw.regionNavigation, columns) : null } : {}),
     source,
     validationErrors: [...new Set(errors)]
   };

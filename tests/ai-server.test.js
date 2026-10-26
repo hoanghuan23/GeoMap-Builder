@@ -49,6 +49,31 @@ async function call(middleware, body, path = "/api/ai/analyze-map-data") {
   return { status: response.statusCode, body: JSON.parse(text) };
 }
 
+test("the existing analysis request supplies country region coverage and returns AI navigation choices", async t => {
+  const profile = profileTabularData([{ country: "Việt Nam" }, { country: "Laos" }, { country: "JPN" }]);
+  const regionNavigation = { countryField: "country", regions: ["subregion:South-eastern Asia", "region:Asia"] };
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    calls++;
+    const payload = JSON.parse(options.body);
+    const input = JSON.parse(payload.input);
+    assert.equal(input.profile.columns[0].countryRegions.countryCount, 3);
+    assert.match(payload.instructions, /country_regions.json/);
+    assert.match(payload.instructions, /Đề xuất này độc lập với search_bar/);
+    assert.ok(payload.text.format.schema.required.includes("regionNavigation"));
+    return { ok: true, json: async () => ({ output_text: JSON.stringify({
+      columns: [{ name: "country", role: "geo", geoLevel: "country" }],
+      suggestions: [{ id: "countries", chartType: "choropleth", bindings: { region: "country", value: null } }],
+      regionNavigation, search_bar: false, search_fields: []
+    }) }) };
+  });
+  const response = await call(middlewareFor({ OPENAI_API_KEY: "test" }), { profile });
+  assert.equal(response.status, 200);
+  assert.equal(calls, 1);
+  assert.deepEqual(response.body.regionNavigation, regionNavigation);
+  assert.equal(response.body.search_bar, false);
+});
+
 test("middleware forwards per-column temperature semantics and legends without changing the input contract", async () => {
   const originalFetch = globalThis.fetch;
   const legend = legendFixture();

@@ -867,7 +867,11 @@ function aiWeatherPopupContent(feature) {
       recommendation.geometry.field, { chartType: "choropleth", columns, bindings: activePolygonSuggestion()?.bindings }) : [];
   return createAiPopupContent(document, feature, displayedColumns,
     state.aiDataset.nativeTitleField || (activeMapPopupSuggestion()?.chartType === "point"
-      ? pointTitleField(displayedColumns) || state.aiDataset.analysis.search_fields?.[0] : recommendation.geometry?.field), { records });
+      ? pointTitleField(displayedColumns) || state.aiDataset.analysis.search_fields?.[0] : recommendation.geometry?.field), {
+        records,
+        datasetTitle: state.aiDataset.analysis?.datasetTitle?.trim()
+          || String(state.aiDataset.fileName || state.fileName || "").replace(/\.[^/.]+$/, "")
+      });
 }
 
 function showAiPolygonDetails(event) {
@@ -2978,6 +2982,7 @@ function currentDataSearch() {
     : selectedProvinceNames().length > 0;
   return { data, columns, titleField, chartType: dataset?.nativeGeometry ? undefined : suggestion?.chartType,
     search_bar: dataset?.analysis.search_bar ?? state.spatialAnalysis?.search_bar, search_fields: dataset?.analysis.search_fields || state.spatialAnalysis?.search_fields,
+    regionNavigation: dataset?.analysis.regionNavigation ?? state.spatialAnalysis?.regionNavigation,
     filtered, sourceRecords: dataset?.records, locationKeys: dataset?.boundaries?.locationKeys };
 }
 

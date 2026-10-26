@@ -101,10 +101,27 @@ test("renderer ghi chuỗi HTML bằng textContent", () => {
   };
   const card = createAiPopupContent(documentRef, {
     properties: { province: "Lào Cai", note: "<b>x</b>" }
-  }, [columns[0], columns[8]], "province");
+  }, [columns[0], columns[8]], "province", { datasetTitle: "<b>Dữ liệu đầu vào</b>" });
   const list = card.children[1];
   assert.equal(list.children[0].children[1].textContent, "<b>x</b>");
   assert.equal(list.children[0].className, "popup-info-note");
   assert.equal(card.children[0].children[1].textContent, "Lào Cai");
+  assert.equal(card.children[0].children[0].textContent, "<b>Dữ liệu đầu vào</b>");
   assert.equal(innerHtmlWrites, 0);
+});
+
+test("popup keeps the input dataset title and original field labels for single and multiple country records", () => {
+  const documentRef = { createElement(tagName) { return { tagName, children: [], textContent: "", append(...children) { this.children.push(...children); } }; } };
+  const sourceColumns = [{ name: "Điểm đến", role: "geo" }, { name: "Khu vực", role: "geo" }, { name: "Cấp độ tiếp cận", role: "category" }];
+  const record = { "Điểm đến": "Myanmar", "Khu vực": "Đông Nam Á", "Cấp độ tiếp cận": "Miễn thị thực" };
+  for (const records of [[], [record, { ...record, "Cấp độ tiếp cận": "Thị thực khi đến" }]]) {
+    const card = createAiPopupContent(documentRef, { properties: record }, sourceColumns, "Điểm đến", {
+      records, datasetTitle: "Hộ chiếu Việt Nam — quyền tiếp cận điểm đến"
+    });
+    assert.equal(card.children[0].children[0].textContent, "Hộ chiếu Việt Nam — quyền tiếp cận điểm đến");
+    assert.equal(card.children[0].children[1].textContent, "Myanmar");
+    const list = records.length ? card.children[1].children[0].children[1] : card.children[1];
+    assert.deepEqual(list.children.map(row => row.children[0].textContent), ["Khu vực", "Cấp độ tiếp cận"]);
+    assert.deepEqual(list.children.map(row => row.children[1].textContent), ["Đông Nam Á", "Miễn thị thực"]);
+  }
 });

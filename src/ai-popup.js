@@ -39,14 +39,21 @@ function popupDetailKind(detail, column) {
   return "value";
 }
 
-export function createAiPopupContent(documentRef, feature, columns, geometryField, { records = [] } = {}) {
+export function createAiPopupContent(documentRef, feature, columns, geometryField, { records = [], datasetTitle = "" } = {}) {
   const properties = feature?.properties || {};
   const card = documentRef.createElement("div");
   card.className = "weather-popup";
   const title = documentRef.createElement("strong");
   title.textContent = properties[geometryField] || properties.h3 || "Khu vực dữ liệu";
+  const heading = documentRef.createElement("header");
+  heading.className = "popup-info-heading";
+  const caption = documentRef.createElement("small");
+  caption.className = "popup-info-caption";
+  const geometryColumn = (columns || []).find(column => column.name === geometryField);
+  caption.textContent = String(datasetTitle || "").trim()
+    || (geometryColumn ? `Thông tin ${geometryColumn.labelVi || humanizeField(geometryColumn.name)}` : "Thông tin khu vực");
+  heading.append(caption, title);
   if (records.length > 1) {
-    title.className = "popup-country-title";
     const sections = documentRef.createElement("div");
     sections.className = "popup-source-records";
     for (const record of records) {
@@ -54,16 +61,9 @@ export function createAiPopupContent(documentRef, feature, columns, geometryFiel
       section.className = "popup-source-record";
       sections.append(section);
     }
-    card.append(title, sections);
+    card.append(heading, sections);
     return card;
   }
-  const heading = documentRef.createElement("header");
-  heading.className = "popup-info-heading";
-  const caption = documentRef.createElement("small");
-  caption.className = "popup-info-caption";
-  const geometryColumn = (columns || []).find(column => column.name === geometryField);
-  caption.textContent = geometryColumn ? `Thông tin ${geometryColumn.labelVi || humanizeField(geometryColumn.name)}` : "Thông tin khu vực";
-  heading.append(caption, title);
   const list = documentRef.createElement("dl");
   list.className = "popup-info-details";
   const compactRows = { value: [], meta: [] };

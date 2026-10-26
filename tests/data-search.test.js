@@ -9,6 +9,8 @@ import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
 import { normalizeCompositionInput, normalizeCompositionResult } from "../src/map-composition-contract.js";
 import { createMapWorkspace, addWorkspaceLayer, createWorkspaceGroup, applyWorkspaceComposition } from "../src/map-workspace.js";
 import { countryFeature, createCountryWeatherWorkbook, WEATHER_COUNTRIES } from "./fixtures/country-weather-fixture.js";
+import { filterCountryRegionData } from "../src/country-regions.js";
+import { createMapLayerManager } from "../src/map-layer-manager.js";
 
 function countryData() {
   const names = ["Việt Nam", "Nga", "Hoa Kỳ", "Úc", "Áo", "Lào", "Nhật Bản", "Hàn Quốc"];
@@ -27,7 +29,7 @@ function countryData() {
   return { data, columns: analysis.columns, titleField: recommendation.geometry.field };
 }
 
-function harness(t) {
+function harness(t, options = {}) {
   const element = () => ({
     value: "", hidden: false, disabled: false, children: [], handlers: {}, attributes: {},
     classList: { toggle() {} }, scrollIntoView() {}, focus() {}, blur() {},
@@ -64,6 +66,7 @@ function harness(t) {
     addLayer(layer) { layers.set(layer.id, layer); }
   };
   const controller = createMapSearch({
+    ...options,
     map,
     onSelect: (...args) => selected.push(args)
   });
@@ -73,8 +76,74 @@ function harness(t) {
     get("map-search-input").handlers.input();
     return get("map-search-results").children;
   };
-  return { controller, get, search, camera, selected, sources, layers };
+  return { controller, get, search, camera, selected, sources, layers, map };
 }
+
+test("region dropdown filters actual polygon sources and search, then restores the world", t => {
+  const snapshot = countryData();
+  const regionNavigation = { countryField: snapshot.titleField, regions: ["subregion:South-eastern Asia", "region:Asia", "region:Europe"] };
+  const config = { ...snapshot, regionNavigation };
+  let manager;
+  const { controller, get, search, map, sources } = harness(t, {
+    onRegionChange: id => manager.setDataFilter(id ? data => filterCountryRegionData(data, config, id) : null)
+  });
+  manager = createMapLayerManager(map, 'countries');
+  for (const source of ['polygon-data', 'vietnam-boundary', 'h3-grid']) manager.map.addSource(source, { type: 'geojson', data: snapshot.data });
+  manager.attach();
+  controller.setData(config);
+  const select = get("map-region-navigation");
+  assert.deepEqual(select.children.map(option => option.textContent), ["Toàn thế giới", "Đông Nam Á", "Châu Á", "Châu Âu"]);
+  const choose = value => { select.value = value; select.handlers.change(); };
+  choose('subregion:South-eastern Asia');
+  for (const name of ['polygon-data', 'vietnam-boundary', 'h3-grid']) {
+    assert.deepEqual(sources.get('countries--' + name).data.features.map(feature => feature.properties[snapshot.titleField]), ['Việt Nam', 'Lào']);
+  }
+  assert.equal(snapshot.data.features.length, 8, 'source records remain intact');
+  assert.equal(search('Lào')[0].children[1].children[0].textContent, 'Lào');
+  assert.match(search('Japan')[0].textContent, /Không tìm thấy/);
+  assert.deepEqual(select.children.map(option => option.textContent), ["Toàn thế giới", "Đông Nam Á", "Châu Á", "Châu Âu"]);
+  const saved = controller.getState();
+  choose('region:Europe');
+  assert.deepEqual(sources.get('countries--polygon-data').data.features.map(feature => feature.properties[snapshot.titleField]), ['Nga', 'Áo']);
+  controller.restoreState(saved);
+  assert.equal(select.value, 'subregion:South-eastern Asia');
+  assert.equal(sources.get('countries--polygon-data').data.features.length, 2);
+  choose('');
+  assert.equal(sources.get('countries--polygon-data').data, snapshot.data);
+  assert.equal(search('Japan').length, 1);
+  controller.setData({ ...config, search_bar: false });
+  assert.equal(get('map-search-box').hidden, true);
+  assert.equal(select.hidden, false);
+  controller.setData();
+  assert.equal(get('map-search').hidden, true);
+  assert.equal(select.hidden, true);
+});
+
+test("group dropdown applies a common region to all layers and keeps choices available for empty intersections", t => {
+  const { controller, get, camera } = harness(t);
+  const columns = [{ name: "country", role: "geo", geoLevel: "country" }];
+  const regionNavigation = { countryField: "country", regions: ["subregion:South-eastern Asia", "region:Asia"] };
+  const layer = (country, coordinates) => ({ columns, search_bar: false, regionNavigation, sourceRecords: [{country}],
+    data: { features: [{ type: "Feature", properties: { country }, geometry: { type: "Point", coordinates } }] } });
+  const layers = [layer('Việt Nam', [106,21]), layer('Lào', [102,18]), layer('Germany', [13,52])];
+  const select = get('map-region-navigation');
+  const choose = id => { select.value = id; select.handlers.change(); };
+  controller.setData({ groupId: 'one', layers });
+  choose('subregion:South-eastern Asia');
+  assert.deepEqual(camera.at(-1)[0], [[102,18], [106,21]]);
+  controller.setData({ groupId: 'one', regionId: 'subregion:South-eastern Asia', layers: layers.map(layer => ({...layer, data: {features:[]}})) });
+  assert.equal(select.value, 'subregion:South-eastern Asia');
+  assert.equal(select.hidden, false);
+  choose('region:Asia');
+  assert.equal(select.value, 'region:Asia');
+  controller.setData({groupId: 'one', layers, regionId: ''});
+  choose('region:Asia');
+  choose('');
+  assert.deepEqual(camera.at(-1)[0], [[13,18], [106,52]]);
+  controller.setData({ groupId: 'two', layers: [layer('Japan', [140,36])] });
+  assert.equal(controller.getState().regionId, '');
+  assert.deepEqual(select.children.map(option => option.textContent), ['Toàn thế giới', 'Châu Á']);
+});
 
 test("selected boundary highlight follows search selection, survives style reload and clears with search", t => {
   const { controller, get, search, sources, layers } = harness(t);

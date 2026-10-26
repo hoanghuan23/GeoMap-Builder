@@ -1,5 +1,6 @@
 import { inferTimeGranularity, normalizeTimeValue, timeValueInfo } from "./time-values.js";
 import { countryLookupName, resolveBoundaryCountry } from "./country-boundary-sources.js";
+import { summarizeCountryRegions } from "./country-regions.js";
 
 function isDate(value) {
   return Object.prototype.toString.call(value) === "[object Date]" && !Number.isNaN(value.getTime());
@@ -230,6 +231,10 @@ export function profileTabularData(records, { includeSamples = true, maxSamples 
     if (includeSamples) {
       column.samples = state.samples.map(jsonValue);
       if (inferredType === "text" && !state.uniqueCountCapped && state.uniques.size <= 12) column.categoryValues = [...state.uniques].map(value => value.slice(value.indexOf(":") + 1));
+      if (inferredType === "text" && !state.uniqueCountCapped) {
+        const coverage = summarizeCountryRegions([...state.uniques].map(value => value.slice(value.indexOf(":") + 1)));
+        if (coverage) column.countryRegions = coverage;
+      }
     }
     return column;
   });

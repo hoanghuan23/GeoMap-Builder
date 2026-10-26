@@ -7,6 +7,7 @@ import { describeWorkspaceLayer, geometryExtent, layerData, tableRecords, csvFor
 import { createMapSearch } from './map-search.js';
 import { CONFIG } from './config.js';
 import { expandJsonUpload } from './json-datasets.js';
+import { countryRegionMatches, filterCountryRegionData } from './country-regions.js';
 
 const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
@@ -50,6 +51,11 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   let selectedSignature = ''; let compositionController; let currentStyle = 'liberty'; let statusTimer; let styleReady = false;
   const mounted = new Set();
   const search = createMapSearch({ map, minFilteredObjects: CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS,
+    onRegionChange(regionId) {
+      const group = activeMapGroup(workspace); if (!group) return;
+      group.regionId = regionId;
+      closePopups(); sync();
+    },
     onSelect(_feature, _center, entry) {
       if (!runtimes.has(entry?.layerId)) return;
       closePopups();
@@ -99,7 +105,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         schedule();
       },
       renderTable() { schedule(); return true; },
-      exportData(state) { downloadRecords(state, workspace.layersById[id]?.title || 'Dữ liệu'); return true; }
+      exportData(state) { downloadRecords(state, workspace.layersById[id]?.title || 'Dữ liệu', api.searchData()); return true; }
     });
     api.initialize();
     const item = { id, api, manager, dom, panel, metric, legends, table, chart, heading, tabs, layerCount, metricHeading, legendHeading, genericLegend, tableSnapshot: null, preparsedResults };
@@ -116,7 +122,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   function saveViewport(group) {
     if (group) {
       group.viewport = { center: map.getCenter().toArray(), zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() };
-      group.searchState = search.getState();
+      group.searchState = { ...search.getState(), regionId: group.regionId || '' };
     }
   }
 
@@ -133,7 +139,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   }
 
   function fitGroup(group) {
-    const extents = group.layerIds.map(id => geometryExtent(layerData(runtimes.get(id).api.state))).filter(Boolean);
+    const extents = group.layerIds.map(id => {
+      const item = runtimes.get(id);
+      return geometryExtent(filterCountryRegionData(layerData(item.api.state), item.api.searchData(), group.regionId));
+    }).filter(Boolean);
     if (!extents.length) return;
     const bbox = [Math.min(...extents.map(box => box[0])), Math.min(...extents.map(box => box[1])), Math.max(...extents.map(box => box[2])), Math.max(...extents.map(box => box[3]))];
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 55, maxZoom: 12, duration: 0 });
@@ -141,6 +150,13 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
 
   function sync() {
     const group = activeMapGroup(workspace);
+    const searches = (group?.visible ? group.layerIds : []).map(id => {
+      const layer = workspace.layersById[id];
+      return { ...runtimes.get(id).api.searchData(), ...(!layer.searchEnabled ? { search_bar: false } : {}),
+        layerId: id, groupId: group.id, layerTitle: layer.title };
+    });
+    search.setData({ layers: searches, groupId: group?.id, regionId: group?.regionId || '' });
+    if (group?.visible) group.regionId = search.getState().regionId;
     empty.hidden = Boolean(group);
     groupField.hidden = !group; compositionNote.hidden = !group; actions.hidden = !group;
     showTable.hidden = !group; showTable.disabled = !group;
@@ -161,6 +177,14 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     for (const [id, item] of runtimes) {
       const active = group?.activeLayerId === id;
       const isVisible = visibleIds.has(id);
+      const config = item.api.searchData();
+      const regionId = isVisible ? group.regionId || '' : '';
+      const filterKey = JSON.stringify([regionId, config.regionNavigation?.countryField,
+        config.columns?.filter(column => column.role === 'geo' && column.geoLevel === 'country').map(column => column.name)]);
+      if (item.regionFilterKey !== filterKey) {
+        item.regionFilterKey = filterKey;
+        item.manager.setDataFilter(regionId ? data => filterCountryRegionData(data, config, regionId) : null);
+      }
       item.manager.setInteractive(active);
       if (isVisible && styleReady && !mounted.has(id)) { item.manager.attach(); mounted.add(id); }
       if (!isVisible && mounted.has(id)) { item.manager.detach(); mounted.delete(id); item.api.closePopup(); }
@@ -180,7 +204,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       item.metricHeading.textContent = workspace.layersById[id]?.title || '';
       item.legendHeading.textContent = workspace.layersById[id]?.title || '';
       const otherLegend = [...item.legends.children].some(node => node !== item.genericLegend && node.tagName === 'DIV' && !node.hidden);
-      const count = layerData(item.api.state)?.features?.length || 0;
+      const count = filterCountryRegionData(layerData(item.api.state), config, regionId)?.features?.length || 0;
       item.genericLegend.hidden = otherLegend || !count;
       if (!item.genericLegend.hidden) item.genericLegend.textContent = `${workspace.layersById[id]?.title} · ${count.toLocaleString('vi-VN')} đối tượng`;
       item.chart.hidden = true;
@@ -197,11 +221,6 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     }
     document.querySelector('.content-area').classList.toggle('table-hidden', !tableShown || !group);
     orderWorkspaceMapLayers(map);
-    const searches = (group?.visible ? group.layerIds : []).flatMap(id => {
-      const layer = workspace.layersById[id]; if (!layer.searchEnabled) return [];
-      return [{ ...runtimes.get(id).api.searchData(), layerId: id, groupId: group.id, layerTitle: layer.title }];
-    });
-    search.setData({ layers: searches, groupId: group?.id });
     const unknown = Object.values(workspace.groupsById).some(value => value.composition?.action === 'undetermined');
     retry.hidden = !unknown || Object.keys(workspace.layersById).length < 2;
     compositionNote.textContent = group?.composition?.reason || (group ? `${group.layerIds.length} lớp dữ liệu trong bản đồ đang hiển thị.` : '');
@@ -237,9 +256,11 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
 
   function renderTable(item, title) {
     const state = item.api.state; const data = layerData(state);
-    const signature = [data, state.page, state.pageSize, state.query];
+    const regionId = activeMapGroup(workspace)?.regionId || '';
+    const signature = [data, state.page, state.pageSize, state.query, regionId];
     if (item.tableSnapshot && item.tableSnapshot.every((value, index) => signature[index] === value)) return;
-    const all = tableRecords(state); const query = state.query.trim().toLocaleLowerCase('vi');
+    const config = item.api.searchData();
+    const all = tableRecords(state).filter(record => countryRegionMatches(record, config, regionId)); const query = state.query.trim().toLocaleLowerCase('vi');
     const filtered = query ? all.filter(record => Object.values(record).some(value => String(value ?? '').toLocaleLowerCase('vi').includes(query))) : all;
     const columns = [...new Set(all.flatMap(record => Object.keys(record).filter(key => !key.startsWith('__'))))];
     const el = name => item.dom.elements.get(name);
@@ -255,11 +276,12 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     el('pagination-info').textContent = `${filtered.length ? start + 1 : 0}–${Math.min(start + state.pageSize, filtered.length)} của ${filtered.length}`;
     el('prev-page').disabled = state.page <= 1; el('next-page').disabled = start + state.pageSize >= filtered.length;
     el('page-buttons').replaceChildren(textNode('span', String(state.page)));
-    item.tableSnapshot = [data, state.page, state.pageSize, state.query];
+    item.tableSnapshot = [data, state.page, state.pageSize, state.query, regionId];
   }
 
-  function downloadRecords(state, title) {
-    const records = tableRecords(state); const query = state.query.trim().toLocaleLowerCase('vi');
+  function downloadRecords(state, title, config) {
+    const regionId = activeMapGroup(workspace)?.regionId || '';
+    const records = tableRecords(state).filter(record => countryRegionMatches(record, config, regionId)); const query = state.query.trim().toLocaleLowerCase('vi');
     const filtered = query ? records.filter(record => Object.values(record).some(value => String(value ?? '').toLocaleLowerCase('vi').includes(query))) : records;
     const url = URL.createObjectURL(new Blob([csvForRecords(filtered)], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a'); link.href = url; link.download = `${title.replace(/[<>:"/\\|?*]/g, '_')}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);

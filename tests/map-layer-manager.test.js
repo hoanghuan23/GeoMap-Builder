@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMapLayerManager, orderWorkspaceMapLayers } from '../src/map-layer-manager.js';
+import { filterCountryRegionData } from '../src/country-regions.js';
 
 function fakeMap() {
   const sources = new Map(); const layers = new Map(); const listeners = new Map();
@@ -35,6 +36,30 @@ test('same-type layers isolate source data, paint, visibility and lifecycle acro
   native.sources.clear(); native.layers.clear(); a.attach(); b.attach();
   assert.equal(native.layers.size, 2);
   a.dispose(); assert.equal(native.layers.size, 1); assert.equal(native.sources.size, 1);
+});
+
+test('country filtering survives source rebuilds, inactive groups and basemap changes, and world restores the latest data', () => {
+  const native = fakeMap(); const manager = createMapLayerManager(native, 'countries');
+  const config = { columns: [{name: 'country', role: 'geo', geoLevel: 'country'}] };
+  const data = names => ({type:'FeatureCollection', features: names.map(country => ({type:'Feature', properties:{country}, geometry:{type:'Polygon',coordinates:[]}}))});
+  const original = data(['Việt Nam', 'Germany', 'Japan', 'Lào']);
+  manager.map.addSource('polygon-data', {type:'geojson', data:original});
+  manager.map.addLayer({id:'polygon-fill',type:'fill',source:'polygon-data'});
+  manager.setDataFilter(data => filterCountryRegionData(data, config, 'subregion:South-eastern Asia'));
+  manager.attach();
+  const rendered = () => native.sources.get('countries--polygon-data').data.features.map(feature => feature.properties.country);
+  assert.deepEqual(rendered(), ['Việt Nam', 'Lào']);
+  assert.equal(manager.sources.get('polygon-data').data, original);
+  const updated = data(['Vietnam', 'Germany', 'Thailand']);
+  manager.map.getSource('polygon-data').setData(updated);
+  assert.deepEqual(rendered(), ['Vietnam', 'Thailand']);
+  manager.detach(); manager.attach();
+  assert.deepEqual(rendered(), ['Vietnam', 'Thailand']);
+  native.sources.clear(); native.layers.clear(); manager.attach();
+  assert.deepEqual(rendered(), ['Vietnam', 'Thailand']);
+  manager.setDataFilter(null);
+  assert.equal(native.sources.get('countries--polygon-data').data, updated);
+  assert.deepEqual(rendered(), ['Vietnam', 'Germany', 'Thailand']);
 });
 
 test('overlapping features dispatch clicks only to the top owner; dispose removes handlers', () => {

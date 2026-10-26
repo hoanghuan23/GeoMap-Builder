@@ -4,6 +4,7 @@ import {
   COUNTRY_BOUNDARY_SOURCES, countryLookupName, loadCountryBoundaryData, resolveBoundaryCountry, resolvedCountryProperties
 } from "./country-boundary-sources.js";
 import { sourceLocationNames } from "./geographic-grain.js";
+import { buildCountryRegionNavigation, filterCountryRegionData } from "./country-regions.js";
 
 const MAPTILER_GEOCODING_URL = "https://api.maptiler.com/geocoding";
 const VIETNAM_BBOX = "102.14,8.18,109.47,23.4";
@@ -605,19 +606,21 @@ export function buildGroupDataSearchIndex(layers = [], options = {}) {
 }
 
 function sameSearchData(previous, next) {
-  if (!previous || previous.groupId !== next.groupId) return false;
-  const keys = ['data', 'columns', 'titleField', 'chartType', 'search_bar', 'search_fields', 'filtered', 'sourceRecords', 'locationKeys', 'layerId', 'groupId', 'layerTitle'];
+  if (!previous || previous.groupId !== next.groupId || previous.regionId !== next.regionId) return false;
+  const keys = ['data', 'columns', 'titleField', 'chartType', 'search_bar', 'search_fields', 'regionNavigation', 'filtered', 'sourceRecords', 'locationKeys', 'layerId', 'groupId', 'layerTitle'];
   if (Array.isArray(next.layers)) return Array.isArray(previous.layers) && previous.layers.length === next.layers.length
     && next.layers.every((layer, index) => keys.every(key => previous.layers[index][key] === layer[key]));
   return !previous.layers && keys.every(key => previous[key] === next[key]);
 }
 
-export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }) {
+export function createMapSearch({ map, onSelect = null, onRegionChange = null, minFilteredObjects = 5 }) {
   const root = document.getElementById("map-search");
   const form = document.getElementById("map-search-form");
   const input = document.getElementById("map-search-input");
   const results = document.getElementById("map-search-results");
   const clearButton = document.getElementById("map-search-clear");
+  const searchBox = document.getElementById("map-search-box");
+  const navigation = document.getElementById("map-region-navigation");
   if (!root || !form || !input || !results || !clearButton) return { setData() {}, destroy() {} };
 
   let index = { entries: [] };
@@ -625,6 +628,22 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
   let activeIndex = -1;
   let snapshot;
   let selectedFeature = null;
+  let regions = [];
+  let regionId = "";
+
+  const renderRegions = () => {
+    if (!navigation) return;
+    navigation.hidden = !regions.length;
+    navigation.replaceChildren();
+    if (!regions.length) return;
+    for (const region of [{ id: "", label: "Toàn thế giới" }, ...regions]) {
+      const option = document.createElement("option");
+      option.value = region.id;
+      option.textContent = region.label;
+      navigation.append(option);
+    }
+    navigation.value = regionId;
+  };
 
   const setOpen = open => {
     results.hidden = !open;
@@ -641,6 +660,29 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
     results.replaceChildren();
     setOpen(false);
   };
+  const updateIndex = () => {
+    const layers = (snapshot?.layers || [snapshot || {}]).map(layer => ({ ...layer,
+      data: filterCountryRegionData(layer.data, layer, regionId) }));
+    index = Array.isArray(snapshot?.layers) ? buildGroupDataSearchIndex(layers, { minFilteredObjects })
+      : buildDataSearchIndex({ ...layers[0], minFilteredObjects });
+    reset();
+    renderRegions();
+    root.hidden = !index.enabled && !regions.length;
+    if (searchBox) searchBox.hidden = !index.enabled;
+    input.disabled = !index.enabled;
+    input.placeholder = index.placeholder;
+    input.setAttribute("aria-label", index.placeholder.replace(/\.\.\.$/, ""));
+    return layers;
+  };
+  const changeRegion = () => {
+    if (root.hidden || navigation.hidden) return;
+    const nextId = navigation.value;
+    if ((nextId && !regions.some(region => region.id === nextId)) || nextId === regionId) return;
+    regionId = nextId;
+    const layers = updateIndex();
+    onRegionChange?.(regionId);
+    focusMapOnFeatures(map, layers.flatMap(layer => layer.data?.features || []));
+  };
   const setActive = next => {
     const options = [...results.querySelectorAll(".map-search-result")];
     if (!options.length) return;
@@ -654,7 +696,7 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
     options[activeIndex].scrollIntoView({ block: "nearest" });
   };
   const choose = entry => {
-    if (!entry || root.hidden || !index.entries.includes(entry)) return;
+    if (!entry || root.hidden || !index.enabled || !index.entries.includes(entry)) return;
     input.value = entry.label;
     clearButton.hidden = false;
     setOpen(false);
@@ -664,7 +706,7 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
     onSelect?.(entry.feature, featureCenter(entry.feature), entry);
   };
   const runSearch = () => {
-    if (root.hidden) return;
+    if (root.hidden || !index.enabled) return;
     clearButton.hidden = !input.value;
     matches = searchDataIndex(index, input.value);
     activeIndex = -1;
@@ -701,7 +743,7 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
     setOpen(true);
   };
   const keydown = event => {
-    if (root.hidden) return;
+    if (root.hidden || !index.enabled) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (results.hidden) runSearch();
@@ -726,7 +768,8 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
   const outside = event => { if (!root.contains(event.target)) setOpen(false); };
   const listeners = [
     [input, "input", runSearch], [input, "focus", runSearch], [input, "keydown", keydown],
-    [form, "submit", submit], [clearButton, "click", clear], [document, "pointerdown", outside]
+    [form, "submit", submit], [clearButton, "click", clear], [document, "pointerdown", outside],
+    ...(navigation ? [[navigation, "change", changeRegion]] : [])
   ];
   listeners.forEach(([element, event, handler]) => element.addEventListener(event, handler));
   root.hidden = true;
@@ -735,24 +778,27 @@ export function createMapSearch({ map, onSelect = null, minFilteredObjects = 5 }
 
   return {
     refreshHighlight() { renderSearchBoundary(map, selectedFeature); },
-    getState() { return { query: input.value }; },
+    getState() { return { query: input.value, regionId }; },
     restoreState(state) {
+      const restored = regions.some(region => region.id === state?.regionId) ? state.regionId : "";
+      if (restored !== regionId) {
+        regionId = restored; updateIndex(); onRegionChange?.(regionId);
+      }
       if (!state?.query || !index.enabled) return;
       input.value = state.query; clearButton.hidden = false; runSearch();
     },
     setData(next = {}) {
       if (sameSearchData(snapshot, next)) return;
+      const requested = typeof next.regionId === "string" ? next.regionId : snapshot?.groupId !== next.groupId ? "" : regionId;
       snapshot = { ...next };
-      index = Array.isArray(next.layers) ? buildGroupDataSearchIndex(next.layers, { minFilteredObjects }) : buildDataSearchIndex({ ...next, minFilteredObjects });
-      reset();
-      root.hidden = !index.enabled;
-      input.disabled = root.hidden;
-      input.placeholder = index.placeholder;
-      input.setAttribute("aria-label", index.placeholder.replace(/\.\.\.$/, ""));
+      regions = buildCountryRegionNavigation(Array.isArray(next.layers) ? next.layers : [next]);
+      regionId = regions.some(region => region.id === requested) ? requested : "";
+      updateIndex();
     },
     destroy() {
       listeners.forEach(([element, event, handler]) => element.removeEventListener(event, handler));
       index = { entries: [] };
+      regions = []; regionId = ""; renderRegions();
       reset();
       root.hidden = true;
       input.disabled = true;

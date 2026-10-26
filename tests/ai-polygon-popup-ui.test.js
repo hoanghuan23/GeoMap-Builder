@@ -157,6 +157,20 @@ const polygonMetricButtons = [
   { field: "minimum", label: "Nhiệt độ thấp nhất", icon: "❄️", color: "#3b82f6" }
 ];
 
+test("information popups use the active input dataset title, with the input file name as fallback", () => {
+  const h = harness();
+  const caption = () => h.popups.at(-1).card.querySelector('.popup-info-caption').textContent;
+  h.run("openMapPopup(testFeatures[0], [105, 21])");
+  assert.equal(caption(), 'Thời tiết');
+  h.dataset.analysis.datasetTitle = 'Doanh thu cửa hàng theo tháng';
+  h.run("openMapPopup(testFeatures[1], [105, 21])");
+  assert.equal(caption(), 'Doanh thu cửa hàng theo tháng');
+  h.dataset.analysis.datasetTitle = '  ';
+  h.dataset.fileName = 'Dữ liệu đầu vào.xlsx';
+  h.run("openMapPopup(testFeatures[0], [105, 21])");
+  assert.equal(caption(), 'Dữ liệu đầu vào');
+});
+
 test("categorical country map shows exact AI colors, a distinct combination swatch and both original popup records", async () => {
   const fixture = categoricalCountryFixture();
   const analysis = validateAndNormalizeAnalysis({ columns: fixture.columns, suggestions: [fixture.suggestion], search_bar: true, search_fields: ["Điểm đến"] }, profileTabularData(fixture.records));

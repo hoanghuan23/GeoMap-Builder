@@ -162,6 +162,8 @@
         </div>
         <div class="map-query-panel">
         <div id="map-search" class="map-search" hidden>
+          <div class="map-search-controls">
+          <div id="map-search-box" class="map-search-box">
           <form id="map-search-form" class="map-search-form" role="search">
             <span class="map-search-location" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/></svg></span>
             <input id="map-search-input" type="search" placeholder="Tìm trong dữ liệu đã tải lên..." disabled autocomplete="off" spellcheck="false" role="combobox" aria-label="Tìm trong dữ liệu đã tải lên" aria-autocomplete="list" aria-controls="map-search-results" aria-expanded="false">
@@ -169,6 +171,9 @@
             <button class="map-search-submit" type="submit" aria-label="Tìm kiếm"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg></button>
           </form>
           <div id="map-search-results" class="map-search-results" role="listbox" aria-label="Kết quả tìm kiếm" hidden></div>
+          </div>
+          <select id="map-region-navigation" class="map-region-navigation" aria-label="Lọc bản đồ theo khu vực" hidden><option value="">Toàn thế giới</option></select>
+          </div>
         </div>
         </div>
         <div class="map-controls"><button id="zoom-in">+</button><button id="zoom-out">−</button><button id="fullscreen">⛶</button></div>
