@@ -2593,14 +2593,33 @@ function renderRoadLegend() {
   const field = suggestion.bindings.value || dataset.recommendation.metricField;
   const column = dataset.analysis.columns.find(column => column.name === field);
   const heading = document.createElement("div"); heading.className = "point-legend-heading";
-  const title = document.createElement("strong"); title.textContent = column?.labelVi || field || suggestion.title || dataset.analysis.datasetTitle || "Tuyến đường";
+  const title = document.createElement("strong");
+  const titleText = column?.labelVi || field || suggestion.title || dataset.analysis.datasetTitle || "Tuyến đường";
+  title.textContent = column?.unit && !titleText.toLocaleLowerCase("vi").includes(column.unit.toLocaleLowerCase("vi"))
+    ? `${titleText} (${column.unit})` : titleText;
   heading.append(title);
   const rows = document.createElement("div"); rows.className = "point-legend-rows";
-  for (const item of dataset.roadStyle?.rows || []) {
-    const row = document.createElement("div"); row.className = "point-legend-row";
-    const swatch = document.createElement("i"); swatch.style.background = item.color;
-    const label = document.createElement("span"); label.textContent = item.label;
-    row.append(swatch, label); rows.append(row);
+  const stops = dataset.roadStyle?.rows || [];
+  if (column?.role === "measure" && stops.length) {
+    rows.className = "line-legend-continuous";
+    const ramp = document.createElement("div"); ramp.className = "line-legend-ramp"; ramp.setAttribute("aria-hidden", "true");
+    ramp.style.background = `linear-gradient(90deg, ${stops.map((stop, index) =>
+      `${stop.color} ${stops.length === 1 ? 0 : index / (stops.length - 1) * 100}%`).join(", ")}${stops.length === 1 ? `, ${stops[0].color} 100%` : ""})`;
+    const labels = document.createElement("div"); labels.className = "line-legend-labels";
+    stops.forEach((stop, index) => {
+      const position = stops.length === 1 ? 50 : index / (stops.length - 1) * 100;
+      const tick = document.createElement("i"); tick.className = "line-legend-tick"; tick.style.left = `${position}%`;
+      const label = document.createElement("span"); label.textContent = stop.label; label.style.left = `${position}%`;
+      ramp.append(tick); labels.append(label);
+    });
+    rows.append(ramp, labels);
+  } else {
+    for (const item of stops) {
+      const row = document.createElement("div"); row.className = "point-legend-row";
+      const swatch = document.createElement("i"); swatch.style.background = item.color;
+      const label = document.createElement("span"); label.textContent = item.label;
+      row.append(swatch, label); rows.append(row);
+    }
   }
   const note = document.createElement("small");
   const timeFilter = dataset.recommendation.filters.find(filter => ["date-select", "datetime-select"].includes(filter.control));
