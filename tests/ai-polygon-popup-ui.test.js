@@ -74,7 +74,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
       rendered.push({ kind, config: kind === "bar" ? normalizeBarChartConfig(config) : config }); },
     clear(container) { cleared.push(container); }
   });
-  const sources = new Map(["polygon-data", "vietnam-boundary", "h3-grid", "line-data", "point-data"].map(id => [id, { setData(data) { this.data = data; } }]));
+  const sources = new Map(["polygon-data", "scope-marker-data", "vietnam-boundary", "h3-grid", "line-data", "point-data"].map(id => [id, { setData(data) { this.data = data; } }]));
   const layers = new Map((thematic ? ["polygon-fill", "polygon-border", "h3-fill", "h3-border"] : []).map(id => [id, { paint: {}, layout: {} }]));
   const palettes = ["diverging", "viridis", "blue"].map(palette => { const button = new Element(); button.className = "palette"; button.dataset.palette = palette; return button; });
   const map = { getContainer: () => get("map"), getSource: id => sources.get(id), getLayer: id => layers.get(id), resize() {},
@@ -212,7 +212,7 @@ test("categorical country map shows exact AI colors, a distinct combination swat
   assert.equal(h.dataset.records.length, 52);
 });
 
-test("descriptive countries render with the fixed color and preserve both source records in the popup", async () => {
+test("descriptive scoped records render separately and preserve their own popup details", async () => {
   const h = harness({ thematic: true, boundaryLoader: (names, options) => loadAdministrativeBoundaries(names, {
     ...options, apiKey: "key", fetchImpl: descriptiveCountryFetch()
   }) });
@@ -224,26 +224,31 @@ test("descriptive countries render with the fixed color and preserve both source
   h.run("replaceBoundary = async (data, name, profile) => { state.boundary = data; state.dataProfile = profile; };");
   assert.equal(await h.run("activateAiChoropleth(dataset.suggestions[0])"), true);
   assert.equal(h.sources.get("polygon-data").data.features.length, 51);
+  assert.equal(h.sources.get("scope-marker-data").data.features.length, 1);
+  assert.equal(h.run("state.boundary.features.length"), 52);
   assert.equal(h.layers.get("polygon-fill").paint["fill-color"], "#123456");
   assert.equal(h.get("fixed-color").disabled, false);
   assert.equal(h.get("polygon-palette-options").hidden, true);
-  assert.equal(h.get("weather-legend").hidden, true);
+  assert.equal(h.get("weather-legend").hidden, false);
   h.run("renderMapMetricControls()");
   assert.equal(h.get("map-metric-control").hidden, true);
   assert.equal(h.run("activePolygonLegendScale()"), null);
-  h.run("openMapPopup(state.boundary.features.find(feature => feature.properties.__resolved_country_code === 'CHN'), [105, 21])");
-  const sections = h.popups.at(-1).card.querySelectorAll(".popup-source-record");
-  assert.equal(sections.length, 2);
-  const texts = sections.map(section => section.querySelectorAll("*").map(node => node.textContent).join(" | "));
-  assert.match(texts[0], /Trung Quốc — đảo Hải Nam.*Đoàn du lịch.*Chỉ áp dụng tại đảo Hải Nam/);
-  assert.match(texts[1], /Trung Quốc — quá cảnh.*Có vé nối chuyến.*Giữ nguyên điều kiện quá cảnh/);
-  assert.ok(texts.every(text => !text.includes("Nhiều giá trị")));
+  for (const [render, pattern] of [["boundary", /Trung Quốc — đảo Hải Nam.*Đoàn du lịch.*Chỉ áp dụng tại đảo Hải Nam/],
+    ["marker", /Trung Quốc — quá cảnh.*Có vé nối chuyến.*Giữ nguyên điều kiện quá cảnh/]]) {
+    h.run(`openMapPopup(state.boundary.features.find(feature => feature.properties.__geographic_scope === '${render}'), [105, 21])`);
+    const card = h.popups.at(-1).card;
+    assert.equal(card.querySelectorAll(".popup-source-record").length, 0);
+    assert.match(card.querySelectorAll("*").map(node => node.textContent).join(" | "), pattern);
+    assert.ok(card.querySelector(".popup-scope-note"));
+  }
+  assert.equal(h.all(".scope-marker-control").length, 0);
   assert.equal(Object.keys(h.run("currentDataSearch().locationKeys")).length, 52);
   h.run("fitBoundary = () => {};");
   const region = h.all(".ai-generated-filter").find(control => control.dataset.field === "Điểm đến");
   region.value = "Trung Quốc — quá cảnh"; await h.change(region);
-  assert.equal(h.sources.get("polygon-data").data.features.length, 1);
-  assert.equal(h.sources.get("polygon-data").data.features[0].properties["Ghi chú"], descriptiveRecords.at(-1)["Ghi chú"]);
+  assert.equal(h.sources.get("polygon-data").data.features.length, 0);
+  assert.equal(h.sources.get("scope-marker-data").data.features.length, 1);
+  assert.equal(h.sources.get("scope-marker-data").data.features[0].properties["Ghi chú"], descriptiveRecords.at(-1)["Ghi chú"]);
   assert.equal(JSON.stringify(h.dataset.records), original);
 });
 
@@ -255,7 +260,8 @@ test("one matched country is enough for Polygon without a measure", async () => 
     selectedSuggestionId: descriptiveSuggestion.id, suggestions: [{ ...descriptiveSuggestion, available: true }] });
   h.run("replaceBoundary = async (data, name, profile) => { state.boundary = data; state.dataProfile = profile; };");
   assert.equal(await h.run("activateAiChoropleth(dataset.suggestions[0])"), true);
-  assert.equal(h.sources.get("polygon-data").data.features.length, 1);
+  assert.equal(h.sources.get("polygon-data").data.features.length, 0);
+  assert.equal(h.sources.get("scope-marker-data").data.features.length, 1);
   assert.equal(h.dataset.recommendation.metricField, null);
   assert.equal(h.dataset.recommendation.aggregation, null);
 });

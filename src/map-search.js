@@ -4,6 +4,7 @@ import {
   COUNTRY_BOUNDARY_SOURCES, countryLookupName, loadCountryBoundaryData, resolveBoundaryCountry, resolvedCountryProperties
 } from "./country-boundary-sources.js";
 import { sourceLocationNames } from "./geographic-grain.js";
+import { largestBoundaryPart } from "./geographic-scopes.js";
 import { buildCountryRegionNavigation, filterCountryRegionData } from "./country-regions.js";
 
 const MAPTILER_GEOCODING_URL = "https://api.maptiler.com/geocoding";
@@ -118,7 +119,7 @@ export async function searchMapTilerBoundaries(query, options) {
 
 export function buildAdministrativeGeocodingUrl(name, apiKey, placeType = "region", country = "VNM") {
   const isCountry = placeType === "country";
-  const lookupName = isCountry ? countryLookupName(name) : String(name).trim();
+  const lookupName = String(name).trim();
   const code = isCountry ? resolveBoundaryCountry(lookupName) : null;
   const query = code && lookupName.toUpperCase() === code ? COUNTRY_BOUNDARY_SOURCES[code].name : lookupName;
   const scope = isCountry ? null : resolveBoundaryCountry(country);
@@ -190,10 +191,7 @@ function exactCountryCandidateScore(feature, name) {
 }
 
 export function countryCandidateScore(feature, name) {
-  const score = exactCountryCandidateScore(feature, name);
-  if (score === 0) return score;
-  const lookup = countryLookupName(name);
-  return lookup !== String(name).trim() && exactCountryCandidateScore(feature, lookup) === 0 ? 1 : 2;
+  return exactCountryCandidateScore(feature, name);
 }
 
 export function boundaryMatchesCountry(feature, country) {
@@ -209,7 +207,7 @@ export function boundaryMatchesCountry(feature, country) {
 
 export async function getMapTilerAdministrativeBoundary(name, { apiKey, placeType = "region", country = "VNM", signal, fetchImpl = fetch, onAmbiguous } = {}) {
   if (!apiKey) throw new Error("MAPTILER_API_KEY_MISSING");
-  const lookupName = placeType === "country" ? countryLookupName(name) : name;
+  const lookupName = name;
   const normalizedName = placeType === "country" ? resolveBoundaryCountry(lookupName) || normalizePlaceName(lookupName) : normalizedAdministrativeName(name);
   const scope = placeType === "country" ? "global" : resolveBoundaryCountry(country) || normalizePlaceName(country) || "global";
   const cacheKey = `${scope}:${placeType}:${normalizedName}`;
@@ -445,12 +443,13 @@ export async function landOnlyBoundary(feature, { fetchImpl = fetch, signal, for
   const landData = await loadCountryBoundaryData(code, level, { fetchImpl, signal });
   if (signal?.aborted) throw new DOMException("Boundary clipping aborted", "AbortError");
   const clipped = clipBoundaryToLand(feature, landData, level, code);
-  if (clipped || level === 0) return clipped;
+  if (clipped || level === 0) return clipped && properties.__scope_geometry_part === "largest" ? largestBoundaryPart(clipped) : clipped;
 
   // The country outline remains a fallback when administrative vintages differ.
   const countryLand = await loadCountryBoundaryData(code, 0, { fetchImpl, signal });
   if (signal?.aborted) throw new DOMException("Boundary clipping aborted", "AbortError");
-  return clipBoundaryToLand(feature, countryLand, 0, code);
+  const fallback = clipBoundaryToLand(feature, countryLand, 0, code);
+  return fallback && properties.__scope_geometry_part === "largest" ? largestBoundaryPart(fallback) : fallback;
 }
 
 export function renderSearchBoundary(map, feature) {

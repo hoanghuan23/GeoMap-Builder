@@ -114,8 +114,8 @@ function categoryGroupSummary(records, columns) {
       if (raw == null || typeof raw === "object" || !String(raw).trim()) return null;
       const label = String(raw).trim();
       if (!identities.has(label)) {
-        const name = countryLookupName(label);
-        identities.set(label, { key: resolveBoundaryCountry(name) || name, label: name });
+        // Different geographic/conditional scopes are not observations of the whole parent.
+        identities.set(label, { key: resolveBoundaryCountry(label) || label, label });
       }
       return identities.get(label);
     });
@@ -230,6 +230,10 @@ export function profileTabularData(records, { includeSamples = true, maxSamples 
     };
     if (includeSamples) {
       column.samples = state.samples.map(jsonValue);
+      if (inferredType === "text" && !state.uniqueCountCapped && state.uniques.size <= 300) {
+        const values = [...state.uniques].map(value => value.slice(value.indexOf(":") + 1));
+        if (values.every(value => value.length <= 500)) column.distinctValues = values;
+      }
       if (inferredType === "text" && !state.uniqueCountCapped && state.uniques.size <= 12) column.categoryValues = [...state.uniques].map(value => value.slice(value.indexOf(":") + 1));
       if (inferredType === "text" && !state.uniqueCountCapped) {
         const coverage = summarizeCountryRegions([...state.uniques].map(value => value.slice(value.indexOf(":") + 1)));
@@ -241,6 +245,14 @@ export function profileTabularData(records, { includeSamples = true, maxSamples 
   const profile = { rowCount: records.length, columns, samplesIncluded: Boolean(includeSamples) };
   if (includeSamples) {
     profile.head = head;
+    // Supply same-row context for qualified labels even when they occur after head/reservoir samples.
+    const scopeRows = records.filter(record => Object.values(record || {}).some(value =>
+      typeof value === "string" && value.length <= 500 && countryLookupName(value) !== value.trim()));
+    if (scopeRows.length) {
+      profile.scopeRows = scopeRows.slice(0, 100).map(record => Object.fromEntries(Object.entries(record).map(([key, value]) =>
+        [key, typeof value === "string" ? value.slice(0, 1600) : jsonValue(value)])));
+      profile.scopeRowsTruncated = scopeRows.length > 100;
+    }
     const groups = categoryGroupSummary(records, columns);
     if (groups.length) profile.categoryGroups = groups;
   }

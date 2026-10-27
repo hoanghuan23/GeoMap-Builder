@@ -6,6 +6,7 @@ import * as pointStyle from "../../src/renderers/point-style.js";
 import * as geojsonLayers from "../../src/geojson-layers.js";
 import { PointRenderer } from "../../src/renderers/point-renderer.js";
 import { PolygonRenderer } from "../../src/renderers/polygon-renderer.js";
+import { renderGeographicScopeMarkers } from "../../src/renderers/geographic-scope-renderer.js";
 import * as layerOrder from "../../src/layer-order.js";
 import { nativeMapDataset, nativeMapView } from "../../src/native-map-data.js";
 import * as pipeline from "../../src/ai-chart-pipeline.js";
@@ -28,11 +29,11 @@ import * as categoricalColor from "../../src/categorical-color.js";
 export function createHarness() {
   const elements = new Map();
   const element = () => ({
-    checked: true, hidden: false, value: "", textContent: "", style: { setProperty() {} }, dataset: {}, children: [],
+    checked: true, hidden: false, value: "", textContent: "", style: { setProperty() {} }, dataset: {}, children: [], events: {},
     classList: { add() {}, remove() {}, toggle() {} },
     replaceChildren(...children) { this.children = children; },
     append(...children) { this.children.push(...children); },
-    setAttribute() {}, addEventListener() {}, querySelector() { return null; }
+    setAttribute() {}, addEventListener(type, callback) { this.events[type] = callback; }, querySelector() { return null; }
   });
   const get = id => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
   const descendants = node => [node, ...node.children.flatMap(descendants)];
@@ -52,7 +53,7 @@ export function createHarness() {
     moveLayer() {}, on() {}, resize() {}, fitBounds() {}
   };
   const context = vm.createContext({
-    ...capabilities, ...polygonStyle, ...pointStyle, ...geojsonLayers, ...layerOrder, PointRenderer, PolygonRenderer,
+    ...capabilities, ...polygonStyle, ...pointStyle, ...geojsonLayers, ...layerOrder, PointRenderer, PolygonRenderer, renderGeographicScopeMarkers,
     ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, ...polygonLegend, ...legendContract, ...boundaryData, ...categoricalColor,
     jsonDatasets, nativeMapDataset, nativeMapView, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue, profileRecordsInWorker, parseSpreadsheetFile,
     requestAiTextAnalysis, parseTextDocumentFile,

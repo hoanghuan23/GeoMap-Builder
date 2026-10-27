@@ -3,6 +3,7 @@ import {
   localBoundaryNameAliases, normalizePlaceName, normalizePlaceWords, searchLocalBoundaries, searchMapTilerBoundaries
 } from "./map-search.js";
 import { COUNTRY_BOUNDARY_SOURCES, countryLookupName, resolveBoundaryCountry, resolvedCountryProperties } from "./country-boundary-sources.js";
+import { applyGeographicScope, geographicScopeFor, hasGeographicQualifier, scopePlaceType } from "./geographic-scopes.js";
 
 function provinceName(feature) {
   const region = feature.context?.find(item => item.id?.startsWith("region.") || item.place_type?.includes("region"));
@@ -161,11 +162,12 @@ async function resolveCandidates(name, { apiKey, placeType, country, signal, fet
 
 export async function loadAdministrativeBoundaries(names, {
   apiKey, placeType = "region", country, signal, fetchImpl = fetch, concurrency = 4,
-  onProgress, strict = true, aliases = {}, selections = {}, contexts = {}
+  onProgress, strict = true, aliases = {}, selections = {}, contexts = {}, geographicScopes = []
 } = {}) {
   const uniqueNames = [...new Set((names || []).map(name => String(name ?? "").trim()).filter(Boolean))];
   const results = new Array(uniqueNames.length);
   const candidates = {};
+  const scopeIssues = {};
   const countryLookups = new Map();
   // Share local file loads across workers, including when a custom fetch implementation is used.
   const localFiles = new Map();
@@ -184,30 +186,40 @@ export async function loadAdministrativeBoundaries(names, {
       if (signal?.aborted) throw new DOMException("Boundary loading aborted", "AbortError");
       const index = cursor++;
       const sourceName = uniqueNames[index];
-      const queryName = String(aliases[sourceName] || sourceName).trim();
-      const locationCountry = Object.hasOwn(contexts[sourceName] || {}, "country") ? contexts[sourceName].country : country;
+      const sourceValue = contexts[sourceName]?.sourceValue || sourceName;
+      const scope = geographicScopeFor(sourceValue, geographicScopes);
+      const queryName = String(aliases[sourceName] || scope?.targetName || sourceName).trim();
+      const locationCountry = scope?.country || (Object.hasOwn(contexts[sourceName] || {}, "country") ? contexts[sourceName].country : country);
+      const effectivePlaceType = scope ? scopePlaceType(scope) : placeType;
       try {
+        if (scope?.render === "unresolved" || !scope && placeType === "country" && hasGeographicQualifier(sourceValue)) {
+          scopeIssues[sourceName] = scope?.reason || "Chưa xác định phạm vi của giá trị có điều kiện. Bổ sung địa danh/phạm vi trong dữ liệu rồi phân tích lại.";
+          continue;
+        }
         const selected = selections[sourceName];
-        const lookupKey = placeType === "country" ? resolveBoundaryCountry(countryLookupName(queryName)) || normalizePlaceName(countryLookupName(queryName)) : null;
-        const resolve = () => resolveCandidates(queryName, { apiKey, placeType, country: locationCountry, signal, fetchImpl: fetchImpl === fetch ? fetch : sharedFetch });
+        const lookupKey = effectivePlaceType === "country" ? resolveBoundaryCountry(queryName) || normalizePlaceName(queryName) : null;
+        const resolve = () => resolveCandidates(queryName, { apiKey, placeType: effectivePlaceType, country: locationCountry, signal, fetchImpl: fetchImpl === fetch ? fetch : sharedFetch });
         if (!isBoundaryFeature(selected) && lookupKey && !countryLookups.has(lookupKey)) countryLookups.set(lookupKey, resolve());
         let matches = isBoundaryFeature(selected) ? [selected]
           : lookupKey ? await countryLookups.get(lookupKey) : await resolve();
         // An exact full-name match must not authorize a different qualifier with no matching country identity.
         if (!isBoundaryFeature(selected) && lookupKey && matches.length && !matches.some(feature => countryCandidateScore(feature, queryName) < 2)) matches = await resolve();
         if (signal?.aborted) throw new DOMException("Boundary loading aborted", "AbortError");
-        if (matches.length === 1) results[index] = { ...matches[0], properties: {
+        if (scope) matches = matches.filter(feature => boundaryMatchesCountry(feature, locationCountry)
+          && mapTilerScore(feature, administrativeQuery(queryName, effectivePlaceType, locationCountry)) === 0);
+        if (matches.length === 1) results[index] = applyGeographicScope({ ...matches[0], properties: {
           ...(matches[0].properties || {}), ...resolvedCountryProperties(matches[0]), __data_location: sourceName, __data_query: queryName,
           ...(locationCountry ? { __data_country: locationCountry } : {})
-        } };
+        } }, scope);
         else if (matches.length > 1) candidates[sourceName] = await describeCandidates(matches, {
           apiKey, signal, fetchImpl: fetchImpl === fetch ? fetch : sharedFetch
         });
       } catch (error) {
         if (strict || error?.name === "AbortError" || signal?.aborted) throw error;
+      } finally {
+        completed += 1;
+        onProgress?.({ completed, total: uniqueNames.length, name: sourceName });
       }
-      completed += 1;
-      onProgress?.({ completed, total: uniqueNames.length, name: sourceName });
     }
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), uniqueNames.length) }, worker));
@@ -216,7 +228,7 @@ export async function loadAdministrativeBoundaries(names, {
   const features = results.filter(Boolean);
   const locationKeys = Object.fromEntries(features.flatMap(feature => feature.properties.__resolved_location_key
     ? [[feature.properties.__data_location, feature.properties.__resolved_location_key]] : []));
-  return { type: "FeatureCollection", features, candidates, unmatched, locationKeys,
+  return { type: "FeatureCollection", features, candidates, scopeIssues, unmatched, locationKeys,
     matched: uniqueNames.filter((_, index) => Boolean(results[index])),
     matchRate: features.length / Math.max(1, uniqueNames.length) };
 }

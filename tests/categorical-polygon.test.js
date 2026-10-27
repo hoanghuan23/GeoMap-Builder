@@ -88,14 +88,14 @@ test("52 source rows retain their details and search labels; each combined count
   assert.equal(scale.entries.reduce((sum, entry) => sum + entry.count, 0) + scale.mixed[0].count, 51);
   assert.deepEqual(popupRegionRecords(records, china, "Điểm đến"), original.slice(-2));
   const index = buildDataSearchIndex({ data, columns, chartType: "choropleth", titleField: "Điểm đến", search_fields: ["Điểm đến"], locationKeys: boundaries.locationKeys });
-  assert.equal(searchDataIndex(index, "Hải Nam")[0].feature, china);
-  assert.equal(searchDataIndex(index, "quá cảnh")[0].feature, china);
+  assert.equal(searchDataIndex(index, "Trung Quốc")[0].feature, china);
+  assert.equal(searchDataIndex(index, "China")[0].feature, china);
   const filtered = join({ [accessField]: "Miễn thị thực" });
   const filteredScale = resolvePolygonLegendConfig({ suggestion, columnMetadata: columns, aggregatedFeatures: filtered });
   assert.equal(filteredScale.mixed.length, 0);
   const filteredChina = filtered.features.find(feature => feature.properties.__resolved_country_code === "CHN");
   assert.equal(colorOf(polygonFillExpression(filtered, {}, null, "#000000", filteredScale), filteredChina), "#15803d");
-  assert.equal(filteredChina.properties["Điểm đến"], "Trung Quốc — đảo Hải Nam");
+  assert.equal(filteredChina.properties["Điểm đến"], "Trung Quốc");
   const sameRows = records.map((row, index) => index === 51 ? { ...row, [accessField]: records[50][accessField] } : row);
   const sameData = collapseCountryFeatures(joinRecordsToMapTilerBoundaries(sameRows, boundaries, recommendation, { columns }), "Điểm đến", { categoryField: accessField });
   const sameScale = resolvePolygonLegendConfig({ suggestion, columnMetadata: columns, aggregatedFeatures: sameData });

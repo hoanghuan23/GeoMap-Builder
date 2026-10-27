@@ -53,6 +53,13 @@ export function createAiPopupContent(documentRef, feature, columns, geometryFiel
   caption.textContent = String(datasetTitle || "").trim()
     || (geometryColumn ? `Thông tin ${geometryColumn.labelVi || humanizeField(geometryColumn.name)}` : "Thông tin khu vực");
   heading.append(caption, title);
+  const scopeNote = properties.__geographic_scope === "marker"
+    ? ["Ký hiệu minh họa điều kiện; không biểu thị toàn lãnh thổ được áp dụng.", properties.__scope_reason].filter(Boolean).join(" ")
+    : properties.__scope_reason;
+  if (scopeNote) {
+    const note = documentRef.createElement("p"); note.className = "popup-scope-note"; note.textContent = scopeNote;
+    heading.append(note);
+  }
   if (records.length > 1) {
     const sections = documentRef.createElement("div");
     sections.className = "popup-source-records";

@@ -22,7 +22,7 @@ export function resolveBoundaryCountry(value) {
   )?.[0] || null;
 }
 
-/** A display label may qualify a country without changing the requested ADM0. */
+/** Extract parent identity for navigation/context; this does not authorize drawing ADM0. */
 export function countryLookupName(value) {
   const name = String(value ?? "").trim();
   if (resolveBoundaryCountry(name)) return name;

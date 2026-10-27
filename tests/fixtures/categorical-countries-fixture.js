@@ -15,7 +15,8 @@ export function categoricalCountryFixture() {
     ? { name: accessField, labelVi: accessField, role: "category", legend: structuredClone(accessLegend) } : { ...column });
   const records = descriptiveRecords.map((row, index) => {
     const { "Điều kiện": condition, ...properties } = row;
-    return { ...properties, [accessField]: accessLegend.stops[(index >= 50 ? index - 50 : index) % 4].value };
+    return { ...properties, ...(index >= 50 ? { "Điểm đến": index === 50 ? "Trung Quốc" : "China" } : {}),
+      [accessField]: accessLegend.stops[(index >= 50 ? index - 50 : index) % 4].value };
   });
-  return { records, columns, suggestion: { ...descriptiveSuggestion, bindings: { ...descriptiveSuggestion.bindings, value: accessField }, legend: null } };
+  return { records, columns, suggestion: { ...descriptiveSuggestion, geographicScopes: [], bindings: { ...descriptiveSuggestion.bindings, value: accessField }, legend: null } };
 }

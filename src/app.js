@@ -44,6 +44,7 @@ import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
 import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupChartColumns, popupDisplayOptions, popupFeaturesMatch, popupRegionRecords, popupTimeColumn } from "./ai-popup-chart.js";
 import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-client.js";
 import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
+import { renderGeographicScopeMarkers } from "./renderers/geographic-scope-renderer.js";
 import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
 import { joinRoadRecordsByArea, roadAreaField, ROAD_NETWORKS, roadMapStyle, roadNetworksFromRecords, roadValueColumns } from "./road-map-data.js";
 import { roadNetworkUrl } from "./road-network-assets.js";
@@ -435,6 +436,30 @@ function renderCategoricalPolygonLegend(scale) {
   }));
 }
 
+function renderScopeLegend() {
+  const legend = $("scope-legend");
+  if (!legend) return;
+  const markers = activePolygonSuggestion() ? (state.boundary?.features || []).filter(feature =>
+    feature.geometry?.type === "Point" && feature.properties?.__geographic_scope === "marker") : [];
+  legend.hidden = !$("show-map-layers").checked || !markers.length || !["polygon", "h3"].includes(state.mapType);
+  if (legend.hidden) return;
+  legend.replaceChildren(...markers.map(feature => {
+    const row = document.createElement("div"); row.className = "scope-legend-row";
+    const icon = document.createElement("i"); icon.setAttribute("aria-hidden", "true");
+    const name = String(feature.properties.__scope_label || "").trim().replace(/(?:\s*[-–—]\s*lớp\s+riêng)+\s*$/iu, "").trim();
+    const label = document.createElement("span"); label.textContent = `${name} - lớp riêng`;
+    row.append(icon, label); return row;
+  }));
+  if (usesDefaultPolygonColor()) {
+    $("weather-legend").hidden = false;
+    $("weather-legend-title").textContent = "Chú giải";
+    $("weather-legend-mode").hidden = true;
+    $("weather-legend-scale").hidden = true;
+    $("weather-legend-labels").replaceChildren();
+    $("weather-legend-note").textContent = "";
+  }
+}
+
 function applyStyle() {
   syncDataSearch();
   if (!map) return;
@@ -483,6 +508,8 @@ function applyMapLayerVisibility(resolvedScale = activePolygonLegendScale()) {
   if (!showLayers) closeMapPopup();
   const showH3 = showLayers && (state.mapType === "h3" || isRegionHexMode());
   const showPolygon = showLayers && state.mapType === "polygon" && !isRegionHexMode();
+  const showScopes = showLayers && Boolean(activePolygonSuggestion()) && ["polygon", "h3"].includes(state.mapType);
+  for (const id of ["scope-marker"]) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", showScopes ? "visible" : "none");
   if (map.getLayer("h3-fill")) map.setLayoutProperty("h3-fill", "visibility", showH3 ? "visible" : "none");
   if (map.getLayer("h3-border")) map.setLayoutProperty("h3-border", "visibility", showH3 && $("show-border").checked ? "visible" : "none");
   if (map.getLayer("point-marker")) map.setLayoutProperty("point-marker", "visibility", showLayers && state.mapType === "point" ? "visible" : "none");
@@ -499,6 +526,7 @@ function applyMapLayerVisibility(resolvedScale = activePolygonLegendScale()) {
   }
   if (!showH3 && !showPolygon) cellPopup?.remove();
   renderWeatherLegend(resolvedScale);
+  renderScopeLegend();
   renderPointLegend();
   renderRoadLegend();
   if (state.mapType !== "point" || !showLayers) { pointPopup?.remove(); pointPopup = null; }
@@ -532,6 +560,7 @@ function addMapLayers() {
   map.moveLayer("vietnam-border");
   map.addSource("line-data", { type: "geojson", data: state.lineData });
   map.addLayer({ id: "data-lines", type: "line", source: "line-data", paint: { "line-color": "#c52e64", "line-width": 3 } });
+  renderGeographicScopeMarkers(map, state.boundary);
   applyMapLayerVisibility();
   if (mapLayerEventsBound) return;
   mapLayerEventsBound = true;
@@ -545,7 +574,10 @@ function addMapLayers() {
     if (!suggestion) { showUploadedFeaturePopup(feature, { name: state.fileName || "Tuyến dữ liệu", role: "line" }, event.lngLat); return; }
     openMapPopup(feature, event.lngLat, "data-lines");
   });
-  for (const id of ["polygon-fill", "data-lines"]) {
+  map.on("click", "scope-marker", event => {
+    if (state.aiDataset && event.features?.[0]) openMapPopup(event.features[0], event.lngLat, "scope-marker");
+  });
+  for (const id of ["polygon-fill", "data-lines", "scope-marker"]) {
     map.on("mouseenter", id, () => { if (state.aiDataset) map.getCanvas().style.cursor = "pointer"; });
     map.on("mouseleave", id, () => map.getCanvas().style.cursor = "");
   }
@@ -1245,6 +1277,7 @@ function clearUploadedData({ preserveUploads = false } = {}) {
   map?.getSource("h3-grid")?.setData(state.h3Data); map?.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
   map?.getSource("point-data")?.setData(state.pointData);
   map?.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
+  map?.getSource("scope-marker-data")?.setData(EMPTY_FEATURE_COLLECTION);
 }
 
 async function resetConfiguration() {
@@ -1860,6 +1893,7 @@ function recommendationForSuggestion(suggestion) {
         ...(contextFields.length ? { contextFields } : {}) }
       : { field: null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: "point" },
     metricField: valueField,
+    geographicScopes: suggestion.geographicScopes || [],
     numericFields: dataset.analysis.columns.filter(column => column.role === "measure").map(column => column.name),
     filters: [
       ...(areaField && areaField !== regionField ? [{
@@ -2316,6 +2350,11 @@ function renderGeoRepair(unmatched = []) {
   panel.append(title, ...unmatched.map(name => {
     const row = document.createElement("label"); const original = document.createElement("span"); const input = document.createElement("input");
     row.className = "geo-repair-row"; original.textContent = name; input.className = "geo-alias-input"; input.dataset.location = name;
+    const scopeIssue = state.aiDataset.geoMatch?.scopeIssues?.[name];
+    if (scopeIssue) {
+      const note = document.createElement("small"); note.textContent = scopeIssue;
+      row.append(original, note); return row;
+    }
     input.value = state.aiDataset.geoAliases?.[name] || ""; input.placeholder = "Tên địa danh, tỉnh/thành";
     const fields = document.createElement("div"); fields.className = "geo-repair-fields";
     const candidates = state.aiDataset.geoMatch?.candidates?.[name] || [];
@@ -2340,7 +2379,9 @@ function renderGeoRepair(unmatched = []) {
     }
     fields.append(input); row.append(original, fields); return row;
   }));
-  button.type = "button"; button.className = "secondary-button apply-geo-aliases"; button.textContent = "Thử ghép lại"; panel.append(button); controls.append(panel); $("ai-data-filters").hidden = false;
+  button.type = "button"; button.className = "secondary-button apply-geo-aliases"; button.textContent = "Thử ghép lại";
+  button.hidden = unmatched.every(name => state.aiDataset.geoMatch?.scopeIssues?.[name]);
+  panel.append(button); controls.append(panel); $("ai-data-filters").hidden = false;
 }
 
 function activePointSuggestion() {
@@ -2781,8 +2822,12 @@ async function filteredAiBoundary({ fit = false } = {}) {
   state.baselineCount = null;
   const numericFields = [recommendation.metricField, ...recommendation.numericFields].filter((field, index, fields) => recommendation.numericFields.includes(field) && fields.indexOf(field) === index);
   state.dataProfile = analyzeSpatialData(data, { numericFields, hasArea: true });
-  map.getSource("polygon-data")?.setData(data);
-  map.getSource("vietnam-boundary")?.setData(data);
+  const polygonData = { ...data, features: data.features.filter(feature => feature.properties?.__geographic_scope !== "marker") };
+  const scopeData = { type: "FeatureCollection", features: data.features.filter(feature =>
+    feature.geometry?.type === "Point" && feature.properties?.__geographic_scope === "marker") };
+  map.getSource("polygon-data")?.setData(polygonData);
+  map.getSource("vietnam-boundary")?.setData(polygonData);
+  map.getSource("scope-marker-data")?.setData(scopeData);
   if (state.mapType === "h3" || isRegionHexMode()) await rebuildGrid({ fit });
   else {
     syncPolygonPaletteControls(); applyStyle();
@@ -2804,6 +2849,7 @@ async function activateAiChoropleth(suggestion) {
   dataset.recommendation = recommendation;
   const countryField = recommendation.geometry.contextFields?.find(field => dataset.analysis.columns.find(column => column.name === field)?.geoLevel === "country");
   const contexts = Object.fromEntries(records.map(record => [geographicLocationName(record, recommendation.geometry), {
+    sourceValue: String(record[recommendation.geometry.field] ?? "").trim(),
     country: countryField ? String(record[countryField] ?? "").trim() || null
       : recommendation.geometry.country || (recommendation.geometry.placeType === "country" ? null : "VNM")
   }]).filter(([name]) => name));
@@ -2817,6 +2863,7 @@ async function activateAiChoropleth(suggestion) {
       placeType: recommendation.geometry.placeType,
       country: recommendation.geometry.country,
       contexts,
+      geographicScopes: recommendation.geographicScopes,
       strict: false,
       aliases: dataset.geoAliases || {},
       selections: dataset.geoSelections || {},
@@ -2829,9 +2876,9 @@ async function activateAiChoropleth(suggestion) {
       ...resolvedBoundaries,
       features: await Promise.all(resolvedBoundaries.features.map(async boundary =>
         await landOnlyBoundary(boundary, {
-          country: recommendation.geometry.placeType === "country" ? undefined
+          country: boundary.properties?.__data_country || (recommendation.geometry.placeType === "country" ? undefined
             : countryField ? contexts[boundary.properties?.__data_location]?.country
-              : recommendation.geometry.country || "VNM",
+              : recommendation.geometry.country || "VNM"),
           signal: controller.signal
         }) || boundary
       ))
@@ -2844,7 +2891,8 @@ async function activateAiChoropleth(suggestion) {
     if (aiBoundaryAbortController === controller) aiBoundaryAbortController = null;
   }
   dataset.boundaries = boundaries;
-  dataset.geoMatch = { matched: resolvedBoundaries.matched, unmatched: resolvedBoundaries.unmatched, matchRate: resolvedBoundaries.matchRate, candidates: resolvedBoundaries.candidates };
+  dataset.geoMatch = { matched: resolvedBoundaries.matched, unmatched: resolvedBoundaries.unmatched, matchRate: resolvedBoundaries.matchRate,
+    candidates: resolvedBoundaries.candidates, scopeIssues: resolvedBoundaries.scopeIssues };
   suggestion.boundaryBaseFeasibility ??= suggestion.feasibilityScore;
   suggestion.feasibilityScore = Math.min(suggestion.boundaryBaseFeasibility, resolvedBoundaries.matchRate);
   suggestion.effectiveConfidence = suggestion.confidence;

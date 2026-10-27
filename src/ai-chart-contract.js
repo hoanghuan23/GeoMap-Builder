@@ -3,6 +3,7 @@ import { measureAggregation } from "./measure-semantics.js";
 import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "./polygon-legend-contract.js";
 import { normalizeDataSearchConfig } from "./data-search-config.js";
 import { COUNTRY_REGION_CATALOG, normalizeRegionNavigation } from "./country-regions.js";
+import { GEOGRAPHIC_SCOPES_SCHEMA, normalizeGeographicScopes } from "./geographic-scopes.js";
 
 import { POPUP_CONTENT_SCHEMA, normalizePopupContent } from "./popup-content-contract.js";
 
@@ -146,8 +147,9 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend", "popupSuggestions", "metricButtons"],
+        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend", "popupSuggestions", "metricButtons", "geographicScopes"],
         properties: {
+          geographicScopes: GEOGRAPHIC_SCOPES_SCHEMA,
           id: { type: "string" },
           chartType: { type: "string", enum: Object.keys(AI_MAP_REGISTRY) },
           title: { type: "string" },
@@ -323,6 +325,9 @@ export function validateAndNormalizeAnalysis(raw, profile) {
       continue;
     }
     suggestion.metricButtons = raw.source === "rule" ? [] : normalizeMetricButtons(rawSuggestion.metricButtons, columns, suggestion, profile);
+    suggestion.geographicScopes = suggestion.chartType === "choropleth" ? normalizeGeographicScopes(
+      rawSuggestion.geographicScopes, profile, suggestion.bindings.region, reason => errors.push(reason)
+    ) : [];
     const existing = suggestionsByType.get(suggestion.chartType);
     if (!existing || suggestion.confidence > existing.confidence) suggestionsByType.set(suggestion.chartType, suggestion);
   }

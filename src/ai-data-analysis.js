@@ -86,6 +86,7 @@ export async function requestAiMapRecommendation(records, options = {}) {
       placeType: region?.geoLevel === "country" ? "country" : region?.geoLevel === "admin2" ? "county" : "region",
       country: region?.geoLevel === "country" || contextFields.some(field => columns.get(field)?.geoLevel === "country") ? null : region?.country || null,
       ...(contextFields.length ? { contextFields } : {}) },
+    geographicScopes: suggestion.geographicScopes || [],
     metricField: suggestion.bindings.value,
     numericFields: pipeline.analysis.columns.filter(column => column.role === "measure").map(column => column.name),
     filters: [

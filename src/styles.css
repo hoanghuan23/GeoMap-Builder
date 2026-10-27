@@ -3160,3 +3160,8 @@ th:last-child {
   .map-layer-tab { flex-basis: 100px; }
   .map-legends { max-width: calc(100% - 24px); }
 }
+.popup-scope-note { padding: 10px 12px; border-left: 3px solid #8b5cf6; border-radius: 4px; background: #f4effb; color: #4c3d68; font: 12px/1.6 Inter, sans-serif; }
+.scope-legend { margin-top: 12px; padding-top: 10px; border-top: 1px solid #ffffff26; }
+.scope-legend-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.scope-legend-row + .scope-legend-row { margin-top: 8px; }
+.scope-legend-row > i { flex: 0 0 16px; width: 16px; height: 16px; box-sizing: border-box; border: 2px solid #197c6d; border-radius: 50%; background: #fff; }
