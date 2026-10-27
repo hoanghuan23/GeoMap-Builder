@@ -37,7 +37,7 @@ test('image URL parsing allows HTTP(S), arrays, newlines, semicolons and redirec
 test('the renderer preserves separate sources and all descriptions, treats HTML as text and validates links', () => {
   const card = createInfoImagePopup(documentRef, { sources, coordinates: geojson.features[1].geometry.coordinates });
   assert.equal(all(card).find(child => child.tagName === 'h2').textContent, 'Chùa Trấn Quốc');
-  assert.deepEqual(all(card).filter(child => child.className === 'info-image-source-label').map(child => child.textContent), ['GeoJSON', 'Excel · Mục 1', 'Excel · Mục 2']);
+  assert.deepEqual(all(card).filter(child => child.className === 'info-image-source-label').map(child => child.textContent), ['Mục 1', 'Mục 2']);
   assert.equal(all(card).filter(child => child.className === 'info-image-description').length, 3);
   assert.ok(all(card).some(child => child.textContent === '<img src=x onerror=alert(1)>'));
   const directions = find(card, 'info-image-directions');

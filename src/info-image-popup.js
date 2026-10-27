@@ -67,7 +67,7 @@ export function createInfoImagePopup(documentRef, { sources, coordinates, onLayo
   for (const source of configured) {
     source.records.forEach((record, recordIndex) => {
       const section = node('section', 'info-image-source');
-      section.append(node('h3', 'info-image-source-label', `${source.title}${source.records.length > 1 ? ` · Mục ${recordIndex + 1}` : ''}`));
+      if (source.records.length > 1) section.append(node('h3', 'info-image-source-label', `Mục ${recordIndex + 1}`));
       const config = source.popupContent;
       if (source !== configured[0] && present(record[config.titleField])) section.append(node('h4', '', record[config.titleField]));
       for (const field of config.addressFields) if (present(record[field])) section.append(node('p', 'info-image-address', record[field]));
