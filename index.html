@@ -136,6 +136,7 @@
             <div class="field range-field compact"><div class="field-label"><label for="road-line-opacity">Độ mờ tuyến</label><output id="road-line-opacity-value">100%</output></div><input id="road-line-opacity" type="range" min="0" max="1" step=".05" value="1"></div>
             <label class="toggle-row"><span>Hiển thị chú giải</span><input id="road-show-legend" type="checkbox" checked><i></i></label>
           </div>
+          <div id="arc-flow-style-controls" hidden></div>
           <div id="bar-style-controls" hidden></div>
           <div class="builder-actions"><button id="reset-config">♙&nbsp; Đặt lại cấu hình</button><button id="clear-data">↻&nbsp; Xóa dữ liệu</button></div>
         </div>
@@ -151,6 +152,7 @@
           <div id="map-metric-list" class="map-metric-list" role="group" aria-label="Chọn chỉ số hiển thị trên bản đồ"></div>
         </div>
         <div class="map-legends" role="group" aria-label="Chú giải bản đồ">
+          <div id="arc-flow-legend" class="point-legend arc-flow-legend" hidden aria-label="Chú giải luồng đi–đến" aria-live="polite"></div>
           <div id="ai-line-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ mạng lưới" aria-live="polite"></div>
           <div id="point-legend" class="point-legend" hidden aria-label="Chú giải biểu đồ điểm" aria-live="polite"></div>
           <div id="weather-legend" class="weather-legend" hidden aria-live="polite">

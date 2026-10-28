@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { parseSpreadsheetBuffer } from '../src/tabular-parser.js';
 import { pointGeoJSONToRecords } from '../src/geojson-layers.js';
 import { describeWorkspaceLayer, tableRecords } from '../src/map-layer-data.js';
@@ -9,10 +8,10 @@ import { normalizeCompositionInput, normalizeCompositionResult } from '../src/ma
 import { normalizeJoinValue, joinedPopupSources } from '../src/attribute-joins.js';
 import { popupImageUrls } from '../src/info-image-popup.js';
 import { analyzeMapComposition } from '../server/map-composition.js';
-import { popupAttributeRecords, imagePopupContent } from './fixtures/popup-attributes.js';
+import { popupAttributeRecords, imagePopupContent, popupPointGeoJSON, createPopupAttributesWorkbook } from './fixtures/popup-attributes.js';
 
-const geojson = JSON.parse(readFileSync(new URL('../dulieu_chua_mienbac.geojson', import.meta.url)));
-const spreadsheet = parseSpreadsheetBuffer(readFileSync(new URL('./fixtures/popup-attributes.xlsx', import.meta.url)));
+const geojson = popupPointGeoJSON;
+const spreadsheet = parseSpreadsheetBuffer(createPopupAttributesWorkbook());
 
 function addLayer(workspace, sourceKind, records = sourceKind === 'attribute' ? spreadsheet.records : null, title = sourceKind) {
   const points = pointGeoJSONToRecords(geojson);

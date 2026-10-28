@@ -8,7 +8,7 @@ import { administrativeContextFields, sourceLocationNames } from "./geographic-g
 import { normalizePopupSuggestions } from "./ai-chart-contract.js";
 
 export function mapDisplaySuggestions(suggestions = [], selectedSuggestionId = null) {
-  return suggestions.filter(item => ["choropleth", "map_line", "point"].includes(item.chartType));
+  return suggestions.filter(item => ["choropleth", "map_line", "point", "arc_flow"].includes(item.chartType));
 }
 
 export function popupTimeColumn(columns = []) {

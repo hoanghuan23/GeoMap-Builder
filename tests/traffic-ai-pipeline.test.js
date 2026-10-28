@@ -1,3 +1,4 @@
+import { createArcFlowController } from "../src/arc-flow-controller.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -15,6 +16,7 @@ import { createRoadTrafficWorkbook, trafficAiAnalysis, trafficRecords, TRAFFIC_S
 
 function uploadHarness() {
   const context = vm.createContext({
+    createArcFlowController, maplibregl: {},
     CONFIG: { DEFAULT_RESOLUTION: 6 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
     document: { getElementById: () => ({ checked: true }) },
     parseSpreadsheetFile, profileRecordsInWorker, requestAiDataAnalysis, jsonDatasets,

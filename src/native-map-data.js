@@ -1,6 +1,6 @@
 import { asFeatureCollection } from './map-layer-data.js';
 import { geometryKinds } from './geojson-layers.js';
-import { applyPipelineFilters } from './ai-chart-pipeline.js';
+import { applyPipelineFilters, prepareSuggestions } from './ai-chart-pipeline.js';
 
 /** Supplied geometry is authoritative. Internal identities are added only after AI analysis. */
 export function nativeMapDataset(data, pipeline, fileName) {
@@ -23,7 +23,11 @@ export function nativeMapDataset(data, pipeline, fileName) {
   const suggestion = supplied ? { ...supplied,
     bindings: { ...supplied.bindings, lat: null, lng: null, region: identityField, nativeIdentity: identityField, value: supplied.bindings.value || null },
     available: true, feasibilityScore: 1, effectiveConfidence: supplied.confidence, nativeGeometry: true } : null;
-  return { ...pipeline, records, analysis: { ...pipeline.analysis, columns }, fileName, suggestions: suggestion ? [suggestion] : [], selectedSuggestionId: suggestion?.id || null,
+  const arcs = prepareSuggestions({ ...pipeline.analysis, columns, suggestions: pipeline.analysis.suggestions.filter(item => item.chartType === 'arc_flow') },
+    records, pipeline.validRowRate, { mapOnly: true });
+  const suggestions = [...(suggestion ? [suggestion] : []), ...arcs].sort((a, b) => b.confidence - a.confidence);
+  return { ...pipeline, records, rawRecords: pipeline.rawRecords || features.map(feature => feature.properties || {}), analysis: { ...pipeline.analysis, columns }, fileName,
+    suggestions, selectedSuggestionId: suggestions.find(item => item.available)?.id || null,
     nativeGeometry: { features, records, identityField, titleField }, nativeTitleField: titleField,
     popupSelections: {}, filters: {}, geoAliases: {}, geoSelections: {}, roadColorOverrides: {}, recommendation: null };
 }

@@ -10,6 +10,8 @@ export default defineConfig(({ mode }) => {
   envPrefix: ["VITE_", "MAPTILER_"],
   plugins: [aiMapRecommendationPlugin(env)],
   worker: { format: "es" },
+  // Pre-bundle lazy GPU imports in dev so the first Arc Flow does not reload the workspace.
+  optimizeDeps: { include: ["@deck.gl/maplibre", "@deck.gl/layers", "@deck.gl/geo-layers"] },
   build: {
     rollupOptions: {
       input: {

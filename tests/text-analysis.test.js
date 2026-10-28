@@ -44,7 +44,7 @@ test("text endpoint extracts records and all map metadata in one structured resp
     const input = JSON.parse(payload.input);
     assert.equal(input.text, document);
     assert.equal("profile" in input, false);
-    assert.deepEqual(Object.keys(input.supportedCharts), ["choropleth", "map_line", "point"]);
+    assert.deepEqual(Object.keys(input.supportedCharts), ["choropleth", "map_line", "point", "arc_flow"]);
     return { ok: true, json: async () => ({ output: [{ content: [{ type: "output_text", text: JSON.stringify(textWeatherOutput()) }] }] }) };
   };
   const result = await call({ text: document, source: { fileName: "weather.txt" } });

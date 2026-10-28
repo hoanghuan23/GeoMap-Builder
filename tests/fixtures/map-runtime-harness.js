@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createArcFlowController } from '../../src/arc-flow-controller.js';
 import vm from "node:vm";
 import * as capabilities from "../../src/data-capabilities.js";
 import * as polygonStyle from "../../src/renderers/polygon-style.js";
@@ -53,6 +54,7 @@ export function createHarness() {
     moveLayer() {}, on() {}, resize() {}, fitBounds() {}
   };
   const context = vm.createContext({
+    createArcFlowController,
     ...capabilities, ...polygonStyle, ...pointStyle, ...geojsonLayers, ...layerOrder, PointRenderer, PolygonRenderer, renderGeographicScopeMarkers,
     ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, ...polygonLegend, ...legendContract, ...boundaryData, ...categoricalColor,
     jsonDatasets, nativeMapDataset, nativeMapView, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue, profileRecordsInWorker, parseSpreadsheetFile,

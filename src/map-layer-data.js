@@ -24,6 +24,7 @@ export function geometryExtent(data) {
 }
 
 export function layerData(state) {
+  if (state.mapType === 'arc_flow') return state.arcFlowView?.data;
   if (state.mapType === 'point' || state.mapType === 'heatmap') return state.pointData;
   if (state.mapType === 'line') return state.lineData;
   if (state.mapType === 'h3' || state.regionHexEnabled) return state.h3Data;
@@ -35,7 +36,7 @@ export function describeWorkspaceLayer(id, state, title) {
   const dataset = state.aiDataset;
   const analysis = dataset?.analysis || state.spatialAnalysis;
   const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-  const data = dataset?.nativeGeometry ? { type: 'FeatureCollection', features: dataset.nativeGeometry.features }
+  const data = state.mapType === 'arc_flow' ? layerData(state) : dataset?.nativeGeometry ? { type: 'FeatureCollection', features: dataset.nativeGeometry.features }
     : dataset?.boundaries?.features?.length ? dataset.boundaries : dataset?.spatialData || state.sourceBoundary || layerData(state);
   const columns = analysis?.columns || [
     ...(state.dataProfile?.textFields || []).map(name => ({ name, role: 'text' })),
@@ -51,6 +52,7 @@ export function describeWorkspaceLayer(id, state, title) {
 }
 
 export function tableRecords(state) {
+  if (state.mapType === 'arc_flow' && state.arcFlowView) return state.arcFlowView.tableRecords;
   if (state.aiDataset && (!state.mapType || !geometryExtent(layerData(state)))) return state.aiDataset.records;
   return asFeatureCollection(layerData(state)).features.map(feature => feature.properties || {});
 }

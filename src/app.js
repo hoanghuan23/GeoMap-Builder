@@ -1,4 +1,5 @@
 import { jsonDatasets } from "./json-datasets.js";
+import { createArcFlowController } from "./arc-flow-controller.js";
 import { startMapWorkspace } from "./map-workspace-ui.js";
 import { nativeMapDataset, nativeMapView } from "./native-map-data.js";
 import { CONFIG } from "./config.js";
@@ -103,7 +104,8 @@ const MAP_STYLE_LABELS = Object.freeze({ map4d: "Map4D · IOTLink", satellite: "
 const SUPPORTED_VIEW_TYPES = Object.freeze([
   { label: "Bản đồ Polygon", icon: "polygon", kind: "map" },
   { label: "Bản đồ Line", icon: "line", kind: "map" },
-  { label: "Bản đồ Point", icon: "point", kind: "map" }
+  { label: "Bản đồ Point", icon: "point", kind: "map" },
+  { label: "Bản đồ Arc Flow 3D", icon: "arc_flow", kind: "map" }
 ]);
 
 function renderSupportedMapCatalog(document) {
@@ -155,6 +157,9 @@ let aiBoundaryRevision = 0;
 let dataSearchProfile;
 let dataSearchColumns = [];
 let mapMetricControlView = null;
+const arcFlow = createArcFlowController({ state, document, getMap: () => map, maplibregl,
+  overlay: options.arcFlowOverlay, id: options.id, onChange: () => options.onChange?.(),
+  onStatus: message => setStatus(message), onInteract: options.onArcInteract });
 
 function createAbortController() {
   return typeof AbortController === "function" ? new AbortController() : { signal: undefined, abort() {} };
@@ -262,6 +267,7 @@ function updateModelSections() {
   const hasModel = Boolean(state.mapType);
   const isChart = Boolean(state.chartConfig);
   const isPoint = !isChart && state.mapType === "point";
+  const isArc = !isChart && state.mapType === "arc_flow";
   const isRoad = Boolean(activeRoadSuggestion());
   $("line-toggle-field").hidden = isChart || isRoad || !state.lineData.features.length;
   $("line-toggle-label").textContent = activeRoadSuggestion() ? "Hiển thị tuyến đường" : "Hiển thị đường nối giữa các điểm";
@@ -270,8 +276,9 @@ function updateModelSections() {
   $("feature-section").hidden = !hasModel || isChart;
   $("region-hex-controls").hidden = isChart || state.mapType !== "polygon";
   syncRegionHexControls();
-  $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon", "point"].includes(state.mapType) && !isRoad);
-  $("map-style-controls").hidden = isChart || isPoint || isRoad;
+  $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon", "point", "arc_flow"].includes(state.mapType) && !isRoad);
+  $("map-style-controls").hidden = isChart || isPoint || isRoad || isArc;
+  $("arc-flow-style-controls").hidden = !isArc;
   $("point-style-controls").hidden = !isPoint;
   $("road-style-controls").hidden = !isRoad;
   $("cell-stats-card").hidden = !hasModel || isChart || state.mapType !== "h3";
@@ -286,7 +293,7 @@ function updateModelSections() {
   if (!isChart) {
     const isPolygon = state.mapType === "polygon";
     const isAiThematic = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
-    $("style-description").textContent = isRoad ? "Chú giải màu, độ dày và độ mờ tuyến" : isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
+    $("style-description").textContent = isArc ? "Chiều cao cung, độ dày, chuyển động và chú giải" : isRoad ? "Chú giải màu, độ dày và độ mờ tuyến" : isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
     $("polygon-color-ramp").hidden = !isPolygon && !isAiThematic;
     $("border-color-field").hidden = isPolygon;
     $("show-border-field").hidden = false;
@@ -505,6 +512,7 @@ function applyStyle() {
 function applyMapLayerVisibility(resolvedScale = activePolygonLegendScale()) {
   if (!map) return;
   const showLayers = $("show-map-layers")?.checked ?? false;
+  arcFlow.setActive(showLayers && state.mapType === "arc_flow");
   if (!showLayers) closeMapPopup();
   const showH3 = showLayers && (state.mapType === "h3" || isRegionHexMode());
   const showPolygon = showLayers && state.mapType === "polygon" && !isRegionHexMode();
@@ -1251,6 +1259,7 @@ function renderCompatibleMapTypes(data, profile = analyzeSpatialData(data)) {
 }
 
 function clearUploadedData({ preserveUploads = false } = {}) {
+  arcFlow.clear();
   closeMapPopup();
   regionHexBuildRevision += 1;
   state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
@@ -1281,6 +1290,7 @@ function clearUploadedData({ preserveUploads = false } = {}) {
 }
 
 async function resetConfiguration() {
+  if (arcFlow.reset()) { applyMapLayerVisibility(); updateDashboard(); return; }
   regionHexBuildRevision += 1;
   state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
   $("region-hex-note").textContent = "";
@@ -1534,6 +1544,7 @@ function renderRoadStyleControls() {
 }
 
 function clearAiMapState() {
+  arcFlow.clear();
   closeMapPopup();
   cancelAiBoundaryLoad();
   pointPopup?.remove(); pointPopup = null;
@@ -1921,7 +1932,7 @@ function createAiSuggestionButton(suggestion) {
   button.dataset.type = suggestion.id;
   button.disabled = !suggestion.available && !suggestion.repairable;
   button.title = suggestion.available ? suggestion.reason : suggestion.repairable ? `${suggestion.unavailableReason} Bấm để sửa alias.` : suggestion.unavailableReason;
-  if (["choropleth", "point", "hex_h3", "map_line"].includes(suggestion.chartType)) {
+  if (["choropleth", "point", "hex_h3", "map_line", "arc_flow"].includes(suggestion.chartType)) {
     renderMapIcon(icon, AI_CHART_REGISTRY[suggestion.chartType].icon);
   }
   else renderChartIcon(icon, suggestion.chartType === "line" ? "line" : "singleBar");
@@ -2811,6 +2822,14 @@ async function selectAiSuggestion(id) {
   }
   if (!suggestion.available) return false;
   state.aiDataset.selectedSuggestionId = id;
+  if (suggestion.chartType === "arc_flow") {
+    cancelAiBoundaryLoad(); clearChartCanvas();
+    $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode"); showChartStyleControls(false);
+    map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+    const activated = await arcFlow.activate(suggestion);
+    updateModelSections(); applyMapLayerVisibility(); renderAiSuggestionGrid(); updateDashboard();
+    return activated;
+  }
   if (state.aiDataset.nativeGeometry) { activateNativeMap(suggestion); return true; }
   if (["bar", "line"].includes(suggestion.chartType)) {
     cancelAiBoundaryLoad();
@@ -3069,6 +3088,7 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
 
 // Search follows the active filters and retains regions with a missing color metric.
 function currentDataSearch() {
+  if (state.mapType === "arc_flow") return arcFlow.searchData();
   if (!state.mapType || state.chartConfig || !state.aiDataset && !state.dataProfile) { return {}; }
   const suggestion = activeMapPopupSuggestion()
     || state.aiDataset?.suggestions.find(item => item.id === state.aiDataset.selectedSuggestionId && item.chartType === "hex_h3");
@@ -3116,7 +3136,8 @@ async function applyReadResult(result, file) {
     const dataset = nativeMapDataset(result.data, result.nativePipeline, file.name);
     if (dataset) {
       state.aiDataset = dataset; state.dataOrigin = "ai";
-      if (dataset.suggestions.length) activateNativeMap(dataset.suggestions[0]);
+      const first = dataset.suggestions.find(item => item.available);
+      if (first) await selectAiSuggestion(first.id);
       else {
         state.mapType = null;
         showCurrentFile(file.name, dataset.fallbackReason || "AI chưa đề xuất được bản đồ phù hợp với geometry.");
@@ -3760,8 +3781,9 @@ async function init() {
 return {
   state, readSpatialFile, applyReadResult, processSpatialFiles, removeUploadedFile,
   resizePopup() { if (mapPopupView) sizeMapPopup(mapPopupView); },
-  closePopup() { closeMapPopup(); cellPopup?.remove(); pointPopup?.remove(); },
+  closePopup() { closeMapPopup(); cellPopup?.remove(); pointPopup?.remove(); arcFlow.closePopup(); },
   openPopup(feature, center) {
+    if (state.mapType === "arc_flow") { arcFlow.openNode(feature); return; }
     if (state.aiDataset) openMapPopup(feature, center, state.mapType === "point" ? "point-marker" : state.mapType === "line" ? "data-lines" : "polygon-fill");
     else showUploadedFeaturePopup(feature, { name: state.fileName || "Dữ liệu", role: state.mapType }, center);
   },
@@ -3784,6 +3806,7 @@ return {
     renderSupportedChartCatalog(); bindUI(); addMapLayers(); updateDashboard();
   },
   dispose() {
+    arcFlow.dispose();
     tabularAbortController?.abort(); cancelAiBoundaryLoad(); regionHexBuildRevision++;
     clearTimeout(toastTimer); clearTimeout(statusTimer); clearTimeout(layerOrderTimer);
     closeMapPopup(); cellPopup?.remove(); pointPopup?.remove(); clearChartCanvas();

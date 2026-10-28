@@ -14,8 +14,13 @@
     "vite": "^6.1.0"
   },
   "dependencies": {
+    "@deck.gl/core": "9.4.0",
+    "@deck.gl/geo-layers": "9.4.0",
+    "@deck.gl/layers": "9.4.0",
+    "@deck.gl/maplibre": "9.4.0",
     "h3-js": "^4.5.0",
     "mammoth": "^1.13.0",
+    "maplibre-gl": "4.7.1",
     "polygon-clipping": "^0.15.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

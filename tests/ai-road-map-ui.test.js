@@ -1,3 +1,4 @@
+import { createArcFlowController } from "../src/arc-flow-controller.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -36,6 +37,7 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => roads })
   layers.set("data-lines", { layout: {}, paint: {} });
   get("opacity").value = ".72";
   const context = vm.createContext({
+    createArcFlowController,
     ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue, polygonLegendLabels,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
     roadNetworkUrl: id => ["hanoi", "da_nang"].includes(id) ? `/roads/${id}.json` : null,

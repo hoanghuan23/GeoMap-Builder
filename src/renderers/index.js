@@ -5,7 +5,8 @@ import { PolygonRenderer } from "./polygon-renderer.js";
 export const renderers = Object.freeze({
   point: PointRenderer,
   line: LineRenderer,
-  polygon: PolygonRenderer
+  polygon: PolygonRenderer,
+  arc_flow: Object.freeze({ load: () => import('./arc-flow-renderer.js') })
 });
 
 export {

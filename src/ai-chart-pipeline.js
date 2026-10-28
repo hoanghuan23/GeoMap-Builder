@@ -6,6 +6,7 @@ import { AGGREGATION_VALUES, measureAggregation, measureUnit } from "./measure-s
 import { normalizePolygonLegendRecommendation, polygonLegendTarget } from "./polygon-legend-contract.js";
 import { latLngToCell } from "h3-js";
 import { buildCoordinateLines, isCoordinateLine } from "./coordinate-data.js";
+import { createArcFlowModel } from "./arc-flow-data.js";
 import { administrativeContextFields, geographicLocationName, preferredAdministrativeColumn } from "./geographic-grain.js";
 export { administrativeContextFields, geographicLocationName, preferredAdministrativeColumn } from "./geographic-grain.js";
 
@@ -344,7 +345,11 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
   let feasibilityScore = requiredCoverage(suggestion, validRowRate);
   let available = true;
   let unavailableReason = "";
-  if (["bar", "line"].includes(suggestion.chartType)) {
+  if (suggestion.chartType === "arc_flow") {
+    const model = createArcFlowModel(records, columns, suggestion);
+    feasibilityScore = model.stats.validRate;
+    available = model.available; unavailableReason = model.unavailableReason;
+  } else if (["bar", "line"].includes(suggestion.chartType)) {
     const dimension = columnMap(columns).get(suggestion.bindings.x);
     const metrics = [suggestion.bindings.y].flat();
     const groups = groupRecords(records, suggestion.bindings.x, dimension).filter(group =>
@@ -408,7 +413,7 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
 
 /** Check render feasibility only; every suggestion and its priority come from the analysis. */
 export function prepareSuggestions(analysis, records, validRowRate, options = {}) {
-  const suggestions = (analysis.suggestions || []).filter(suggestion => !options.mapOnly || ["choropleth", "map_line", "point"].includes(suggestion.chartType));
+  const suggestions = (analysis.suggestions || []).filter(suggestion => !options.mapOnly || ["choropleth", "map_line", "point", "arc_flow"].includes(suggestion.chartType));
   return suggestions.map(suggestion => evaluateSuggestion(suggestion, records, analysis.columns, validRowRate, options))
     .sort((a, b) => b.confidence - a.confidence);
 }

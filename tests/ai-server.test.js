@@ -5,6 +5,27 @@ import { aiMapRecommendationPlugin } from "../server/ai-map-recommendation.js";
 import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 import { profileTabularData } from "../src/tabular-data.js";
 import { accessField, accessLegend, categoricalCountryFixture } from "./fixtures/categorical-countries-fixture.js";
+import { analysis as arcAnalysis, bindings as arcBindings, row as arcRow } from './fixtures/arc-flow-fixture.js';
+
+test('the existing analysis endpoint returns Arc Flow from one metadata-only AI request', async () => {
+  const profile = profileTabularData([arcRow()], { includeSamples: false });
+  const previous = globalThis.fetch; let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++;
+    const payload = JSON.parse(options.body); const input = JSON.parse(payload.input);
+    assert.ok(input.supportedCharts.arc_flow.slots.targetLat.includes('geo'));
+    assert.match(payload.instructions, /CÓ HƯỚNG/);
+    assert.ok(payload.text.format.schema.properties.suggestions.items.properties.bindings.required.includes('sourceLng'));
+    assert.equal(input.profile.head, undefined); assert.equal(input.profile.columns[0].samples, undefined);
+    return { ok: true, json: async () => ({ output_text: JSON.stringify(arcAnalysis) }) };
+  };
+  try {
+    const result = await call(middlewareFor({ OPENAI_API_KEY: 'test' }), { profile });
+    assert.equal(result.status, 200); assert.equal(calls, 1);
+    assert.equal(result.body.source, 'ai'); assert.equal(result.body.suggestions[0].chartType, 'arc_flow');
+    assert.deepEqual(result.body.suggestions[0].bindings, arcBindings);
+  } finally { globalThis.fetch = previous; }
+});
 
 function middlewareFor(env) {
   let middleware;
@@ -199,12 +220,12 @@ test("middleware chỉ gọi OpenAI một lần và fallback ngay khi output kh�
     assert.deepEqual(response.body.suggestions, []);
     const sent = JSON.parse(upstreamBody.input);
     assert.equal(sent.profile.rowCount, 2);
-    assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "map_line", "point"]);
+    assert.deepEqual(Object.keys(sent.supportedCharts), ["choropleth", "map_line", "point", "arc_flow"]);
     assert.ok(sent.supportedCharts.map_line.slots.x.includes("time"));
     assert.ok(sent.supportedCharts.map_line.slots.lat.includes("geo"));
     assert.ok(sent.supportedCharts.point.slots.region.includes("id"));
-    assert.deepEqual(upstreamBody.text.format.schema.properties.suggestions.items.properties.chartType.enum, ["choropleth", "map_line", "point"]);
-    assert.ok(response.body.suggestions.every(item => ["choropleth", "map_line", "point"].includes(item.chartType)));
+    assert.deepEqual(upstreamBody.text.format.schema.properties.suggestions.items.properties.chartType.enum, ["choropleth", "map_line", "point", "arc_flow"]);
+    assert.ok(response.body.suggestions.every(item => ["choropleth", "map_line", "point", "arc_flow"].includes(item.chartType)));
     assert.match(upstreamBody.instructions, /Gán role, đơn vị, phép gộp và grain/);
   } finally {
     globalThis.fetch = originalFetch;

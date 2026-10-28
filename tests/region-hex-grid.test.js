@@ -1,3 +1,4 @@
+import { createArcFlowController } from "../src/arc-flow-controller.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -69,6 +70,7 @@ function harness() {
   };
   get("opacity").value = .72; get("fixed-color").value = "#6c5ce7";
   const context = vm.createContext({
+    createArcFlowController, maplibregl: {},
     buildRegionHexGrid, polygonFillExpression, resolvePolygonLegendConfig, resolveAggregation, polygonLegendKey, polygonLegendTarget, regions, testMap: map, setTimeout, console,
     CONFIG: { DEFAULT_RESOLUTION: 6, MAX_RENDER_CELLS: 1000 },
     DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},

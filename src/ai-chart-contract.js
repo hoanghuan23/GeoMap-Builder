@@ -47,6 +47,15 @@ export function normalizeMetricButtons(raw, columns, suggestion, profile) {
 
 
 export const AI_CHART_REGISTRY = Object.freeze({
+  arc_flow: Object.freeze({
+    label: "Bản đồ Arc Flow 3D", icon: "arc_flow", renderer: "deck.gl",
+    slots: Object.freeze({
+      source: Object.freeze(["id", "category", "text", "geo"]), target: Object.freeze(["id", "category", "text", "geo"]),
+      sourceLat: Object.freeze(["geo", "measure"]), sourceLng: Object.freeze(["geo", "measure"]),
+      targetLat: Object.freeze(["geo", "measure"]), targetLng: Object.freeze(["geo", "measure"]),
+      value: Object.freeze(["measure"]), time: Object.freeze(["time"]), group: Object.freeze(["category", "id", "text", "time"])
+    })
+  }),
   choropleth: Object.freeze({
     label: "Bản đồ Polygon",
     slots: Object.freeze({ region: Object.freeze(["geo"]), value: Object.freeze(["measure", "category"]) }),
@@ -86,9 +95,9 @@ export const AI_CHART_REGISTRY = Object.freeze({
   })
 });
 
-// Only these three types are accepted by the upload/AI interface. The other
+// Only these map types are accepted by the upload/AI interface. The other
 // registry entries remain internal chart/legacy renderers, not input models.
-export const AI_MAP_REGISTRY = Object.freeze(Object.fromEntries(["choropleth", "map_line", "point"].map(type => [type, AI_CHART_REGISTRY[type]])));
+export const AI_MAP_REGISTRY = Object.freeze(Object.fromEntries(["choropleth", "map_line", "point", "arc_flow"].map(type => [type, AI_CHART_REGISTRY[type]])));
 
 export function supportedChartsForPrompt() {
   return Object.fromEntries(Object.entries(AI_MAP_REGISTRY).map(([chartType, spec]) => [chartType, { slots: spec.slots }]));
@@ -156,8 +165,12 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
           bindings: {
             type: "object",
             additionalProperties: false,
-            required: ["region", "value", "lat", "lng", "x", "y", "series"],
+            required: ["region", "value", "lat", "lng", "x", "y", "series", "source", "target", "sourceLat", "sourceLng", "targetLat", "targetLng", "time", "group"],
             properties: {
+              source: nullable({ type: "string" }), target: nullable({ type: "string" }),
+              sourceLat: nullable({ type: "string" }), sourceLng: nullable({ type: "string" }),
+              targetLat: nullable({ type: "string" }), targetLng: nullable({ type: "string" }),
+              time: nullable({ type: "string" }), group: nullable({ type: "string" }),
               region: nullable({ type: "string" }),
               value: nullable({ type: "string" }),
               lat: nullable({ type: "string" }),
@@ -253,7 +266,8 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
   const coordinateLine = raw.chartType === "map_line" && b.lat && b.lng;
   const nativeKind = raw.chartType === "choropleth" ? "area" : raw.chartType === "map_line" ? "line" : null;
   const nativeGeometry = profile?.spatial?.nativeGeometry === true && profile.spatial.geometryKinds?.includes(nativeKind);
-  const required = nativeGeometry ? [] : coordinateLine ? ["lat", "lng"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["region"]
+  const required = raw.chartType === "arc_flow" ? ["source", "target", "sourceLat", "sourceLng", "targetLat", "targetLng", "value"]
+    : nativeGeometry ? [] : coordinateLine ? ["lat", "lng"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["region"]
     : raw.chartType === "point" ? ["lat", "lng"]
       : raw.chartType === "hex_h3" ? ["lat", "lng", "value"]
         : raw.chartType === "line" ? ["x", "y"] : ["x", "y"];
@@ -265,10 +279,12 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
       continue;
     }
     const names = list(value).filter(name => typeof name === "string" && name);
-    if (!names.length || names.some(name => !fieldNames.has(name) || !spec.slots[slot]?.includes(roleOf.get(name)))) return null;
+    if (!names.length || raw.chartType === "arc_flow" && (typeof value !== "string" || names.length !== 1)
+      || names.some(name => !fieldNames.has(name) || !spec.slots[slot]?.includes(roleOf.get(name)))) return null;
     normalizedBindings[slot] = slot === "y" && raw.chartType === "line" ? [...new Set(names)] : names[0];
   }
-  for (const slot of nativeGeometry ? ["region", "value"] : coordinateLine ? ["region", "x", "value"] : raw.chartType === "point" ? ["region"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["value"] : []) {
+  if (raw.chartType === "arc_flow" && new Set(required.map(slot => b[slot])).size !== required.length) return null;
+  for (const slot of raw.chartType === "arc_flow" ? ["time", "group"] : nativeGeometry ? ["region", "value"] : coordinateLine ? ["region", "x", "value"] : raw.chartType === "point" ? ["region"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["value"] : []) {
     if (b[slot] == null || b[slot] === "") continue;
     const roles = nativeGeometry && slot === "region" ? ["geo", "category", "id", "text"] : spec.slots[slot];
     if (typeof b[slot] !== "string" || !fieldNames.has(b[slot]) || !roles?.includes(roleOf.get(b[slot]))) return null;

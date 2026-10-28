@@ -56,7 +56,7 @@ export function normalizeCompositionInput(raw) {
     return { id, sourceKind: layer.sourceKind === 'attribute' ? 'attribute' : 'spatial',
       popupContent: normalizePopupContent(layer.popupContent, columns), popupSuggestions: normalizePopupSuggestions(layer.popupSuggestions),
       title: clean(layer.title, 160), grain: clean(layer.grain, 400),
-      chartType: ['point', 'choropleth', 'map_line', 'polygon', 'line', 'h3', 'mixed'].includes(layer.chartType) ? layer.chartType : null,
+      chartType: ['point', 'choropleth', 'map_line', 'arc_flow', 'polygon', 'line', 'h3', 'mixed'].includes(layer.chartType) ? layer.chartType : null,
       available: layer.available === true,
       geometryKinds: Array.isArray(layer.geometryKinds) ? [...new Set(layer.geometryKinds.filter(kind => ['area', 'line', 'point'].includes(kind)))] : [],
       extent: Array.isArray(layer.extent) && layer.extent.length === 4 && layer.extent.every(Number.isFinite)

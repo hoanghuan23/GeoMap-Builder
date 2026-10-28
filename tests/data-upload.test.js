@@ -30,11 +30,11 @@ import * as legendContract from "../src/polygon-legend-contract.js";
 
 import { createHarness } from "./fixtures/map-runtime-harness.js";
 
-test("danh sách kiểu bản đồ chỉ có Polygon, Line và Point", () => {
+test("danh sách kiểu bản đồ có Polygon, Line, Point và Arc Flow", () => {
   const { context, get } = createHarness();
   vm.runInContext("renderSupportedChartCatalog()", context);
   const labels = get("supported-chart-grid").children.map(item => item.children[1].textContent);
-  assert.deepEqual(labels, ["Bản đồ Polygon", "Bản đồ Line", "Bản đồ Point"]);
+  assert.deepEqual(labels, ["Bản đồ Polygon", "Bản đồ Line", "Bản đồ Point", "Bản đồ Arc Flow 3D"]);
   const areaTypes = capabilities.compatibleMapTypes({ hasPoints: false, hasLines: false, hasArea: true, numericFields: [], textFields: [] });
   assert.deepEqual(areaTypes.map(type => type.id), ["polygon"], "H3 is no longer a selectable map type");
   context.roadData = metroFixture.metro_route;

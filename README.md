@@ -1,5 +1,21 @@
 # GeoMap Builder
 
+## Arc Flow 3D
+
+AI có thể đề xuất `arc_flow` khi mỗi dòng có quan hệ điểm đi → điểm đến, định danh hai đầu, hai cặp tọa độ và lưu lượng. Contract dùng `bindings.source/target/sourceLat/sourceLng/targetLat/targetLng/value`, thêm `time/group` khi có. Các binding phải tham chiếu cột thật; dữ liệu được kiểm tra tại client, không nhận dạng theo tên file hoặc lĩnh vực. Giữ nguyên endpoint phân tích và tùy chọn gửi mẫu; lọc, style và popup không gọi AI lại.
+
+Chọn sheet `Luu_luong_OD` trong `metro_arc_flow_gia_lap.xlsx` để thử 182 OD có hướng giữa 14 điểm, tổng **1.663.830 lượt giả lập**. Mặc định Top 100; có Top 50/250 hoặc tất cả. Bộ lọc gồm điểm đi/đến, thời gian và nhóm dữ liệu. Ô **Thời điểm** chỉ chọn một ngày/kỳ, mặc định **Tất cả** để gộp toàn bộ thời gian. Top N chỉ giới hạn hình vẽ; bảng và CSV dùng toàn bộ OD đang lọc/tổng hợp.
+
+Code tính ngưỡng phân vị 1/3, 2/3 trước Top N: thấp đỏ, trung bình vàng, cao xanh lá; cột phân nhóm gốc không bị thay đổi. Chú giải thể hiện ngưỡng, đơn vị và số mức thực tế. Các OD trùng được tổng hợp theo `agg`/`aggDefault`; thiếu phép gộp thì báo lỗi. Giữ riêng hai chiều và các điểm trùng tên ở tọa độ khác nhau. Chỉ khả dụng khi ít nhất 70% dòng hợp lệ; tọa độ thiếu/sai, lưu lượng thiếu/âm và hai đầu trùng vị trí được thống kê. Giá trị 0 giữ trong bảng, không chạy hạt.
+
+Mỗi nhóm Arc Flow mới được fit ở pitch 55° và bearing 0°, giữ basemap đang chọn. Một `MapLibreOverlay` dùng chung ở cấp workspace; `PathLayer` và `TripsLayer` dùng cùng cung 3D. Module deck.gl tải khi kích hoạt Arc Flow; Vite pre-bundle các dependency để lần đầu mở không tự reload workspace. Điểm và nhãn vẫn là lớp MapLibre thuộc từng dataset. Có style chiều cao/độ dày/độ mờ/tốc độ, công tắc chuyển động/nhãn/chú giải; tắt chuyển động mặc định khi có `prefers-reduced-motion`. Hover làm nổi bật cung, click mở popup OD; click điểm xem tổng vào/ra trước Top N. Popup đóng bằng nút × hoặc khi đổi bộ lọc/nhóm, ẩn hay xóa lớp.
+
+Chiều cao cung mặc định bằng 30% khoảng cách hai đầu (tối thiểu 30 m), nhân hệ số **Chiều cao cung**. Độ lệch ngang của hai chiều đi–về cũng tỷ lệ theo chiều dài tuyến để vẫn phân biệt được ở phạm vi thành phố hoặc toàn quốc. Chiều cao là hiệu ứng trực quan; màu và độ dày tiếp tục thể hiện lưu lượng.
+
+Overlay dùng một đồng hồ chung, dừng khi không còn luồng chuyển động đang hiển thị hoặc tab bị ẩn; phục hồi khi chuyển nhóm/đổi nền. Arc Flow cần WebGL2; nếu không có, giao diện báo chưa khả dụng và các loại bản đồ khác vẫn hoạt động. V1 chưa ghép sheet tọa độ, geocoding, xuất PNG hoặc suy ra geometry tuyến thực tế từ OD.
+
+Kiểm thử Arc Flow: `node --test tests/arc-flow-*.test.js`. Bài kiểm thử workbook mẫu chạy khi file Excel đính kèm có trong thư mục gốc; các kiểm thử dữ liệu/contract/UI/vòng đời còn lại dùng fixture độc lập. Toàn bộ kiểm thử: `npm test`; build: `npm run build`.
+
 Ứng dụng hỗ trợ nhiều dataset trong cùng phiên làm việc. Sau mỗi đợt import, mỗi file/sheet được phân tích và giữ cấu hình riêng; AI đánh giá các lớp mới với toàn bộ nhóm hiện có qua `/api/ai/analyze-map-composition`. Các lớp phù hợp được hiển thị chung, lớp chưa phù hợp hoặc chưa đánh giá được trở thành bản đồ riêng. Dữ liệu không bị thay thế khi thêm file mới. Khi AI không khả dụng, ứng dụng giữ các bản đồ riêng và cho phép thử đánh giá lại. Bảng không có geometry hoặc đề xuất bản đồ khả dụng được giữ làm nguồn thuộc tính ở trạng thái **Chờ liên kết**, có nút **Xem dữ liệu** riêng và không tạo lớp bản đồ rỗng.
 
 Trong mục 1, **Bản đồ đang hiển thị** chọn nhóm bản đồ. Mục 3 có tab riêng cho từng lớp khi nhóm có nhiều lớp; đổi tab chỉ đổi cấu hình đang chỉnh. Mục 2, style, bảng dữ liệu và export đi theo lớp được chọn. Bộ lọc, chỉ số, ngày, biểu đồ popup và lưới Polygon được giữ riêng; công tắc hiển thị tại mục 4 áp dụng toàn nhóm. Chú giải và nút chỉ số được trình bày theo lớp; thanh tìm kiếm tổng hợp các lớp được đề xuất tìm kiếm và mở đúng popup của đối tượng được chọn.
@@ -19,7 +35,7 @@ Liên kết thuộc tính hỗ trợ nhập GeoJSON và Excel cùng đợt hoặ
 
 Quan hệ ghép chỉ nằm trong workspace và phục vụ popup: không ghi đè dữ liệu gốc, thay đổi bảng/export, nhân điểm hay nối qua bảng trung gian. Một lớp nhận được nhiều nguồn thuộc tính; nhiều dòng cùng khóa được gom ảnh không trùng và vẫn giữ từng mục thông tin với nhãn nguồn. Đề xuất popup từ composition được dùng khi nguồn ghép có ảnh. Xóa nguồn gỡ phần thông tin tương ứng, cập nhật popup và các lựa chọn khả dụng; phản hồi AI đến muộn bị bỏ qua khi revision không khớp. Phản hồi AI cũ thiếu metadata mới vẫn hoạt động.
 
-Fixture `tests/fixtures/popup-attributes.xlsx` có nhiều dòng cùng khóa, nhiều ảnh/mô tả, khóa rỗng và dòng không khớp để ghép với 5 điểm trong `dulieu_chua_mienbac.geojson`. Các kiểm thử bổ sung bao phủ khóa ghép/tên trùng khác địa điểm, nhiều nguồn, xóa nguồn, phản hồi cũ, URL và HTML, chuyển kiểu popup và điều hướng ảnh.
+Fixture `tests/fixtures/popup-attributes.js` tạo 5 điểm GeoJSON giả lập và workbook Excel trong bộ nhớ, gồm nhiều dòng cùng khóa, nhiều ảnh/mô tả, khóa rỗng và dòng không khớp; kiểm thử không cần file dữ liệu mẫu bên ngoài. Các kiểm thử bổ sung bao phủ khóa ghép/tên trùng khác địa điểm, nhiều nguồn, xóa nguồn, phản hồi cũ, URL và HTML, chuyển kiểu popup và điều hướng ảnh.
 
 Luồng ghép lớp dùng chung cho mọi lĩnh vực, tên file và tổ hợp Polygon/Line/Point/lục giác; không có danh sách cặp dữ liệu được ghép sẵn. AI quyết định dựa trên hồ sơ, ứng dụng kiểm tra hợp đồng JSON và quyền sở hữu lớp/nhóm. Schema được gửi cả qua `text.format` và trong instructions để các gateway không thực thi structured output vẫn nhận đủ cấu trúc. Các lớp mới được đề xuất cùng nhóm dùng chung `newGroupKey`; `append_to_group` chỉ tham chiếu nhóm đã có. `AI_DEBUG=true` ghi phản hồi composition gốc và kết quả chuẩn hóa ra console để kiểm tra lỗi hợp đồng.
 
@@ -214,6 +230,7 @@ Các kiểu bản đồ hiện được hỗ trợ:
 - Point
 - Line
 - Polygon
+- Arc Flow 3D (quan hệ đi–đến có tọa độ)
 
 ## 6. Hệ thống thư viện
 

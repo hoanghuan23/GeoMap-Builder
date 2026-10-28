@@ -1,4 +1,5 @@
 export const mapIcons = Object.freeze({
+  arc_flow: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#389e55" stroke-width="1.8" aria-hidden="true"><path d="M3 19C3 1 21 1 21 19M3 19C8 6 15 9 16 19"/><circle cx="3" cy="19" r="2" fill="#389e55"/><circle cx="21" cy="19" r="2" fill="#389e55"/><path d="m18 15 3 4 2-4"/></svg>`,
   point: `
     <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="5" fill="#389e55" />

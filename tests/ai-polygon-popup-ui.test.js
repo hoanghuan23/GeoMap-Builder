@@ -1,3 +1,4 @@
+import { createArcFlowController } from "../src/arc-flow-controller.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -130,6 +131,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
     popupSuggestions: popupSuggestions.map(item => ({ ...item })) }));
   if (metricButtons !== null) dataset.suggestions.find(suggestion => suggestion.id === dataset.selectedSuggestionId).metricButtons = metricButtons;
   const context = vm.createContext({
+    createArcFlowController,
     ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...h3Utils, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract, ...categoricalColor,
     fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, createInfoImagePopup, collapseCountryFeatures, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
@@ -465,13 +467,21 @@ for (const [geoLevel, locationField, metric, otherMetric, names] of [
     assert.equal(feature.properties.__metric, null);
     assert.equal(feature.properties[otherMetric], 100);
     assert.equal(searchDataIndex(index, names[1])[0].feature.properties[metric], 0);
-    assert.equal(h.sources.get("polygon-data").data.features.length, 3);
+    for (const sourceId of ["polygon-data", "vietnam-boundary"]) {
+      assert.deepEqual(Array.from(h.sources.get(sourceId).data.features, feature => feature.properties[locationField]), names.slice(1));
+    }
     await h.run(`changeAiMapMetric(${JSON.stringify(otherMetric)})`);
     assert.equal(h.run("activePolygonLegendScale().field"), otherMetric);
+    for (const sourceId of ["polygon-data", "vietnam-boundary"]) {
+      assert.deepEqual(Array.from(h.sources.get(sourceId).data.features, feature => feature.properties[locationField]), names);
+    }
     assert.equal(searchDataIndex(buildDataSearchIndex(h.run("currentDataSearch()")), names[0])[0].feature.properties[otherMetric], 100);
     h.run(`dataset.records.forEach(record=>record[${JSON.stringify(metric)}]=null)`);
     await h.run(`changeAiMapMetric(${JSON.stringify(metric)})`);
     assert.equal(h.layers.get("polygon-fill").paint["fill-color"], "rgba(0, 0, 0, 0)");
+    for (const sourceId of ["polygon-data", "vietnam-boundary"]) {
+      assert.equal(h.sources.get(sourceId).data.features.length, 0);
+    }
     assert.equal(buildDataSearchIndex(h.run("currentDataSearch()")).uniqueCount, 3);
   });
 }

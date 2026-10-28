@@ -1,3 +1,4 @@
+import { createArcFlowController } from "../src/arc-flow-controller.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -107,6 +108,7 @@ test("giao diện dùng đúng cột thời gian đã bind và giữ aggregation
   const elements = new Map();
   const get = id => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
   const context = vm.createContext({
+    createArcFlowController, maplibregl: {},
     ...pipeline, ...timeValues, comparableFilterValue, Date,
     CONFIG: { DEFAULT_RESOLUTION: 6 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
     document: { getElementById: get, createElement: element },

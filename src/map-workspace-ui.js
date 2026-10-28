@@ -10,6 +10,7 @@ import { countryRegionMatches, filterCountryRegionData } from './country-regions
 import { CONFIG } from './config.js';
 import { expandJsonUpload } from './json-datasets.js';
 import { keepSelectOpenAfterMouseClick } from './select-control.js';
+import { createArcFlowOverlayManager } from './arc-flow-overlay.js';
 
 const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
@@ -70,6 +71,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     if (hide) statusTimer = setTimeout(() => { $('status').hidden = true; }, 3500);
   };
   const enqueue = task => { const next = queue.then(task); queue = next.catch(error => { console.error(error); status(error.message); }); return next; };
+  const arcFlowOverlay = createArcFlowOverlayManager(map, { onError: error => status(error.message || 'Không thể dựng Arc Flow 3D.') });
   const schedule = () => {
     if (scheduled) return;
     scheduled = true;
@@ -97,6 +99,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     metric.dataset.layerId = id;
     const api = createRuntime({ id, document: dom.document, map: manager.map, nativeMap: map, maplibregl: manager.popupLibrary(globalThis.maplibregl), preparsedResults,
       managedWorkspace: true, onStatus: status,
+      arcFlowOverlay, onArcInteract: () => selectLayer(id),
       popupSources: feature => joinedPopupSources(workspace, id, feature),
       popupMetadata() {
         const joins = workspace.attributeJoins.filter(join => join.targetLayerId === id && join.popupContent.imageFields.length);
@@ -154,7 +157,9 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     }).filter(Boolean);
     if (!extents.length) return;
     const bbox = [Math.min(...extents.map(box => box[0])), Math.min(...extents.map(box => box[1])), Math.max(...extents.map(box => box[2])), Math.max(...extents.map(box => box[3]))];
-    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 55, maxZoom: 12, duration: 0 });
+    const hasArc = group.layerIds.some(id => runtimes.get(id)?.api.state.mapType === 'arc_flow');
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 75, maxZoom: 12, duration: 0,
+      pitch: hasArc ? 55 : 0, bearing: 0 });
   }
 
   function sync() {
@@ -202,6 +207,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       item.panel.hidden = !active;
       const groupVisible = isVisible && group.visible;
       item.manager.setVisible(Boolean(groupVisible));
+      arcFlowOverlay.setLayerState(id, { attached: isVisible && styleReady, visible: Boolean(groupVisible) });
       item.metric.hidden = !groupVisible || !item.api.state.aiDataset || !item.dom.elements.get('map-metric-list').children.length;
       // The runtime may hide its metric control when fewer than two AI buttons exist.
       if (item.api.state.aiDataset) {
@@ -217,7 +223,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       const otherLegend = [...item.legends.children].some(node => node !== item.genericLegend && node.tagName === 'DIV' && !node.hidden);
       const count = filterCountryRegionData(layerData(item.api.state), config, regionId)?.features?.length || 0;
       const legendEnabled = item.api.state.mapType === 'point' ? item.api.state.pointStyle.showLegend
-        : item.api.state.mapType === 'line' ? item.api.state.roadDisplayStyle.showLegend : true;
+        : item.api.state.mapType === 'line' ? item.api.state.roadDisplayStyle.showLegend
+          : item.api.state.mapType === 'arc_flow' ? item.api.state.arcFlowStyle.showLegend : true;
       item.genericLegend.hidden = !legendEnabled || otherLegend || !count;
       if (!item.genericLegend.hidden) item.genericLegend.textContent = `${workspace.layersById[id]?.title} · ${count.toLocaleString('vi-VN')} đối tượng`;
       item.chart.hidden = true;
@@ -236,6 +243,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     }
     document.querySelector('.content-area').classList.toggle('table-hidden', !tableShown || !hasSelection);
     orderWorkspaceMapLayers(map);
+    arcFlowOverlay.refresh();
     const unknown = Object.values(workspace.groupsById).some(value => value.composition?.action === 'undetermined');
     const waiting = Object.values(workspace.layersById).some(layer => layer.sourceKind === 'attribute' && !workspace.attributeJoins.some(join => join.sourceId === layer.id));
     retry.hidden = !(unknown || waiting) || Object.keys(workspace.layersById).length < 2;
@@ -251,7 +259,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       const member = workspace.layersById[id]; const type = runtimes.get(id).api.state.mapType;
       const duplicateTitle = group.layerIds.some(key => key !== id && workspace.layersById[key].title === member.title);
       const label = `${member.title}${duplicateTitle ? ` · ${runtimes.get(id).api.state.fileName || id}` : ''}`;
-      const button = textNode('button', `${type === 'point' ? '●' : type === 'line' ? '╱' : '▧'} ${label}`, 'map-layer-tab');
+      const button = textNode('button', `${type === 'arc_flow' ? '⌒' : type === 'point' ? '●' : type === 'line' ? '╱' : '▧'} ${label}`, 'map-layer-tab');
       button.title = label;
       button.type = 'button'; button.id = `${item.id}-tab-${id}`; button.dataset.layerId = id;
       button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(group.activeLayerId === id));
@@ -282,7 +290,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     const el = name => item.dom.elements.get(name);
     state.page = Math.max(1, Math.min(state.page, Math.ceil(filtered.length / state.pageSize) || 1));
     const start = (state.page - 1) * state.pageSize;
-    el('table-title').textContent = title; el('table-search').placeholder = 'Tìm trong dữ liệu lớp...';
+    el('table-title').textContent = title + (state.mapType === 'arc_flow' ? ' · Luồng đang lọc' : ''); el('table-search').placeholder = 'Tìm trong dữ liệu lớp...';
     const head = document.createElement('tr'); head.append(textNode('th', '#'), ...columns.map(column => textNode('th', column)));
     el('data-head').replaceChildren(head);
     el('data-body').replaceChildren(...filtered.slice(start, start + state.pageSize).map((record, index) => {
@@ -558,14 +566,15 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   $('basemap-options').addEventListener('click', event => {
     const option = event.target.closest('.basemap-option'); if (!option || !styles[option.dataset.mapStyle]) return;
     if (styleReady && currentStyle === option.dataset.mapStyle) return;
-    currentStyle = option.dataset.mapStyle; styleReady = false; map.setStyle(styles[currentStyle], { diff: false });
+    currentStyle = option.dataset.mapStyle; styleReady = false; arcFlowOverlay.setStyleReady(false); map.setStyle(styles[currentStyle], { diff: false });
     document.querySelectorAll('.basemap-option').forEach(button => { button.classList.toggle('active', button.dataset.mapStyle === currentStyle); button.setAttribute('aria-pressed', String(button.dataset.mapStyle === currentStyle)); });
     $('basemap-selection').replaceChildren(document.createTextNode('Nền đang dùng: '), textNode('b', styleLabels[currentStyle]));
     $('map4d-attribution').hidden = currentStyle !== 'map4d'; $('satellite-attribution').hidden = currentStyle !== 'satellite'; $('vector-attribution').hidden = ['map4d', 'satellite'].includes(currentStyle);
   });
   $('zoom-in').addEventListener('click', () => map.zoomIn()); $('zoom-out').addEventListener('click', () => map.zoomOut());
   $('fullscreen').addEventListener('click', () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector('.map-panel').requestFullscreen());
-  map.on('style.load', () => { styleReady = true; mounted.clear(); readyResolve(); sync(); search.refreshHighlight(); });
+  map.on('style.load', () => { styleReady = true; mounted.clear(); readyResolve(); sync(); arcFlowOverlay.setStyleReady(true); search.refreshHighlight(); });
+  map.on('remove', () => arcFlowOverlay.dispose());
   map.on('error', event => {
     console.warn('MapLibre:', event.error?.message);
     if (!styleReady) status('Chưa tải được nền bản đồ. Bạn có thể chọn nền khác để thử lại.');

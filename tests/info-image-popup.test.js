@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { createInfoImagePopup, popupImageUrls, pointDirectionsUrl } from '../src/info-image-popup.js';
 import { normalizePopupContent, popupUrls } from '../src/popup-content-contract.js';
 import { popupDisplayOptions } from '../src/ai-popup-chart.js';
 import { validateAndNormalizeAnalysis, ANALYSIS_RESPONSE_SCHEMA } from '../src/ai-chart-contract.js';
-import { popupAttributeRecords, imagePopupContent } from './fixtures/popup-attributes.js';
+import { popupAttributeRecords, imagePopupContent, popupPointGeoJSON } from './fixtures/popup-attributes.js';
 
 class Element {
   children = []; events = {}; attributes = {}; textContent = ''; hidden = false;
@@ -19,7 +18,7 @@ class Element {
 const documentRef = { createElement: tag => new Element(tag) };
 const all = element => [element, ...element.children.flatMap(all)];
 const find = (element, className) => all(element).find(child => child.className === className);
-const geojson = JSON.parse(readFileSync(new URL('../dulieu_chua_mienbac.geojson', import.meta.url)));
+const geojson = popupPointGeoJSON;
 const columns = Object.keys(geojson.features[0].properties).map(name => ({ name, role: 'text' }));
 const sources = [{ title: 'GeoJSON', columns, records: [geojson.features[1].properties], popupContent: imagePopupContent },
   { title: 'Excel', columns: [...columns, { name: 'ghi_chu', role: 'text' }], records: popupAttributeRecords.slice(0, 2), popupContent: imagePopupContent }];
