@@ -288,7 +288,7 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
     agg: ["choropleth", "map_line"].includes(raw.chartType) && (!normalizedBindings.value || roleOf.get(normalizedBindings.value) === "category") ? null : AGG_VALUES.includes(raw.agg) ? raw.agg : null,
     confidence: Math.min(1, Math.max(0, Number(raw.confidence) || 0)),
     reason: typeof raw.reason === "string" ? raw.reason.trim() : "",
-    legend: raw.chartType === "choropleth" && normalizedBindings.value ? raw.legend ?? null : null,
+    legend: ["choropleth", "map_line"].includes(raw.chartType) && normalizedBindings.value ? raw.legend ?? null : null,
     popupSuggestions: normalizePopupSuggestions(raw.popupSuggestions),
     source: "ai"
   };
@@ -333,12 +333,12 @@ export function validateAndNormalizeAnalysis(raw, profile) {
   }
   const suggestions = [...suggestionsByType.values()].sort((a, b) => b.confidence - a.confidence);
   for (const column of columns) {
-    const suggestion = suggestions.find(item => item.chartType === "choropleth" && item.bindings.value === column.name);
+    const mapSuggestions = suggestions.filter(item => ["choropleth", "map_line"].includes(item.chartType) && item.bindings.value === column.name);
     const defaultTarget = { ...polygonLegendTarget(column), role: column.role };
     column.legend = normalizePolygonLegendRecommendation(column.legend, defaultTarget, {
       onFallback: reason => errors.push(`Legend ${column.name}: ${reason}`)
     });
-    if (suggestion) {
+    for (const suggestion of mapSuggestions) {
       const target = { ...polygonLegendTarget(column, suggestion.agg || measureAggregation(column)), role: column.role };
       const suggestionLegend = normalizePolygonLegendRecommendation(suggestion.legend, target, {
         onFallback: reason => errors.push(`Legend ${suggestion.id}: ${reason}`)

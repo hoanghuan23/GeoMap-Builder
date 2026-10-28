@@ -183,12 +183,12 @@ test("data units and provenance survive legacy legend fallback through server/cl
   assert.ok(client.columns.every(column => column.legend === null));
 });
 
-test("compact suggestion legends seed only their own matching column default and survive two normalizations", () => {
+for (const chartType of ["choropleth", "map_line"]) test(`${chartType} suggestion legends seed only their matching column and survive two normalizations`, () => {
   const legend = legendFixture({ unit: "Celsius" });
   const raw = {
     columns: [{ name: "temperature", role: "measure", semanticType: "custom_measure", unit: "℃", aggDefault: "mean" },
       { name: "note", role: "category", semanticType: "air_temperature", legend }],
-    suggestions: [{ id: "map", chartType: "choropleth", bindings: { region: "province", value: "temperature" }, agg: "mean", legend }]
+    suggestions: [{ id: "map", chartType, bindings: { region: "province", value: "temperature" }, agg: "mean", legend }]
   };
   const server = normalizeFixture(raw, profile);
   assert.deepEqual(normalizeFixture(JSON.parse(JSON.stringify(server)), profile), server);

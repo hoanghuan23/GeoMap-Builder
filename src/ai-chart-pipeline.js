@@ -49,7 +49,7 @@ export function withSuggestionMetric(suggestion, metric, columns) {
   const dimension = suggestion.chartType === "bar" ? suggestion.bindings.x : suggestion.bindings.region;
   updated.agg = suggestion.chartType === "map_line" && byName.get(metric)?.role !== "measure" ? null
     : metric === "count" ? "count" : resolveAggregation(updated, columns);
-  if (suggestion.chartType === "choropleth") updated.legend = normalizePolygonLegendRecommendation(
+  if (["choropleth", "map_line"].includes(suggestion.chartType)) updated.legend = normalizePolygonLegendRecommendation(
     byName.get(metric)?.legend, { ...polygonLegendTarget(byName.get(metric), updated.agg), role: byName.get(metric)?.role }
   );
   updated.title = dimension ? `${metricLabel} theo ${label(dimension)}` : `${metricLabel} theo ô H3`;

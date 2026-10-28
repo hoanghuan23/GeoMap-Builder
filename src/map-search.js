@@ -1,5 +1,5 @@
 import polygonClipping from "polygon-clipping";
-import { normalizeDataSearchConfig, resolveDataSearchColumns } from "./data-search-config.js";
+import { isDataSearchColumn, normalizeDataSearchConfig, resolveDataSearchColumns } from "./data-search-config.js";
 import {
   COUNTRY_BOUNDARY_SOURCES, countryLookupName, loadCountryBoundaryData, resolveBoundaryCountry, resolvedCountryProperties
 } from "./country-boundary-sources.js";
@@ -532,15 +532,35 @@ function dataSearchValue(value) {
   return ["string", "number", "boolean"].includes(typeof value) ? String(value).trim() : "";
 }
 
-function dataSearchEntityKey(properties, fields, locationKeys = {}) {
+function dataSearchEntityKey(properties, fields, locationKeys = {}, contextFields) {
   const primary = dataSearchValue(properties?.[fields[0].name]);
   if (!primary) return null;
   const countryCode = fields[0].geoLevel === "country" ? resolveBoundaryCountry(countryLookupName(primary)) : null;
   const identity = fields[0].geoLevel === "country"
     ? properties?.__resolved_location_key || (Object.hasOwn(locationKeys, primary) ? locationKeys[primary] : null)
       || (countryCode ? `country:${countryCode}` : primary) : primary;
-  const context = fields[0].role === "id" ? [] : fields.slice(1).filter(column => column.role === "geo");
+  const context = contextFields ?? (fields[0].role === "id" ? [] : fields.slice(1).filter(column => column.role === "geo"));
   return JSON.stringify([identity, ...context.map(column => dataSearchValue(properties?.[column.name]))]);
+}
+
+function groupLineSearchEntries(entries) {
+  const groups = new Map();
+  for (const entry of entries) {
+    const isLine = ["LineString", "MultiLineString"].includes(entry.feature.geometry?.type);
+    const key = isLine ? entry.entityKey : entry;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  }
+  return [...groups.values()].map(group => {
+    const first = group[0];
+    if (group.length === 1) return first;
+    // Keep disconnected segments separate and let selection fit the whole route.
+    return { ...first, terms: [...new Set(group.flatMap(entry => entry.terms))], feature: {
+      type: "Feature", properties: first.feature.properties,
+      geometry: { type: "MultiLineString", coordinates: group.flatMap(({ feature }) =>
+        feature.geometry.type === "LineString" ? [feature.geometry.coordinates] : feature.geometry.coordinates) }
+    } };
+  });
 }
 
 /** Index only uploaded fields. AI supplies defaults; filtering never calls AI/geocoding. */
@@ -551,10 +571,14 @@ export function buildDataSearchIndex({ data, columns = [], titleField, chartType
   const fields = resolveDataSearchColumns({ columns, titleField, chartType, search_fields: config.search_fields });
   if (!fields.length) return { entries: [], fields: [], uniqueCount: 0, enabled: false, placeholder: "Tìm trong dữ liệu đã tải lên..." };
   const primary = fields[0];
-  const entries = (data?.features || []).flatMap(feature => {
+  // Route identity also needs its area/code, even when AI only searches the name.
+  const contextFields = chartType === "map_line" ? columns.filter(column => column.name !== primary.name
+    && isDataSearchColumn(column) && ["geo", "id"].includes(column.role)) : undefined;
+  const entityKeyFor = properties => dataSearchEntityKey(properties, fields, locationKeys, contextFields);
+  const rawEntries = (data?.features || []).flatMap(feature => {
     if (!featureCenter(feature)) return [];
     const properties = feature.properties || {};
-    const entityKey = dataSearchEntityKey(properties, fields, locationKeys);
+    const entityKey = entityKeyFor(properties);
     if (!entityKey) return [];
     const values = fields.flatMap(column => {
       const value = dataSearchValue(properties[column.name]);
@@ -575,9 +599,10 @@ export function buildDataSearchIndex({ data, columns = [], titleField, chartType
       .map(item => `${item.column.labelVi || item.column.name}: ${item.value}`).join(" · ") || primary.labelVi || primary.name;
     return [{ feature, label, subtitle, terms, entityKey }];
   });
+  const entries = chartType === "map_line" ? groupLineSearchEntries(rawEntries) : rawEntries;
   const uniqueCount = new Set(entries.map(entry => entry.entityKey)).size;
   const totalCount = Array.isArray(sourceRecords)
-    ? new Set(sourceRecords.map(record => dataSearchEntityKey(record, fields, locationKeys)).filter(Boolean)).size : null;
+    ? new Set(sourceRecords.map(entityKeyFor).filter(Boolean)).size : null;
   const reducedByFilter = filtered && (totalCount == null || uniqueCount < totalCount);
   const enabled = config.search_bar !== false && uniqueCount > 0
     && (!reducedByFilter || uniqueCount >= minFilteredObjects);

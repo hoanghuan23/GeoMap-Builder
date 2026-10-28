@@ -1,5 +1,5 @@
 import {
-  administrativeNameAliases, boundaryMatchesCountry, countryCandidateScore, getMapTilerAdministrativeBoundary, getMapTilerRegion, isBoundaryFeature, normalizedAdministrativeName,
+  administrativeNameAliases, boundaryMatchesCountry, countryCandidateScore, getMapTilerAdministrativeBoundary, getMapTilerFeature, getMapTilerRegion, isBoundaryFeature, normalizedAdministrativeName,
   localBoundaryNameAliases, normalizePlaceName, normalizePlaceWords, searchLocalBoundaries, searchMapTilerBoundaries
 } from "./map-search.js";
 import { COUNTRY_BOUNDARY_SOURCES, countryLookupName, resolveBoundaryCountry, resolvedCountryProperties } from "./country-boundary-sources.js";
@@ -130,7 +130,12 @@ async function resolveCandidates(name, { apiKey, placeType, country, signal, fet
         const boundary = await getMapTilerAdministrativeBoundary(cityState ? COUNTRY_BOUNDARY_SOURCES[code].name : providerName, { apiKey, country: lookupCountry,
           placeType: query.kind === "region" ? "region" : effectivePlaceType, signal, fetchImpl,
           onAmbiguous: matches => { ambiguous = matches; } });
-        candidates = boundary ? [boundary] : isCountry ? ambiguous || [] : [];
+        candidates = boundary ? [boundary] : await Promise.all((ambiguous || []).map(async feature => {
+          const detail = isBoundaryFeature(feature) ? feature : await getMapTilerFeature(feature.id, { apiKey, signal, fetchImpl });
+          return isBoundaryFeature(detail) ? { ...feature, ...detail,
+            properties: { ...(feature.properties || {}), ...(detail.properties || {}) } } : null;
+        }));
+        candidates = candidates.filter(Boolean);
       } else {
         // Use the same administrative search as the search bar for explicit district/commune names.
         candidates = await searchMapTilerBoundaries(providerName, { apiKey, country: lookupCountry, signal, fetchImpl });

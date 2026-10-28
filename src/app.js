@@ -46,7 +46,7 @@ import { parseSpreadsheetFile, profileRecordsInWorker } from "./tabular-worker-c
 import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "./vietnam-admin-data.js";
 import { renderGeographicScopeMarkers } from "./renderers/geographic-scope-renderer.js";
 import { deterministicLayerOrder, mapLayerIdsInOrder, requestAiLayerOrder } from "./layer-order.js";
-import { joinRoadRecordsByArea, roadAreaField, ROAD_NETWORKS, roadMapStyle, roadNetworksFromRecords, roadValueColumns } from "./road-map-data.js";
+import { aiRoadMapStyle, joinRoadRecordsByArea, roadAreaField, ROAD_NETWORKS, roadNetworksFromRecords, roadValueColumns } from "./road-map-data.js";
 import { roadNetworkUrl } from "./road-network-assets.js";
 import { buildCoordinateLines, isCoordinateLine, pointTitleField } from "./coordinate-data.js";
 
@@ -286,7 +286,7 @@ function updateModelSections() {
   if (!isChart) {
     const isPolygon = state.mapType === "polygon";
     const isAiThematic = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
-    $("style-description").textContent = isRoad ? "Màu sắc, độ dày, độ mờ và chú giải tuyến" : isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
+    $("style-description").textContent = isRoad ? "Chú giải màu, độ dày và độ mờ tuyến" : isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
     $("polygon-color-ramp").hidden = !isPolygon && !isAiThematic;
     $("border-color-field").hidden = isPolygon;
     $("show-border-field").hidden = false;
@@ -1290,7 +1290,6 @@ async function resetConfiguration() {
   state.pieStyle = mergePieConfig();
   state.pointStyle = mergePointStyle();
   state.roadDisplayStyle = { ...DEFAULT_ROAD_DISPLAY_STYLE };
-  if (activeRoadSuggestion()) state.aiDataset.roadColorOverrides = Object.create(null);
   state.polygonPalette = state.aiDataset ? "diverging" : null;
 
   $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
@@ -1340,7 +1339,7 @@ async function resetConfiguration() {
     refreshPointStyle(); renderPointStyleControls();
   } else if (activeRoadSuggestion()) {
     const suggestion = activeRoadSuggestion();
-    state.aiDataset.roadStyle = roadMapStyle(state.lineData, state.aiDataset.analysis.columns.find(column => column.name === suggestion.bindings.value));
+    state.aiDataset.roadStyle = aiLineStyle(state.lineData, suggestion);
     renderRoadStyleControls();
   } else if (state.boundary) {
     await rebuildGrid();
@@ -1491,7 +1490,7 @@ function showChartStyleControls(show) {
   $("point-style-controls").hidden = !isPoint;
   $("road-style-controls").hidden = !isRoad;
   $("bar-style-controls").hidden = !show;
-  $("style-description").textContent = show ? "Tùy chỉnh biểu đồ" : isRoad ? "Màu sắc, độ dày, độ mờ và chú giải tuyến" : "Màu sắc, độ mờ và đường viền";
+  $("style-description").textContent = show ? "Tùy chỉnh biểu đồ" : isRoad ? "Chú giải màu, độ dày và độ mờ tuyến" : "Màu sắc, độ mờ và đường viền";
   if (show) renderChartStyleControls();
   else {
     clearBarStylePanel($("bar-style-controls"));
@@ -1499,40 +1498,39 @@ function showChartStyleControls(show) {
   }
 }
 
-function roadColorOverridesFor(suggestion) {
-  const dataset = state.aiDataset;
-  dataset.roadColorOverrides ||= Object.create(null);
-  return dataset.roadColorOverrides[suggestion.bindings.value || dataset.recommendation?.metricField || "__path"] ||= Object.create(null);
+function aiLineStyle(data, suggestion) {
+  return aiRoadMapStyle(data, state.aiDataset.analysis.columns, suggestion);
 }
 
-function aiLineStyle(data, suggestion) {
+function roadLegendTitle(suggestion) {
   const dataset = state.aiDataset;
-  const field = suggestion.bindings.value || dataset.recommendation.metricField;
-  const column = dataset.analysis.columns.find(item => item.name === field);
-  const colors = roadColorOverridesFor(suggestion);
-  const color = colors.path || "#00d084";
-  return column ? roadMapStyle(data, column, colors) : { color, rows: [{ key: "path", label: "Màu tuyến", color }] };
+  const field = suggestion.bindings.value;
+  const column = dataset.analysis.columns.find(column => column.name === field);
+  const scale = dataset.roadStyle?.scale;
+  const title = scale?.title || column?.labelVi || field || suggestion.title || dataset.analysis.datasetTitle || "Tuyến đường";
+  const unit = scale ? scale.unit : column?.unit;
+  return unit && !title.toLocaleLowerCase("vi").includes(unit.toLocaleLowerCase("vi")) ? `${title} (${unit})` : title;
 }
 
 function renderRoadStyleControls() {
   const suggestion = activeRoadSuggestion();
-  const rows = suggestion ? state.aiDataset.roadStyle?.rows || [] : [];
   $("road-line-width").value = state.roadDisplayStyle.width;
   $("road-line-width-value").value = `${state.roadDisplayStyle.width} px`;
   $("road-line-opacity").value = state.roadDisplayStyle.opacity;
   $("road-line-opacity-value").value = `${Math.round(state.roadDisplayStyle.opacity * 100)}%`;
   $("road-show-legend").checked = state.roadDisplayStyle.showLegend;
-  $("road-color-field").hidden = !rows.length;
-  $("road-style-colors").replaceChildren(...rows.map(item => {
-    const row = document.createElement("label"); row.className = "bar-color-row";
-    const label = document.createElement("span"); label.textContent = item.label; label.title = item.label;
-    const control = document.createElement("span"); control.className = "color-control";
-    const input = Object.assign(document.createElement("input"), { type: "color", value: item.color, className: "road-style-color" });
-    input.dataset.key = item.key; input.setAttribute("aria-label", `Màu ${item.label}`);
-    const code = document.createElement("code"); code.textContent = item.color.toUpperCase();
-    control.append(input, code); row.append(label, control);
-    return row;
-  }));
+  $("road-color-field").hidden = !suggestion;
+  if (!suggestion) return;
+  const style = state.aiDataset.roadStyle;
+  const scale = style?.scale;
+  const title = roadLegendTitle(suggestion);
+  $("road-color-metric").textContent = scale ? `Theo ${title}` : "";
+  const summary = $("road-legend-summary");
+  const status = !scale ? "Màu tuyến mặc định" : !scale.hasData ? "Không có dữ liệu"
+    : scale.source === "ai" ? "Chú giải do AI đề xuất" : "Chú giải dự phòng";
+  summary.textContent = scale ? `${title} · ${status}` : status;
+  summary.style.setProperty("--legend-gradient", scale?.gradient || scale?.noDataColor || style?.color || "transparent");
+  summary.title = scale?.reason || "";
 }
 
 function clearAiMapState() {
@@ -2074,9 +2072,12 @@ function populatePolygonFilters(dataset, suggestion) {
     mapControls.append(aiField(caption, control));
   }
   nodes.push(mapControls);
-  $("ai-filter-controls").replaceChildren(...nodes);
+  const controls = $("ai-filter-controls");
+  const repair = controls.querySelector(".geo-repair");
+  controls.replaceChildren(...nodes, ...(repair ? [repair] : []));
   $("ai-data-filters").hidden = false;
   dataset.filters = filters;
+  renderGeoRepair(dataset.geoMatch?.unmatched || suggestion.geoUnmatched || []);
   return filters;
 }
 
@@ -2343,10 +2344,15 @@ function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) 
 
 function renderGeoRepair(unmatched = []) {
   const controls = $("ai-filter-controls");
-  controls.querySelector(".geo-repair")?.remove();
+  const previous = controls.querySelector(".geo-repair");
+  const locations = JSON.stringify(unmatched);
+  // Metadata/filter refreshes must preserve choices and aliases not yet applied.
+  if (previous && previous.geoMatch === state.aiDataset.geoMatch && previous.dataset.locations === locations) return;
+  previous?.remove();
   if (!unmatched.length) return;
   const panel = document.createElement("div"); const title = document.createElement("b"); const button = document.createElement("button");
   panel.className = "geo-repair"; title.textContent = `Chưa khớp ${unmatched.length} địa danh`;
+  panel.geoMatch = state.aiDataset.geoMatch; panel.dataset.locations = locations;
   panel.append(title, ...unmatched.map(name => {
     const row = document.createElement("label"); const original = document.createElement("span"); const input = document.createElement("input");
     row.className = "geo-repair-row"; original.textContent = name; input.className = "geo-alias-input"; input.dataset.location = name;
@@ -2590,26 +2596,24 @@ function renderRoadLegend() {
   legend.hidden = !suggestion || !state.roadDisplayStyle.showLegend || !state.lineData.features.length || !$("show-map-layers").checked;
   if (legend.hidden) return;
   const dataset = state.aiDataset;
-  const field = suggestion.bindings.value || dataset.recommendation.metricField;
-  const column = dataset.analysis.columns.find(column => column.name === field);
   const heading = document.createElement("div"); heading.className = "point-legend-heading";
   const title = document.createElement("strong");
-  const titleText = column?.labelVi || field || suggestion.title || dataset.analysis.datasetTitle || "Tuyến đường";
-  title.textContent = column?.unit && !titleText.toLocaleLowerCase("vi").includes(column.unit.toLocaleLowerCase("vi"))
-    ? `${titleText} (${column.unit})` : titleText;
+  title.textContent = roadLegendTitle(suggestion);
   heading.append(title);
   const rows = document.createElement("div"); rows.className = "point-legend-rows";
   const stops = dataset.roadStyle?.rows || [];
-  if (column?.role === "measure" && stops.length) {
+  const scale = dataset.roadStyle?.scale;
+  if (scale && scale.type !== "categorical" && stops.length) {
     rows.className = "line-legend-continuous";
     const ramp = document.createElement("div"); ramp.className = "line-legend-ramp"; ramp.setAttribute("aria-hidden", "true");
-    ramp.style.background = `linear-gradient(90deg, ${stops.map((stop, index) =>
-      `${stop.color} ${stops.length === 1 ? 0 : index / (stops.length - 1) * 100}%`).join(", ")}${stops.length === 1 ? `, ${stops[0].color} 100%` : ""})`;
+    ramp.style.background = scale.gradient;
     const labels = document.createElement("div"); labels.className = "line-legend-labels";
-    stops.forEach((stop, index) => {
-      const position = stops.length === 1 ? 50 : index / (stops.length - 1) * 100;
+    const ticks = polygonLegendLabels(scale);
+    labels.style.height = `${Math.max(...ticks.map(tick => tick.row + 1)) * 14}px`;
+    ticks.forEach(({ position, text, row, offset }) => {
       const tick = document.createElement("i"); tick.className = "line-legend-tick"; tick.style.left = `${position}%`;
-      const label = document.createElement("span"); label.textContent = stop.label; label.style.left = `${position}%`;
+      const label = document.createElement("span"); label.textContent = text; label.style.left = `${position}%`;
+      label.style.top = `${row * 14}px`; label.style.marginLeft = `${offset || 0}px`;
       ramp.append(tick); labels.append(label);
     });
     rows.append(ramp, labels);
@@ -3350,14 +3354,6 @@ function bindUI() {
     applyStyle();
   });
   $("road-style-controls").addEventListener("change", event => {
-    if (event.target.matches(".road-style-color")) {
-      const suggestion = activeRoadSuggestion();
-      if (!suggestion) return;
-      roadColorOverridesFor(suggestion)[event.target.dataset.key] = event.target.value;
-      state.aiDataset.roadStyle = aiLineStyle(state.lineData, suggestion);
-      applyStyle(); renderRoadStyleControls();
-      return;
-    }
     if (controlId(event.target) === "road-show-legend") {
       state.roadDisplayStyle = { ...state.roadDisplayStyle, showLegend: event.target.checked };
       renderRoadLegend();

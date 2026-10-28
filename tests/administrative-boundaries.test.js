@@ -210,6 +210,32 @@ test("same-name communes require a choice and can reuse the explicitly selected 
   }
 });
 
+for (const hasGeometry of [false, true]) test(`bare same-name districts retain provider choices (${hasGeometry ? "polygons" : "point suggestions"})`, async () => {
+  const districts = ["Tây Ninh", "An Giang"].map((province, index) => ({ type: "Feature", id: `county.chau-thanh-${index}`,
+    text: "Châu Thành", place_name: `Châu Thành, ${province}, Việt Nam`, place_type: ["county"],
+    context: [{ id: `region.${index}`, text: province }], properties: { country_code: "vn" },
+    geometry: hasGeometry ? polygon : { type: "Point", coordinates: [105 + index, 20] } }));
+  const urls = [];
+  const result = await loadAdministrativeBoundaries(["Châu Thành"], {
+    apiKey: "key", placeType: "county", strict: false, fetchImpl: async rawUrl => {
+      const url = new URL(rawUrl); urls.push(url);
+      assert.equal(url.origin, "https://api.maptiler.com", "ambiguous provider results must not silently select a local fallback");
+      const detail = districts.find(feature => url.pathname === `/geocoding/${feature.id}.json`);
+      return response(detail ? [{ id: detail.id, geometry: polygon }] : districts);
+    }
+  });
+  assert.deepEqual(result.matched, []);
+  assert.deepEqual(result.unmatched, ["Châu Thành"]);
+  assert.equal(urls.length, hasGeometry ? 1 : 3);
+  assert.deepEqual(result.candidates["Châu Thành"].map(administrativeBoundaryLabel), ["Châu Thành — Tây Ninh", "Châu Thành — An Giang"]);
+  for (const candidate of result.candidates["Châu Thành"]) {
+    const selected = await loadAdministrativeBoundaries(["Châu Thành"], { placeType: "county",
+      selections: { "Châu Thành": candidate }, fetchImpl: () => assert.fail("reuse the chosen district") });
+    assert.equal(selected.features[0].id, candidate.id);
+    assert.equal(selected.features[0].geometry, polygon);
+  }
+});
+
 test("province metadata is reused without extra requests and province aliases narrow same-name communes", async () => {
   const first = { ...commune("municipality.first"), context: [{ id: "region.tayninh", text: "Tây Ninh" }] };
   const second = { ...commune("municipality.second"), properties: { __province_name: "An Giang" } };

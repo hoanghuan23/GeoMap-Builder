@@ -39,6 +39,7 @@ class Element {
   }
   replaceChildren(...children) { this.children = []; this.append(...children); }
   append(...children) { for (const child of children) { child.parent = this; child.parentElement = this; this.children.push(child); } }
+  remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = null; this.parentElement = null; }
   setAttribute(key, value) { this.attributes[key] = value; }
   addEventListener(type, callback) { this.events[type] = callback; }
   matches(selector) {
@@ -303,13 +304,14 @@ test("Point and both Line providers keep color legends and toggles without measu
     assert.equal(h.run("dataset.roadStyle.color"), "#00d084");
     assert.equal(h.get("ai-line-legend").hidden, false);
     assert.equal(h.get("ai-line-legend").querySelector(".point-legend-row").children[0].style.background, h.run("dataset.roadStyle.color"));
-    h.run("roadColorOverridesFor(dataset.suggestions[0]).path = '#123456'; refreshAiRoadMap();");
-    assert.equal(h.get("ai-line-legend").querySelector(".point-legend-row").children[0].style.background, "#123456");
+    h.run("dataset.roadColorOverrides = {__path:{path:'#123456'}}; refreshAiRoadMap();");
+    assert.equal(h.get("ai-line-legend").querySelector(".point-legend-row").children[0].style.background, "#00d084");
     h.run("state.roadDisplayStyle.showLegend = false; renderRoadLegend();");
     assert.equal(h.get("ai-line-legend").hidden, true);
     h.run("state.roadDisplayStyle.showLegend = true; renderRoadLegend();");
     assert.equal(h.get("ai-line-legend").hidden, false);
-    assert.equal(h.get("road-style-colors").children.length, 1);
+    assert.equal(h.get("road-legend-summary").textContent, "Màu tuyến mặc định");
+    assert.equal(h.get("road-color-field").querySelector(".road-style-color"), null);
     assert.ok(h.sources.get("line-data").data.features.length > 0);
   }
 });
@@ -1015,6 +1017,32 @@ test("regional choropleth qualifies duplicate area names by each row's country t
   assert.equal(h.popups.at(-1).removed, true, "a same-name region in another country cannot replace the open region");
 });
 
+test("geographic repair survives metadata and popup filter rebuilds and retains unapplied choices", () => {
+  const h = harness();
+  const name = "Châu Thành";
+  h.dataset.geoMatch = { unmatched: [name], candidates: { [name]: [
+    { id: "county.first", text: name, properties: { __province_name: "Tây Ninh" } },
+    { id: "county.second", text: name, properties: { __province_name: "An Giang" } }
+  ] } };
+  h.run("populateAiFilters(dataset)");
+  const panel = h.all(".geo-repair")[0];
+  const choice = h.all(".geo-boundary-choice")[0];
+  const alias = h.all(".geo-alias-input")[0];
+  assert.equal(choice.children.length, 3);
+  choice.value = "county.second";
+  alias.value = "Châu Thành, An Giang";
+  h.run("populateAiFilters(dataset)");
+  assert.equal(h.all(".geo-repair")[0], panel, "workspace metadata refresh retains the repair panel");
+  h.mode("bar");
+  assert.equal(h.all(".geo-boundary-choice")[0].value, "county.second");
+  assert.equal(h.all(".geo-alias-input")[0].value, "Châu Thành, An Giang");
+  assert.equal(h.get("ai-data-filters").hidden, false);
+  assert.equal(h.all(".apply-geo-aliases").length, 1);
+  h.dataset.geoMatch = { unmatched: [], candidates: {} };
+  h.run("populateAiFilters(dataset)");
+  assert.equal(h.all(".geo-repair").length, 0, "repair disappears after every name has been resolved");
+});
+
 test("ambiguous geographic names show provinces and retries join exactly the chosen geometry", async () => {
   const h = harness();
   h.dataset.geoAliases = { "Tên đã sửa": "Tên đúng" };
@@ -1307,7 +1335,7 @@ test("coordinate Line uses source row order without road network loading and ret
   assert.equal(h.popups[0].card.children.length, 1);
 });
 
-test("coordinate Line keeps coordinate/order fields out of metric controls and applies map colors independently", () => {
+test("coordinate Line keeps coordinate/order fields out of metric controls and adjusts width independently", () => {
   const h = harness({ path: true });
   h.run(`
     dataset.analysis.columns = dataset.analysis.columns.map(column => column.role === 'geo' ? {...column, role:'measure'} : column);
@@ -1322,10 +1350,11 @@ test("coordinate Line keeps coordinate/order fields out of metric controls and a
   assert.deepEqual(h.all(".ai-popup-metric")[0].children.map(option => option.value), ["count", "speed"]);
   h.run("openMapPopup(state.lineData.features[0], [105.02,21.02], 'data-lines')");
   const before = h.rendered.length;
-  const control = h.get("road-style-colors").querySelector(".road-style-color");
-  control.value = "#123456"; h.get("road-style-controls").events.change({ target: control });
-  assert.equal(h.run("dataset.roadStyle.color[2]"), "#123456");
-  assert.equal(h.rendered.length, before, "changing map color does not rebuild popup charts");
+  const control = h.get("road-line-width"); control.id = "road-line-width"; control.value = "5.5";
+  h.get("road-style-controls").events.input({ target: control });
+  assert.equal(h.run("state.roadDisplayStyle.width"), 5.5);
+  assert.equal(h.get("road-color-field").querySelector(".road-style-color"), null);
+  assert.equal(h.rendered.length, before, "changing line width does not rebuild popup charts");
 });
 
 

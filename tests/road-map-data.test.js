@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { joinRoadRecords, joinRoadRecordsByArea, roadAreaField, roadMapStyle, roadNetworkForArea, roadNetworksFromRecords, roadValueColumns } from "../src/road-map-data.js";
+import { aiRoadMapStyle, joinRoadRecords, joinRoadRecordsByArea, roadAreaField, roadMapStyle, roadNetworkForArea, roadNetworksFromRecords, roadValueColumns } from "../src/road-map-data.js";
 import { defaultTimeFilter, applyPipelineFilters, prepareSuggestions, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
 import { fallbackAnalysis, validateAndNormalizeAnalysis, AI_CHART_REGISTRY } from "../src/ai-chart-contract.js";
 import { normalizeTabularRecords, profileTabularData } from "../src/tabular-data.js";
 import { trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED } from "./fixtures/road-traffic-fixture.js";
 import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
 import { MAP_NO_DATA_COLOR } from "../src/map-value.js";
+import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 
 const roads = { type: "FeatureCollection", features: [
   { type: "Feature", properties: { name: "Đường Lĩnh Nam" }, geometry: { type: "LineString", coordinates: [[105.8, 21], [105.81, 21.01]] } },
@@ -15,6 +16,48 @@ const roads = { type: "FeatureCollection", features: [
 ] };
 const profile = profileTabularData(trafficRecords);
 const analysis = validateAndNormalizeAnalysis(trafficAiAnalysis, profile);
+
+test("Line uses AI stops and units for paint, remaps auto scales after filtering and keeps missing values transparent", () => {
+  const column = { name: "value", role: "measure", aggDefault: "mean", unit: "°C", legend: legendFixture() };
+  const suggestion = { chartType: "map_line", bindings: { region: "route", value: "value" }, agg: "mean" };
+  const data = values => ({ type: "FeatureCollection", features: values.map(value => ({ properties: { value } })) });
+  const semantic = aiRoadMapStyle(data([10, 30, null, 0]), [column], suggestion);
+  assert.equal(semantic.scale.source, "ai");
+  assert.deepEqual(semantic.rows.map(row => [row.value, row.color]), column.legend.stops.map(stop => [stop.value, stop.color]));
+  assert.deepEqual(semantic.color[2].slice(3), semantic.scale.stops.flat());
+  assert.equal(semantic.color.at(-1), MAP_NO_DATA_COLOR);
+  const autoColumn = { ...column, legend: legendFixture({ mode: "auto" }) };
+  const first = aiRoadMapStyle(data([10, 70]), [autoColumn], suggestion);
+  const filtered = aiRoadMapStyle(data([20, 140]), [autoColumn], suggestion);
+  assert.deepEqual(first.rows.map(row => row.color), filtered.rows.map(row => row.color));
+  assert.deepEqual(filtered.rows.map(row => row.value), [20, 40, 60, 80, 100, 120, 140]);
+  const empty = aiRoadMapStyle(data([null, null]), [column], suggestion);
+  assert.equal(empty.color, MAP_NO_DATA_COLOR);
+  assert.deepEqual(empty.rows, []);
+  assert.equal(empty.scale.hasData, false);
+  const zero = aiRoadMapStyle(data([0, 0]), [autoColumn], suggestion);
+  assert.equal(zero.rows.length, 1);
+  assert.equal(zero.rows[0].value, 0);
+  assert.equal(zero.scale.hasData, true);
+  assert.equal(aiRoadMapStyle(data([10]), [{ ...column, legend: null }], suggestion).scale.source, "technical-fallback");
+});
+
+test("Line metric changes replace the old AI legend and preserve category colors", () => {
+  const numeric = { name: "value", role: "measure", aggDefault: "mean", unit: "°C", legend: legendFixture() };
+  const category = { name: "status", role: "category", legend: {
+    aggregation: null, type: "categorical", mode: "semantic", title: "Trạng thái", unit: null, domain: null, center: null,
+    stops: [{ value: "Mở", color: "#123456" }, { value: "Đóng", color: "#abcdef" }], combinations: [], reason: "Màu nhóm do AI đề xuất."
+  } };
+  const columns = [numeric, category];
+  const original = { chartType: "map_line", bindings: { region: "route", value: "value" }, agg: "mean", legend: numeric.legend };
+  const changed = withSuggestionMetric(original, "status", columns);
+  assert.deepEqual(changed.legend, category.legend);
+  const style = aiRoadMapStyle({ features: [{ properties: { status: "Mở" } }] }, columns, changed);
+  assert.deepEqual(style.color, ["match", ["to-string", ["get", "status"]], "Mở", "#123456", "Đóng", "#abcdef", MAP_NO_DATA_COLOR]);
+  assert.equal(style.scale.source, "ai");
+  assert.equal(style.scale.title, "Trạng thái");
+  assert.deepEqual(withSuggestionMetric(changed, "value", columns).legend, numeric.legend);
+});
 
 test("map_line có registry và validation, không tự thêm khi AI chưa đề xuất", () => {
   assert.equal(AI_CHART_REGISTRY.map_line.renderer, "MapLibre");

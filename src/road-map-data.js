@@ -1,6 +1,7 @@
 import { normalizeRoadText } from "./text-utils.js";
 import { BAR_COLORS } from "./charts/data-transformers.js";
 import { MAP_NO_DATA_COLOR, numericMapColor, numericMapValue } from "./map-value.js";
+import { resolvePolygonLegendConfig } from "./polygon-legend.js";
 
 export const ROAD_NETWORKS = Object.freeze([
   ["an_giang", "An Giang"], ["bac_ninh", "Bắc Ninh"], ["ca_mau", "Cà Mau"], ["can_tho", "Cần Thơ"],
@@ -151,6 +152,25 @@ export function joinRoadRecordsByArea(records, roadGeometries, { areaField = nul
     features,
     stats: { totalRows: records.length, matchedRows, unmatched, segmentCount: features.length }
   };
+}
+
+/** Share AI legend metadata between line paint, the style preview and map legend. */
+export function aiRoadMapStyle(data, columns, suggestion) {
+  const field = suggestion?.bindings?.value;
+  const column = columns.find(item => item.name === field);
+  if (!column) return { color: "#00d084", rows: [{ key: "path", label: "Màu tuyến", color: "#00d084" }], scale: null };
+  const scale = resolvePolygonLegendConfig({ suggestion, columnMetadata: columns, aggregatedFeatures: data });
+  if (scale.type === "categorical") {
+    const rows = scale.entries.map(entry => ({ key: `category:${entry.value}`, label: entry.value, color: entry.color }));
+    return { scale, rows, color: rows.length
+      ? ["match", ["to-string", ["get", field]], ...rows.flatMap(row => [row.label, row.color]), scale.noDataColor]
+      : scale.noDataColor };
+  }
+  const rows = scale.stops.map(([value, color], index) => ({ key: `measure-${index}`, value, color,
+    label: value.toLocaleString("vi-VN", { maximumSignificantDigits: 5 }) }));
+  const paint = rows.length === 1 ? rows[0].color : ["interpolate", ["linear"],
+    ["to-number", ["get", field], scale.min], ...scale.stops.flat()];
+  return { scale, rows, color: rows.length ? numericMapColor(field, paint) : scale.noDataColor };
 }
 
 export function roadMapStyle(data, column, colorOverrides = {}) {

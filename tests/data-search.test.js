@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDataSearchIndex, createMapSearch, searchDataIndex } from "../src/map-search.js";
+import { buildDataSearchIndex, buildGroupDataSearchIndex, createMapSearch, searchDataIndex } from "../src/map-search.js";
 import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
 import { mockMapRecommendation } from "./fixtures/mock-ai-analysis.js";
 import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
@@ -416,7 +416,64 @@ test("unique objects ignore repeated rows/segments and whitespace but retain geo
   const line = { ...snapshot, chartType: "map_line", search_fields: ["name"],
     data: { ...data, features: Array.from({ length: 100 }, () => ({ ...feature,
       geometry: { type: "LineString", coordinates: [[105, 21], [106, 22]] } })) } };
-  assert.equal(buildDataSearchIndex(line).uniqueCount, 1, "a hundred road segments still represent one named road");
+  const lineIndex = buildDataSearchIndex(line);
+  assert.equal(lineIndex.uniqueCount, 1, "a hundred road segments still represent one named road");
+  assert.equal(lineIndex.entries.length, 1);
+  assert.equal(searchDataIndex(lineIndex, feature.properties.name).length, 1);
+  assert.equal(lineIndex.entries[0].feature.geometry.coordinates.length, 100, "the result retains every segment");
+});
+
+test("Line search shows one route and focuses all its LineString and MultiLineString segments", t => {
+  const { controller, search, selected, camera } = harness(t);
+  const properties = { route: "Cầu 361", area: "Hà Nội", code: "R361" };
+  const firstLine = [[105, 21], [105.1, 21.1]];
+  const otherLines = [[[105.4, 21.4], [105.5, 21.5]], [[105.9, 21.9], [106, 22]]];
+  const features = [
+    { type: "Feature", bbox: [105, 21, 105.1, 21.1], center: [105.05, 21.05],
+      properties: { ...properties, alias: "Đoạn phía nam" }, geometry: { type: "LineString", coordinates: firstLine } },
+    { type: "Feature", properties: { ...properties, alias: "Đoạn phía bắc" },
+      geometry: { type: "MultiLineString", coordinates: otherLines } }
+  ];
+  controller.setData({ data: { type: "FeatureCollection", features }, chartType: "map_line", titleField: "route",
+    columns: [{ name: "route", role: "text" }, { name: "area", role: "geo", geoLevel: "admin1" },
+      { name: "code", role: "id" }, { name: "alias", role: "text" }],
+    search_bar: true, search_fields: ["route", "alias"] });
+  const results = search("Cầu 361");
+  assert.equal(results.length, 1);
+  assert.equal(search("Đoạn phía bắc").length, 1, "aliases on later segments remain searchable");
+  search("Cầu 361")[0].handlers.click();
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0][0].properties.route, "Cầu 361");
+  assert.deepEqual(selected[0][0].geometry, { type: "MultiLineString", coordinates: [firstLine, ...otherLines] });
+  assert.deepEqual(camera[0][0], [[105, 21], [106, 22]], "selection ignores a single segment's bbox");
+  assert.deepEqual(selected[0][1], [105.5, 21.5]);
+  assert.equal(features[0].geometry.type, "LineString", "indexing does not mutate the map source");
+  assert.equal(features[0].bbox[2], 105.1);
+});
+
+test("Line search retains same-name routes with different areas, codes or layers and filters count routes", () => {
+  const records = [
+    { route: "Đường Độc Lập", area: "Hà Nội", code: "R1" },
+    { route: "Đường Độc Lập", area: "Hà Nội", code: "R2" },
+    { route: "Đường Độc Lập", area: "Hải Phòng", code: "R1" }
+  ];
+  const data = { type: "FeatureCollection", features: records.flatMap(properties => [0, 1].map(offset => ({
+    type: "Feature", properties,
+    geometry: { type: "LineString", coordinates: [[105 + offset, 21], [105.1 + offset, 21.1]] }
+  }))) };
+  const snapshot = { data, chartType: "map_line", titleField: "route", sourceRecords: [...records, ...records],
+    columns: [{ name: "route", role: "text" }, { name: "area", role: "geo", geoLevel: "admin1" }, { name: "code", role: "id" }],
+    search_bar: true, search_fields: ["route"] };
+  const index = buildDataSearchIndex({ ...snapshot, filtered: true, minFilteredObjects: 4 });
+  assert.equal(index.uniqueCount, 3);
+  assert.equal(searchDataIndex(index, "doc lap").length, 3, "identity includes context outside the search fields");
+  assert.equal(index.enabled, true, "retaining all routes does not hide search");
+  assert.equal(buildDataSearchIndex({ ...snapshot, filtered: true, minFilteredObjects: 3,
+    data: { ...data, features: data.features.slice(0, 4) } }).enabled, false, "four segments are only two routes");
+  const grouped = buildGroupDataSearchIndex(["first", "second"].map(layerId => ({ ...snapshot, layerId })));
+  assert.equal(grouped.uniqueCount, 6);
+  assert.equal(searchDataIndex(grouped, "doc lap").length, 6, "different layers retain their own results");
+  assert.deepEqual(new Set(grouped.entries.map(entry => entry.layerId)), new Set(["first", "second"]));
 });
 
 test("the active polygon level controls the primary field while Point prefers names before IDs", () => {

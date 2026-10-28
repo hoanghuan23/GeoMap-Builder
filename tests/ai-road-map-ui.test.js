@@ -9,6 +9,7 @@ import * as roadMap from "../src/road-map-data.js";
 import * as timeValues from "../src/time-values.js";
 import { AI_CHART_REGISTRY } from "../src/ai-chart-contract.js";
 import { displayFilterValue, comparableFilterValue } from "../src/ai-data-analysis.js";
+import { polygonLegendLabels } from "../src/polygon-legend.js";
 
 const roads = { type: "FeatureCollection", features: [{ type: "Feature", properties: { name: "Đường A" },
   geometry: { type: "LineString", coordinates: [[105.8, 21], [105.81, 21.01]] } }] };
@@ -19,7 +20,7 @@ const columns = [{ name: "Khu vực", role: "geo", geoLevel: "admin1" },
 function harness(fetchImpl = async () => ({ ok: true, json: async () => roads })) {
   const elements = new Map(); const sources = new Map(); const layers = new Map();
   const element = () => ({
-    checked: true, hidden: false, value: "", textContent: "", style: {}, dataset: {}, children: [],
+    checked: true, hidden: false, value: "", textContent: "", style: { setProperty(key, value) { this[key] = value; } }, dataset: {}, children: [],
     classList: { add() {}, remove() {}, toggle() {} },
     replaceChildren(...children) { this.children = children; }, append(...children) { this.children.push(...children); },
     setAttribute() {}, addEventListener() {}
@@ -35,7 +36,7 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => roads })
   layers.set("data-lines", { layout: {}, paint: {} });
   get("opacity").value = ".72";
   const context = vm.createContext({
-    ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue,
+    ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, AI_CHART_REGISTRY, displayFilterValue, comparableFilterValue, polygonLegendLabels,
     CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
     roadNetworkUrl: id => ["hanoi", "da_nang"].includes(id) ? `/roads/${id}.json` : null,
     keepSelectOpenAfterMouseClick: value => value, humanizeField: value => value,
@@ -75,7 +76,7 @@ test("AI map_line dùng bộ lọc chung, đổi giờ, ẩn/hiện và dọn d�
   assert.equal(get("style-section").hidden, false);
   assert.equal(get("road-style-controls").hidden, false);
   assert.equal(get("map-style-controls").hidden, true);
-  assert.equal(get("style-description").textContent, "Màu sắc, độ dày, độ mờ và chú giải tuyến");
+  assert.equal(get("style-description").textContent, "Chú giải màu, độ dày và độ mờ tuyến");
   assert.equal(get("line-toggle-field").hidden, true);
   assert.equal(get("ai-data-filters").hidden, false);
   assert.equal(descendants(get("ai-filter-controls")).some(node => node.className === "ai-road-network-selector"), false);
@@ -105,15 +106,45 @@ test("AI map_line dùng bộ lọc chung, đổi giờ, ẩn/hiện và dọn d�
   assert.equal(sources.get("line-data").data.features[0].properties["Tốc độ"], 20);
 });
 
-test("style mạng lưới cập nhật độ dày, độ mờ và chú giải", async () => {
+test("style mạng lưới chỉ xem dải màu, vẫn cập nhật độ dày, độ mờ và chú giải", async () => {
   const { context, get, layers, descendants } = harness();
   await vm.runInContext("activateAiRoadMap(state.aiDataset.suggestions[0])", context);
-  const colors = descendants(get("road-style-colors")).filter(node => node.className === "road-style-color");
-  assert.equal(colors.length, 1);
+  assert.equal(get("road-color-field").hidden, false);
+  assert.equal(descendants(get("road-style-controls")).some(node => node.type === "color"), false);
+  assert.match(get("road-legend-summary").textContent, /Chú giải dự phòng/);
   vm.runInContext("state.roadDisplayStyle = { width: 5.5, opacity: .4, showLegend: false }; applyStyle()", context);
   assert.equal(layers.get("data-lines").paint["line-width"], 5.5);
   assert.equal(layers.get("data-lines").paint["line-opacity"], .4);
   assert.equal(get("ai-line-legend").hidden, true);
+});
+
+test("style và chú giải Line dùng đúng dải màu AI, đồng bộ khi đổi chỉ số", async () => {
+  const { context, get, descendants, layers } = harness();
+  vm.runInContext(`state.aiDataset.analysis.columns = testColumns.map(column => column.role === 'measure' ? {
+    ...column, unit: 'km/h', legend: { aggregation:'mean', type:'continuous', mode:'semantic',
+      title:'Tốc độ di chuyển', unit:'km/h', domain:[0,60], center:null,
+      stops:[{value:0,color:'#7f1d1d'},{value:10,color:'#d97706'},{value:60,color:'#15803d'}], reason:'Thang tốc độ AI đề xuất.' }
+  } : column);
+  state.aiDataset.analysis.columns.push({name:'Trạng thái',role:'category',legend:{
+    aggregation:null,type:'categorical',mode:'semantic',title:'Tình trạng đường',unit:null,domain:null,center:null,
+    stops:[{value:'Đông',color:'#b45309'},{value:'Thông thoáng',color:'#047857'}],combinations:[],reason:'Màu phân loại AI đề xuất.'
+  }});
+  state.aiDataset.records.forEach(row => row['Trạng thái']='Thông thoáng');`, context);
+  await vm.runInContext("activateAiRoadMap(state.aiDataset.suggestions[0])", context);
+  const ramp = () => descendants(get("ai-line-legend")).find(node => node.className === "line-legend-ramp");
+  assert.match(get("road-legend-summary").textContent, /Tốc độ di chuyển \(km\/h\) · Chú giải do AI đề xuất/);
+  assert.equal(get("road-color-metric").textContent, "Theo Tốc độ di chuyển (km/h)");
+  assert.equal(get("road-legend-summary").style["--legend-gradient"], ramp().style.background);
+  const ticks = descendants(ramp()).filter(node => node.className === "line-legend-tick");
+  assert.equal(ticks[1].style.left, `${10 / 60 * 100}%`, "AI stops keep their actual numeric positions");
+  assert.deepEqual(Array.from(layers.get("data-lines").paint["line-color"][2].slice(3)), [0,"#7f1d1d",10,"#d97706",60,"#15803d"]);
+  vm.runInContext(`const updated = withSuggestionMetric(state.aiDataset.suggestions[0], 'Trạng thái', state.aiDataset.analysis.columns);
+    state.aiDataset.suggestions[0] = updated;
+    state.aiDataset.recommendation = recommendationForSuggestion(updated); refreshAiRoadMap();`, context);
+  assert.match(get("road-legend-summary").textContent, /Tình trạng đường · Chú giải do AI đề xuất/);
+  assert.equal(ramp(), undefined, "categorical data shows discrete legend rows");
+  assert.deepEqual(Array.from(layers.get("data-lines").paint["line-color"].slice(2, -1)), ["Đông","#b45309","Thông thoáng","#047857"]);
+  assert.equal(descendants(get("road-style-controls")).some(node => node.type === "color"), false);
 });
 
 test("nhiều Khu vực có bộ lọc mặc định tất cả và cập nhật tuyến theo lựa chọn", async () => {
