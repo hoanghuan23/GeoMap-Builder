@@ -5,6 +5,7 @@ import { MAP_ANALYSIS_INSTRUCTIONS } from "./map-analysis-instructions.js";
 import { TEXT_ANALYSIS_RESPONSE_SCHEMA, TEXT_EXTRACTION_INSTRUCTIONS } from "./text-analysis-contract.js";
 import { recordsFromTextTable, validateDocumentText } from "../src/text-data.js";
 import { profileTabularData } from "../src/tabular-data.js";
+import { requestAiJson } from "./ai-provider.js";
 
 const LAYER_ORDER_SCHEMA = {
   type: "object",
@@ -33,13 +34,7 @@ async function readJson(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
-function outputText(result) {
-  if (typeof result.output_text === "string") return result.output_text;
-  return (result.output || []).flatMap(item => item.content || []).find(item => item.type === "output_text")?.text || "";
-}
-
 export function aiMapRecommendationPlugin(env) {
-  const baseUrl = (env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
   const middleware = async (request, response, next) => {
     const path = request.url?.split("?")[0];
     if (!["/api/ai/analyze-map-data", "/api/ai/analyze-map-text", "/api/ai/analyze-layer-order", "/api/ai/analyze-map-composition"].includes(path)) return next();
@@ -80,23 +75,11 @@ export function aiMapRecommendationPlugin(env) {
         : { profile: body.profile, supportedCharts: supportedChartsForPrompt(),
         ...(body.profile.spatial?.nativeGeometry === true ? { spatialContext: "Geometry có sẵn trong file; phân tích properties để đặt datasetTitle/grain/metadata và cấu hình popup/tìm kiếm. Không bịa tên cột tọa độ/địa danh; AI vẫn phải đề xuất kiểu bản đồ phù hợp với profile.spatial.geometryKinds: area dùng choropleth, line dùng map_line, point dùng point với bindings.lat/lng là coordinateBindings đã trích từ geometry. Có thể đề xuất thêm arc_flow khi chính các properties chứa đầy đủ định danh hai đầu, hai cặp tọa độ độc lập và lưu lượng OD có hướng; không suy ra OD từ geometry tuyến hoặc chỉ một cặp tọa độ. Với geometry có sẵn, bindings.region và value được phép null nếu không có trường phù hợp; không bắt buộc cột địa danh hay chỉ số để vẽ geometry gốc. Giá trị dùng để tô màu phải là cột có thật. Nếu suggestions rỗng thì ứng dụng không tự tạo bản đồ." } : {}) };
       const startedAt = Date.now();
-      const upstream = await fetch(`${baseUrl}/responses`, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: env.OPENAI_MODEL || "gpt-5.6-luna",
-          store: false,
-          reasoning: { effort: "low" },
-          instructions,
-          input: JSON.stringify(aiInput),
-          text: { format: { type: "json_schema", name: isLayerOrder ? "layer_order" : isText ? "text_map_recommendation" : "map_recommendation", strict: true, schema } }
-        })
+      const parsed = await requestAiJson(env, {
+        instructions, input: aiInput, schema,
+        name: isLayerOrder ? "layer_order" : isText ? "text_map_recommendation" : "map_recommendation",
+        mode: isText ? "text_analysis" : "analysis"
       });
-      const result = await upstream.json();
-      if (!upstream.ok) throw new Error(result?.error?.message || `OpenAI HTTP ${upstream.status}`);
-      const text = outputText(result);
-      if (!text) throw new Error("OpenAI không trả về nội dung phân tích.");
-      const parsed = JSON.parse(text);
       let records;
       let profile = body.profile;
       if (isText) {

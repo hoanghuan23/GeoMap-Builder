@@ -11,6 +11,25 @@ const input = { workspaceRevision: 1, groups: [], newLayerIds: ['a', 'b'], layer
   chartType: 'point', geometryKinds: ['point'], columns: [], search_bar: false, search_fields: [] })) };
 const result = { decisions: ['a', 'b'].map(layerId => ({ layerId, action: 'create_group', targetGroupId: null, newGroupKey: 'same', groupTitle: 'A + B', confidence: .9, reason: 'Có ích khi hiển thị chung' })), searchLayerIds: [] };
 
+test('Codex composition uses composition mode and preserves minimized metadata and validation', async () => {
+  let calls = 0;
+  const output = await analyzeMapComposition({ ...input, layers: input.layers.map(layer => ({ ...layer, records: ['private-record'] })) },
+    { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: 'http://127.0.0.1:8000/analyze' }, async (url, init) => {
+      calls++;
+      assert.equal(url, 'http://127.0.0.1:8000/analyze');
+      assert.equal(init.headers['x-api-key'], 'test-key');
+      const body = JSON.parse(init.body);
+      assert.equal(body.mode, 'composition');
+      assert.ok(body.prompt.includes(JSON.stringify(MAP_COMPOSITION_SCHEMA)));
+      assert.equal(body.prompt.includes('private-record'), false);
+      assert.ok(init.signal instanceof AbortSignal);
+      return { ok: true, json: async () => ({ success: true, result: JSON.stringify(result) }) };
+    });
+  assert.equal(calls, 1);
+  assert.equal(output.source, 'ai');
+  assert.deepEqual(output.decisions.map(item => item.layerId), ['a', 'b']);
+});
+
 test('composition client caches successful descriptors, excludes workspace revision, and retries failures', async () => {
   let calls = 0;
   const client = createCompositionClient({ fetchImpl: async (_url, init) => {

@@ -6,6 +6,37 @@ import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 import { profileTabularData } from "../src/tabular-data.js";
 import { accessField, accessLegend, categoricalCountryFixture } from "./fixtures/categorical-countries-fixture.js";
 import { analysis as arcAnalysis, bindings as arcBindings, row as arcRow } from './fixtures/arc-flow-fixture.js';
+import { weatherText, weatherRecords, textWeatherOutput } from './fixtures/text-weather-fixture.js';
+
+test('Codex endpoint handles table, text and layer-order requests through the existing middleware', async t => {
+  const env = { OPENAI_API_KEY: 'test', OPENAI_BASE_URL: 'http://127.0.0.1:8000/analyze' };
+  const profile = profileTabularData([arcRow()], { includeSamples: false });
+  const order = { orderedLayerIds: ['a', 'b'], explanation: 'Vùng dưới, điểm trên' };
+  for (const item of [
+    { path: '/api/ai/analyze-map-data', body: { profile }, mode: 'analysis', result: arcAnalysis },
+    { path: '/api/ai/analyze-map-text', body: { text: weatherText }, mode: 'text_analysis', result: textWeatherOutput() },
+    { path: '/api/ai/analyze-layer-order', body: { layers: [{ id: 'a' }, { id: 'b' }] }, mode: 'analysis', result: order }
+  ]) {
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+      calls++;
+      assert.equal(url, env.OPENAI_BASE_URL);
+      const body = JSON.parse(init.body);
+      assert.equal(body.mode, item.mode);
+      assert.equal(body.input, undefined);
+      assert.equal(init.headers['x-api-key'], 'test');
+      assert.ok(body.prompt.includes('schema'));
+      return { ok: true, json: async () => ({ success: true, result: JSON.stringify(item.result) }) };
+    });
+    const response = await call(middlewareFor(env), item.body, item.path);
+    assert.equal(response.status, 200);
+    assert.equal(calls, 1);
+    if (item.mode === 'text_analysis') assert.deepEqual(response.body.records, weatherRecords);
+    else if (item.path.endsWith('layer-order')) assert.deepEqual(response.body, order);
+    else assert.equal(response.body.suggestions[0].chartType, 'arc_flow');
+    t.mock.restoreAll();
+  }
+});
 
 test('the existing analysis endpoint returns Arc Flow from one metadata-only AI request', async () => {
   const profile = profileTabularData([arcRow()], { includeSamples: false });
