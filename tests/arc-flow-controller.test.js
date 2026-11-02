@@ -18,14 +18,16 @@ function harness({ overlayAvailable = true, records = Array.from({ length: 120 }
   const state = { aiDataset: { records, rawRecords: records, analysis, selectedSuggestionId: suggestion.id }, mapType: null };
   const controller = createArcFlowController({ state, document: doc, getMap: () => map,
     maplibregl: { Popup: class {
-      constructor() { popups.push(this); }
+      constructor(options) { this.options = options; popups.push(this); }
       setLngLat(position) { this.position = position; return this; } setDOMContent(content) { this.content = content; return this; }
       addTo() { return this; } remove() { this.removed = true; }
     } }, overlay: { async updateLayer(_id, payload) { published.push(payload); return overlayAvailable; }, removeLayer(id) { removed.push(id); } },
     id: 'a' });
-  const control = caption => get('ai-filter-controls').children.find(item => item.tag === 'label' && item.children[0]?.textContent === caption)?.children[1];
+  const control = caption => descendants(get('ai-filter-controls')).find(item => item.tag === 'label' && item.children[0]?.textContent === caption)?.children[1];
   return { controller, state, get, control, sources, layers, popups, published, removed };
 }
+const descendants = node => [node, ...node.children.flatMap(descendants)];
+const popupRow = (popup, label) => descendants(popup.content).find(node => node.children[0]?.tag === 'dt' && node.children[0].textContent === label);
 
 test('layer controls, Top N, attribute filters and CSV/table state share the same view', async () => {
   const h = harness(); assert.equal(await h.controller.activate({ ...suggestion }), true);
@@ -73,8 +75,7 @@ test('one time selector filters exactly one of three dates and All restores ever
     assert.equal(tableRecords(h.state).length, count);
     assert.equal(h.published.at(-1).view, h.state.arcFlowView);
     h.published.at(-1).onClick(h.state.arcFlowView.flows[0]);
-    assert.ok(h.popups.at(-1).content.children.some(node => node.children?.[0]?.textContent === 'Bộ lọc'
-      && node.children[1].textContent.includes(`${15 + index}/09/2026`)));
+    assert.ok(popupRow(h.popups.at(-1), 'Bộ lọc').children[1].textContent.includes(`${15 + index}/09/2026`));
   }
   await h.controller.activate({ ...suggestion });
   assert.equal(h.control('Thời điểm').value, dates[2].toISOString());
@@ -97,10 +98,15 @@ test('one time selector filters exactly one of three dates and All restores ever
 test('flow and endpoint popups use current OD totals and plain text; filters close stale popups', async () => {
   const h = harness(); await h.controller.activate({ ...suggestion });
   const payload = h.published.at(-1); payload.onClick(h.state.arcFlowView.flows[0]);
-  assert.match(h.popups[0].content.children[0].textContent, /A → B119/);
+  assert.equal(h.popups[0].options.className, 'ai-weather-popup ai-map-popup');
+  assert.equal(h.popups[0].options.closeOnClick, false);
+  assert.equal(h.popups[0].content.className, 'weather-popup');
+  assert.match(h.popups[0].content.children[0].children[1].textContent, /A → B119/);
+  assert.equal(popupRow(h.popups[0], 'passengers').children[1].textContent, '119 lượt');
+  assert.equal(popupRow(h.popups[0], 'date').children[1].textContent, '15/09/2026');
   h.controller.openNode(h.state.arcFlowView.nodes.features[0]);
   assert.equal(h.popups[0].removed, true);
-  assert.ok(h.popups[1].content.children.some(child => child.children?.[0]?.textContent === 'Tổng ra'));
+  assert.ok(popupRow(h.popups[1], 'Tổng ra'));
   const target = h.control('Điểm đến'); target.value = h.state.arcFlowView.flows[0].target.id; target.events.change();
   assert.equal(h.popups[1].removed, true);
   const search = h.controller.searchData(); assert.equal(search.chartType, 'point'); assert.deepEqual(search.search_fields, ['origin', 'destination']);

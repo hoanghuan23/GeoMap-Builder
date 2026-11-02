@@ -159,7 +159,10 @@ let dataSearchColumns = [];
 let mapMetricControlView = null;
 const arcFlow = createArcFlowController({ state, document, getMap: () => map, maplibregl,
   overlay: options.arcFlowOverlay, id: options.id, onChange: () => options.onChange?.(),
-  onStatus: message => setStatus(message), onInteract: options.onArcInteract });
+  onStatus: message => setStatus(message), onInteract: options.onArcInteract,
+  buildPopupControls: suggestion => buildMapPopupControls(state.aiDataset, suggestion),
+  onPopup: info => openMapPopup(info.feature, info.position, "arc-flow", info),
+  onClosePopup: () => { if (mapPopupView?.arcInfo) closeMapPopup(); } });
 
 function createAbortController() {
   return typeof AbortController === "function" ? new AbortController() : { signal: undefined, abort() {} };
@@ -936,7 +939,7 @@ function activePolygonSuggestion() {
 function activeMapPopupSuggestion() {
   const dataset = state.aiDataset;
   const suggestion = dataset?.suggestions?.find(item => item.id === dataset.selectedSuggestionId);
-  if (!["choropleth", "map_line", "point"].includes(suggestion?.chartType)) return null;
+  if (!["choropleth", "map_line", "point", "arc_flow"].includes(suggestion?.chartType)) return null;
   const metadata = options.popupMetadata?.() || {};
   return { ...suggestion, popupContent: dataset.analysis?.popupContent,
     hasJoinedImages: metadata.hasJoinedImages,
@@ -951,7 +954,8 @@ function popupSelectionFor(suggestion = activeMapPopupSuggestion()) {
   const selection = dataset.popupSelections[suggestion.id] ||= { mode: available[0].name, bar: null, line: null };
   if (!available.some(item => item.name === selection.mode)) selection.mode = available[0].name;
   if (["bar", "line"].includes(selection.mode) && !selection[selection.mode]) {
-    const metric = suggestion.chartType === "point" ? pointSelectionFor(suggestion).metricField : dataset.recommendation.metricField;
+    const metric = suggestion.chartType === "point" ? pointSelectionFor(suggestion).metricField
+      : suggestion.chartType === "arc_flow" ? suggestion.bindings.value : dataset.recommendation.metricField;
     selection[selection.mode] = createPopupChartSelection(dataset.records, dataset.analysis.columns, metric, selection.mode, suggestion.bindings);
   }
   return selection;
@@ -983,13 +987,14 @@ function renderMapPopup(view) {
     const content = dataset.analysis.popupContent || {};
     const titleField = content.titleField || dataset.nativeTitleField || (activeMapPopupSuggestion()?.chartType === "point"
       ? pointTitleField(dataset.analysis.columns) || dataset.analysis.search_fields?.[0] : dataset.recommendation.geometry?.field);
-    const baseRecords = popupRegionRecords(dataset.records, view.feature, dataset.recommendation.geometry?.field,
+    const baseRecords = view.arcInfo?.records || popupRegionRecords(dataset.records, view.feature, dataset.recommendation.geometry?.field,
       { chartType: activeMapPopupSuggestion().chartType, columns: dataset.analysis.columns, bindings: activeMapPopupSuggestion().bindings });
     card = createInfoImagePopup(document, { sources: [{ title: dataset.fileName || dataset.analysis.datasetTitle,
       columns: dataset.analysis.columns, popupContent: { ...content, titleField }, records: baseRecords.length ? baseRecords : [view.feature.properties || {}] }, ...joined],
+      title: view.arcInfo?.title,
       coordinates: view.feature.geometry?.type === "Point" ? view.feature.geometry.coordinates : null,
       onLayout: () => { if (mapPopupView === view) sizeMapPopup(view); } });
-  } else card = chartMode ? document.createElement("div") : aiWeatherPopupContent(view.feature);
+  } else card = chartMode ? document.createElement("div") : view.arcInfo ? view.arcInfo.createContent() : aiWeatherPopupContent(view.feature);
   if (selection.mode === "info" && joined.length) {
     const sources = document.createElement("div"); sources.className = "popup-source-records popup-joined-records";
     for (const source of joined) for (const record of source.records) sources.append(createAiPopupContent(document, { properties: record }, source.columns,
@@ -1002,9 +1007,12 @@ function renderMapPopup(view) {
     const dimensionFilters = Object.fromEntries(Object.entries(dataset.filters || {}).filter(([field]) =>
       dataset.analysis.columns.some(column => column.name === field && column.role !== "time")));
     const records = activePolygonSuggestion() ? applyPipelineFilters(dataset.records, dimensionFilters) : dataset.records;
-    chart = buildPopupChart({ records, columns: dataset.analysis.columns,
-      feature: view.feature, regionField: dataset.recommendation.geometry.field,
-      kind: selection.mode, selection: selection[selection.mode], chartType: activeMapPopupSuggestion().chartType, bindings: activeMapPopupSuggestion().bindings });
+    chart = buildPopupChart({ records: view.arcInfo?.records || records,
+      columns: view.arcInfo ? popupChartColumns(dataset.analysis.columns, activeMapPopupSuggestion().bindings) : dataset.analysis.columns,
+      feature: view.arcInfo ? { properties: { __arcPopupTitle: view.arcInfo.title } } : view.feature,
+      regionField: view.arcInfo ? "__arcPopupTitle" : dataset.recommendation.geometry.field,
+      kind: selection.mode, selection: selection[selection.mode], chartType: view.arcInfo ? "choropleth" : activeMapPopupSuggestion().chartType,
+      bindings: view.arcInfo ? {} : activeMapPopupSuggestion().bindings });
     const container = document.createElement("div");
     container.className = chart.config ? "ai-popup-chart" : "weather-popup-status";
     if (!chart.config) { container.textContent = chart.message; container.setAttribute("role", "status"); }
@@ -1035,12 +1043,12 @@ function sizeMapPopup(view) {
   ]));
 }
 
-function openMapPopup(feature, lngLat, layerId = null) {
+function openMapPopup(feature, lngLat, layerId = null, arcInfo = null) {
   closeMapPopup();
   cellPopup?.remove();
-  const popup = new maplibregl.Popup({ anchor: "center", maxWidth: "520px", className: "ai-weather-popup ai-map-popup" })
+  const popup = new maplibregl.Popup({ anchor: "center", maxWidth: "520px", className: "ai-weather-popup ai-map-popup", closeOnClick: !arcInfo })
     .setDOMContent(document.createElement("div"));
-  const view = { popup, feature, lngLat, layerId, chartContainer: null, chartKind: null };
+  const view = { popup, feature, lngLat, layerId, arcInfo, chartContainer: null, chartKind: null };
   mapPopupView = view;
   popup.on("close", () => {
     clearMapPopupChart(view);
@@ -1057,6 +1065,7 @@ function refreshMapPopup() {
   if (!view) return;
   const suggestion = activeMapPopupSuggestion();
   if (!suggestion) { closeMapPopup(); return; }
+  if (view.arcInfo) { renderMapPopup(view); return; }
   const field = suggestion.bindings.region;
   const features = view.layerId === "point-marker" ? state.pointData.features : view.layerId === "data-lines" ? state.lineData.features : view.layerId === "h3-fill" ? state.h3Data.features : state.boundary?.features;
   const feature = (view.layerId === "point-marker" && view.feature.id != null ? features?.find(item => item.id === view.feature.id) : null) || features?.find(item => view.layerId === "h3-fill"
@@ -1996,7 +2005,7 @@ function buildMapPopupControls(dataset, suggestion) {
   const types = document.createElement("div");
   types.className = "ai-popup-types";
   types.setAttribute("role", "group"); types.setAttribute("aria-label", "Kiểu hiển thị popup");
-  const subject = suggestion.chartType === "map_line" ? "tuyến" : suggestion.chartType === "point" ? "điểm" : "vùng";
+  const subject = suggestion.chartType === "arc_flow" ? "luồng" : suggestion.chartType === "map_line" ? "tuyến" : suggestion.chartType === "point" ? "điểm" : "vùng";
   const labels = {
     info: ["Chỉ hiển thị thông tin", "Hiển thị các chỉ số dưới dạng thẻ thông tin", null],
     info_image: ["Thông tin kèm hình ảnh", "Xem hình ảnh và thông tin của đối tượng", "image"],
@@ -2016,7 +2025,7 @@ function buildMapPopupControls(dataset, suggestion) {
     icon.className = "ai-popup-type-icon"; icon.setAttribute("aria-hidden", "true");
     if (iconName) { renderChartIcon(icon, iconName); icon.className = "chart-type-icon ai-popup-type-icon"; }
     else icon.textContent = "▦";
-    title.textContent = option.fallback ? "Hiển thị mặc định" : label;
+    title.textContent = option.fallback && suggestion.chartType !== "arc_flow" ? "Hiển thị mặc định" : label;
     detail.textContent = option.unavailableReason || description; copy.append(title, detail);
     check.className = "ai-popup-type-check"; check.textContent = "✓"; check.setAttribute("aria-hidden", "true");
     button.append(icon, copy);
@@ -2143,7 +2152,8 @@ function buildMapPopupSettings(dataset, selection) {
 }
 
 function refreshMapPopupControls() {
-  if (activeMapPopupSuggestion()?.chartType === "point") populatePointControls(activeMapPopupSuggestion());
+  if (activeMapPopupSuggestion()?.chartType === "arc_flow") arcFlow.refreshControls();
+  else if (activeMapPopupSuggestion()?.chartType === "point") populatePointControls(activeMapPopupSuggestion());
   else populateAiFilters(state.aiDataset);
   if (activePolygonSuggestion()) renderGeoRepair(state.aiDataset.geoMatch?.unmatched || []);
   refreshMapPopup();

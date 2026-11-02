@@ -10,6 +10,7 @@ function normalizedText(value) {
 }
 
 function formatPopupValue(value, column, label) {
+  if (Array.isArray(value)) return value.map(item => formatPopupValue(item, column, label)).join(', ');
   if (column.role === "time") return formatTimeValue(value, column, column.granularity === "datetime");
   if (column.role === "measure" && typeof value === "number" && Number.isFinite(value)) {
     const formatted = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 20 }).format(value);

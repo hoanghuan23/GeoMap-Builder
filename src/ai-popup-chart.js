@@ -16,7 +16,7 @@ export function popupTimeColumn(columns = []) {
 }
 
 export function popupChartColumns(columns, bindings = {}) {
-  const dimensions = new Set([bindings.lat, bindings.lng, bindings.x]);
+  const dimensions = new Set([bindings.lat, bindings.lng, bindings.x, bindings.sourceLat, bindings.sourceLng, bindings.targetLat, bindings.targetLng]);
   return columns.map(column => column.role === "measure" && dimensions.has(column.name) ? { ...column, role: "ignore" } : column);
 }
 

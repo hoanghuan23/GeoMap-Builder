@@ -18,7 +18,7 @@ export function pointDirectionsUrl(coordinates) {
 }
 
 /** All data is assigned as text. Only validated HTTP(S) values reach URL attributes. */
-export function createInfoImagePopup(documentRef, { sources, coordinates, onLayout = () => {} }) {
+export function createInfoImagePopup(documentRef, { sources, coordinates, title, onLayout = () => {} }) {
   const node = (tag, className, text) => {
     const element = documentRef.createElement(tag); element.className = className;
     if (text != null) element.textContent = String(text);
@@ -63,7 +63,8 @@ export function createInfoImagePopup(documentRef, { sources, coordinates, onLayo
   const body = node('div', 'info-image-body'); body.tabIndex = 0;
   const configured = sources.map(source => ({ ...source, popupContent: normalizePopupContent(source.popupContent, source.columns) }));
   const titleSource = configured.find(source => source.records.some(record => present(record[source.popupContent.titleField])));
-  if (titleSource) body.append(node('h2', '', titleSource.records.find(record => present(record[titleSource.popupContent.titleField]))[titleSource.popupContent.titleField]));
+  if (present(title)) body.append(node('h2', '', title));
+  else if (titleSource) body.append(node('h2', '', titleSource.records.find(record => present(record[titleSource.popupContent.titleField]))[titleSource.popupContent.titleField]));
   for (const source of configured) {
     source.records.forEach((record, recordIndex) => {
       const section = node('section', 'info-image-source');

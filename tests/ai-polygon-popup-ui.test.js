@@ -30,6 +30,7 @@ import { trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED } from "./fixtures/roa
 import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 import { descriptiveColumns, descriptiveCountryFetch, descriptiveRecords, descriptiveSuggestion } from "./fixtures/descriptive-countries-fixture.js";
 import { accessField, accessLegend, categoricalCountryFixture } from "./fixtures/categorical-countries-fixture.js";
+import { analysis as arcAnalysis, row as arcRow, suggestion as arcSuggestion } from "./fixtures/arc-flow-fixture.js";
 
 class Element {
   constructor() {
@@ -55,15 +56,15 @@ class Element {
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
-function harness({ road = false, point = false, path = false, thematic = false, storeNameRole = "category", pointRecords = storeRecords,
+function harness({ road = false, point = false, path = false, thematic = false, arc = false, storeNameRole = "category", pointRecords = storeRecords,
   metricButtons = null,
   popupSuggestions = [{ name: "info", confidence: .95 }, { name: "bar", confidence: .9 }, { name: "line", confidence: .85 }],
   fetchImpl = () => assert.fail("map interactions must not call AI"), boundaryLoader = loadAdministrativeBoundaries,
   boundaryClipper = async boundary => boundary } = {}) {
   const elements = new Map(); const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
-  const rendered = []; const cleared = []; const popups = [];
+  const rendered = []; const cleared = []; const popups = []; const published = [];
   class Popup {
-    constructor() { this.callbacks = []; this.element = new Element(); popups.push(this); }
+    constructor(options) { this.options = options; this.callbacks = []; this.element = new Element(); popups.push(this); }
     on(name, callback) { if (name === "close") this.callbacks.push(callback); return this; }
     setDOMContent(card) { this.card = card; this.element.replaceChildren(card); return this; }
     setLngLat(value) { this.lngLat = value; return this; }
@@ -80,6 +81,8 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   const layers = new Map((thematic ? ["polygon-fill", "polygon-border", "h3-fill", "h3-border"] : []).map(id => [id, { paint: {}, layout: {} }]));
   const palettes = ["diverging", "viridis", "blue"].map(palette => { const button = new Element(); button.className = "palette"; button.dataset.palette = palette; return button; });
   const map = { getContainer: () => get("map"), getSource: id => sources.get(id), getLayer: id => layers.get(id), resize() {},
+    addSource(id, spec) { sources.set(id, { data: spec.data, setData(data) { this.data = data; } }); },
+    addLayer(layer) { layers.set(layer.id, { ...layer, layout: { ...layer.layout } }); }, on() {},
     setPaintProperty(id, key, value) { layers.get(id).paint[key] = value; },
     setLayoutProperty(id, key, value) { layers.get(id).layout[key] = value; },
     project: () => ({ x: 400, y: 300 }), unproject: point => point };
@@ -131,6 +134,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
     popupSuggestions: popupSuggestions.map(item => ({ ...item })) }));
   if (metricButtons !== null) dataset.suggestions.find(suggestion => suggestion.id === dataset.selectedSuggestionId).metricButtons = metricButtons;
   const context = vm.createContext({
+    testRuntimeOptions: arc ? { arcFlowOverlay: { async updateLayer(_id, payload) { published.push(payload); return true; }, removeLayer() {} } } : {},
     createArcFlowController,
     ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...h3Utils, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract, ...categoricalColor,
     fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, createInfoImagePopup, collapseCountryFeatures, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
@@ -143,7 +147,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
     maplibregl: { Popup }, AbortController, Date, console, setTimeout() {}, clearTimeout() {}, dataset, testMap: map, testFeatures: features
   });
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
-    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = {};\n")
+    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = testRuntimeOptions;\n")
     .replace(/\/\/ Runtime public API[\s\S]*$/, "");
   vm.runInContext(source, context);
   const run = code => vm.runInContext(code, context);
@@ -155,8 +159,75 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   const click = element => get("ai-filter-controls").events.click({ target: element });
   const change = element => get("ai-filter-controls").events.change({ target: element });
   const mode = name => click(all(".ai-popup-type").find(button => button.dataset.popupMode === name));
-  return { dataset, get, run, all, click, change, mode, popups, rendered, cleared, sources, features, layers, palettes };
+  return { dataset, get, run, all, click, change, mode, popups, rendered, cleared, sources, features, layers, palettes, published };
 }
+
+async function arcHarness(popupSuggestions = []) {
+  const h = harness({ arc: true });
+  Object.assign(h.dataset, { records: [arcRow({ passengers: 10 }), arcRow({ passengers: 20, date: '2026-09-16' }),
+    arcRow({ destination: 'C', destination_lng: 107, passengers: 999 })],
+    analysis: arcAnalysis, suggestions: [{ ...arcSuggestion, popupSuggestions }], selectedSuggestionId: arcSuggestion.id, popupSelections: {} });
+  h.run('dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]);');
+  assert.equal(await h.run('arcFlow.activate(dataset.suggestions[0])'), true);
+  return h;
+}
+
+test('Arc Flow defaults to information and uses the shared card, date formatting and popup controls', async () => {
+  const h = await arcHarness();
+  const button = h.all('.ai-popup-type')[0];
+  assert.equal(button.dataset.popupMode, 'info');
+  assert.equal(button.children[1].children[0].textContent, 'Chỉ hiển thị thông tin');
+  assert.equal(button.attributes['aria-pressed'], 'true');
+  assert.equal(h.all('.ai-popup-type-score').length, 0);
+  h.published.at(-1).onClick(h.run("state.arcFlowView.flows.find(flow => flow.target.name === 'B')"));
+  const popup = h.popups.at(-1);
+  assert.equal(popup.options.className, 'ai-weather-popup ai-map-popup');
+  assert.equal(popup.options.closeOnClick, false);
+  assert.equal(popup.card.className, 'weather-popup');
+  assert.equal(popup.card.querySelector('.popup-info-heading').children[1].textContent, 'A → B');
+  const details = popup.card.querySelector('.popup-info-details');
+  const values = details.querySelectorAll('*').map(node => node.textContent).join(' | ');
+  assert.match(values, /30 lượt/);
+  assert.match(values, /15\/09\/2026, 16\/09\/2026/);
+  assert.doesNotMatch(values, /origin_lat|destination_lng|T00:00/);
+  h.run('arcFlow.openNode(state.arcFlowView.nodes.features.find(feature => feature.properties.__arcName === "A"))');
+  assert.equal(popup.removed, true);
+  assert.match(h.popups.at(-1).card.querySelector('.popup-info-details').querySelectorAll('*').map(node => node.textContent).join(' | '), /1.029 lượt/);
+});
+
+test('Arc Flow respects AI popup ranking, charts only the clicked OD, and closes stale data after filtering', async () => {
+  const h = await arcHarness([{ name: 'line', confidence: .95 }, { name: 'bar', confidence: .9 }, { name: 'info', confidence: .8 }]);
+  assert.deepEqual(h.all('.ai-popup-type').map(button => button.dataset.popupMode), ['line', 'bar', 'info']);
+  assert.equal(h.run('popupSelectionFor().mode'), 'line');
+  h.published.at(-1).onClick(h.run("state.arcFlowView.flows.find(flow => flow.target.name === 'B')"));
+  assert.equal(h.rendered.at(-1).kind, 'line');
+  assert.deepEqual(Array.from(h.rendered.at(-1).config.data, row => row.passengers), [10, 20]);
+  h.mode('bar');
+  assert.equal(h.rendered.at(-1).kind, 'bar');
+  assert.deepEqual(Array.from(h.rendered.at(-1).config.data, row => row.passengers), [10, 20]);
+  assert.ok(h.get('ai-filter-controls').querySelector('.ai-popup-map-controls'));
+  h.mode('info');
+  assert.equal(h.popups.at(-1).card.className, 'weather-popup');
+  const time = h.get('ai-filter-controls').querySelectorAll('*').find(node => node.attributes['aria-label'] === 'Thời điểm');
+  time.value = '2026-09-16'; time.events.change();
+  assert.equal(h.popups.at(-1).removed, true);
+  assert.equal(h.run('state.arcFlowView.total'), 20);
+  assert.equal(h.run('popupSelectionFor().mode'), 'info');
+});
+
+test('Arc Flow image popup keeps the selected route title and original images', async () => {
+  const h = await arcHarness([{ name: 'info_image', confidence: .95 }, { name: 'info', confidence: .8 }]);
+  h.dataset.analysis = { ...arcAnalysis, columns: [...arcAnalysis.columns, { name: 'photo', role: 'text' }],
+    popupContent: { titleField: 'origin', imageFields: ['photo'] } };
+  h.dataset.records.forEach(record => { record.photo = 'https://example.com/airport.png'; });
+  h.run('dataset.popupSelections = {}; arcFlow.refreshControls();');
+  assert.equal(h.run('popupSelectionFor().mode'), 'info_image');
+  h.published.at(-1).onClick(h.run("state.arcFlowView.flows.find(flow => flow.target.name === 'B')"));
+  const card = h.popups.at(-1).card;
+  assert.equal(card.className, 'info-image-popup');
+  assert.equal(card.querySelector('.info-image-body').children[0].textContent, 'A → B');
+  assert.equal(card.querySelector('.info-image-photo').src, 'https://example.com/airport.png');
+});
 
 const polygonMetricButtons = [
   { field: "temperature", label: "Nhiệt độ trung bình", icon: "🌡️", color: "#f59e0b" },

@@ -1,6 +1,7 @@
 import { buildArcFlowView, createArcFlowModel, mergeArcFlowStyle } from './arc-flow-data.js';
 import { formatTimeValue, uniqueTimeValues } from './time-values.js';
 import { serializeTabularValue } from './tabular-data.js';
+import { createAiPopupContent } from './ai-popup.js';
 
 const empty = { type: 'FeatureCollection', features: [] };
 const reasonLabels = { missingEndpoint: 'thiếu điểm đi/đến', missingCoordinates: 'thiếu tọa độ', invalidCoordinates: 'tọa độ ngoài phạm vi',
@@ -8,7 +9,8 @@ const reasonLabels = { missingEndpoint: 'thiếu điểm đi/đến', missingCoo
 const fmt = value => value.toLocaleString('vi-VN', { maximumFractionDigits: 2 });
 
 /** Layer-local controls, native endpoint layers and information popups. GPU ownership stays in the workspace. */
-export function createArcFlowController({ state, document: doc, getMap, maplibregl, overlay, id, onChange, onStatus, onInteract }) {
+export function createArcFlowController({ state, document: doc, getMap, maplibregl, overlay, id, onChange, onStatus, onInteract,
+  buildPopupControls, onPopup, onClosePopup }) {
   const $ = name => doc.getElementById(name);
   let popup; let nodesReady = false; let eventsReady = false; let active = false; let currentSuggestion;
   let payload; let disposed = false;
@@ -25,33 +27,43 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
     dataset.arcFlowSelections[suggestion.id] ||= { filters: {}, topN: 100, time: '' };
     return dataset.arcFlowSelections[suggestion.id];
   };
-  function closePopup() { popup?.remove(); popup = null; }
-  function openInfo(title, rows, position) {
+  function closePopup() { popup?.remove(); popup = null; onClosePopup?.(); }
+  function openInfo(title, rows, position, records, feature) {
     if (!active) return;
     closePopup(); onInteract?.();
-    const content = element('div', null, 'arc-flow-popup'); content.append(element('strong', title));
-    for (const [name, value] of rows) {
-      const row = element('div', null, 'arc-flow-popup-row'); row.append(element('span', name), element('b', value)); content.append(row);
+    const properties = { __arcPopupTitle: title };
+    const columns = rows.map(([labelVi, value, column], index) => {
+      const name = `detail-${index}`; properties[name] = value;
+      return { role: 'measure', ...column, name, labelVi };
+    });
+    const createContent = () => createAiPopupContent(doc, { properties }, columns, '__arcPopupTitle', { datasetTitle: state.aiDataset.analysis.datasetTitle });
+    if (onPopup) {
+      onPopup({ title, createContent, position, feature, records: records.map(record => ({ ...record, __arcPopupTitle: title })) });
+      return;
     }
     // deck handles the pointer before MapLibre emits its click; closing on that
     // same native click would immediately dismiss the popup just opened here.
-    popup = new maplibregl.Popup({ maxWidth: '360px', closeOnClick: false }).setLngLat(position).setDOMContent(content).addTo(getMap());
+    popup = new maplibregl.Popup({ maxWidth: '440px', className: 'ai-weather-popup ai-map-popup', closeOnClick: false }).setLngLat(position).setDOMContent(createContent()).addTo(getMap());
   }
   function openNode(feature) {
     const p = feature.properties; const unit = state.arcFlowView?.model.unit || '';
-    openInfo(p.__arcName, [['Tổng vào', `${fmt(Number(p.__inbound))} ${unit}`], ['Tổng ra', `${fmt(Number(p.__outbound))} ${unit}`],
-      ['Phạm vi', 'Dữ liệu đang lọc, trước Top N']], feature.geometry.coordinates);
+    const flows = state.arcFlowView.flows.filter(flow => flow.source.id === p.__arcNodeId || flow.target.id === p.__arcNodeId);
+    const indices = new Set(flows.flatMap(flow => flow.rowIndices));
+    openInfo(p.__arcName, [['Tổng vào', Number(p.__inbound), { unit }], ['Tổng ra', Number(p.__outbound), { unit }],
+      ['Phạm vi', 'Dữ liệu đang lọc, trước Top N', { role: 'text' }]], feature.geometry.coordinates,
+      [...indices].map(index => state.aiDataset.records[index]), feature);
   }
   function flowClick(flow, position) {
     const view = state.arcFlowView; if (!view) return;
     const b = currentSuggestion.bindings;
-    const rows = [[view.model.metricLabel, `${fmt(flow.value)} ${view.model.unit}`], ['Bản ghi tổng hợp', String(flow.rowIndices.length)]];
+    const rows = [[view.model.metricLabel, flow.value, { unit: view.model.unit }], ['Bản ghi tổng hợp', flow.rowIndices.length]];
     for (const column of view.model.columns) if (![b.source, b.target, b.sourceLat, b.sourceLng, b.targetLat, b.targetLng, b.value].includes(column.name)) {
       const value = flow.properties[column.name];
-      if (value != null && value !== '') rows.push([column.labelVi || column.name, Array.isArray(value) ? value.join(', ') : String(value)]);
+      if (value != null && value !== '') rows.push([column.labelVi || column.name, value, column]);
     }
-    rows.push(['Bộ lọc', filterDescription()]);
-    openInfo(`${flow.source.name} → ${flow.target.name}`, rows, position?.slice(0, 2) || flow.source.position);
+    rows.push(['Bộ lọc', filterDescription(), { role: 'text' }]);
+    openInfo(`${flow.source.name} → ${flow.target.name}`, rows, position?.slice(0, 2) || flow.source.position,
+      flow.rowIndices.map(index => state.aiDataset.records[index]), view.data.features.find(feature => feature.id === flow.id));
   }
   function ensureNodes() {
     const map = getMap();
@@ -114,7 +126,8 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
     if (model.stats.invalidRows) controls.push(element('p', `Bỏ ${model.stats.invalidRows}/${model.stats.totalRows} dòng khỏi bản đồ: `
       + Object.entries(model.stats.reasons).filter(([, count]) => count).map(([key, count]) => `${count} ${reasonLabels[key]}`).join('; '), 'arc-flow-warning'));
     if (view.aggregationIssues) controls.push(element('p', `${view.aggregationIssues} OD chưa có phép tổng hợp hợp lệ.`, 'arc-flow-warning'));
-    root.replaceChildren(...controls); $('ai-data-filters').hidden = false;
+    const mapControls = element('div', null, 'ai-popup-map-controls'); mapControls.append(...controls);
+    root.replaceChildren(...(buildPopupControls?.(currentSuggestion) || []), mapControls); $('ai-data-filters').hidden = false;
   }
   function renderStyle() {
     const root = $('arc-flow-style-controls'); const style = state.arcFlowStyle; const controls = [];
@@ -200,7 +213,7 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
       delete state.aiDataset.arcFlowSelections[currentSuggestion.id]; state.arcFlowStyle = mergeArcFlowStyle({ animated: !reducedMotion() });
       refresh(); renderStyle(); return true;
     },
-    openNode, closePopup,
+    openNode, closePopup, refreshControls: renderFilters,
     dispose() { disposed = true; closePopup(); overlay?.removeLayer(id); },
     searchData() {
       const view = state.arcFlowView; if (!view) return {};
