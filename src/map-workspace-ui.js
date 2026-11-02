@@ -345,13 +345,15 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         select.append(Object.assign(document.createElement('option'), { textContent: 'Chọn bảng dữ liệu…', value: '' }));
         select.append(...upload.sheets.map(sheet => Object.assign(document.createElement('option'), { textContent: sheet, value: sheet, title: sheet })));
         select.value = upload.selectedSheet || ''; select.title = select.value; select.disabled = upload.processing === true;
-        const apply = textNode('button', 'Phân tích bảng đã chọn', 'secondary-button'); apply.type = 'button';
+        const apply = textNode('button', upload.processing ? 'Đang phân tích...' : 'Phân tích bảng đã chọn', 'secondary-button'); apply.type = 'button';
         apply.disabled = upload.processing === true || !select.value;
         select.addEventListener('change', () => { upload.selectedSheet = select.value; select.title = select.value; apply.disabled = !select.value; });
         apply.addEventListener('click', () => {
           const sheetName = upload.selectedSheet;
           if (upload.processing || !upload.sheets.includes(sheetName)) return;
-          upload.processing = true; renderUploads();
+          upload.processing = true;
+          upload.status = `Đang phân tích bảng ${sheetName}`; upload.message = '';
+          status('Đang phân tích...'); renderUploads();
           enqueue(() => processUploads([{ id, upload, sheetName }]));
         });
         const field = textNode('div', '', 'upload-sheet-choice'); field.append(label, select, apply); row.append(field);

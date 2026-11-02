@@ -118,18 +118,10 @@ button {
     font-size: 16px
 }
 
-.notification {
-    position: relative
-}
-
-.notification i {
-    position: absolute;
-    right: 6px;
-    top: 5px;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #ef4444
+.download-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center
 }
 
 .profile-button {
