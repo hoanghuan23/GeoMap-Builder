@@ -56,6 +56,26 @@ test("giữ nhãn tháng thứ tự T01-T12 thay vì đổi thành null", () => 
   assert.equal(result.validRowRate["Tháng"], 1);
 });
 
+test("chuẩn hóa tọa độ geo dạng số và dấu phẩy, giữ nguyên địa danh và mã H3", () => {
+  const result = normalizeTabularRecords([
+    { lat: '21,2212', lng: '105,8072', country: 'Việt Nam', h3: '8928308280fffff' },
+    { lat: '-33,9399', lng: '151,1753', country: 'Úc', h3: '8928308280bffff' },
+    { lat: 0, lng: 0, country: '0', h3: '123456789012345' },
+    { lat: '', lng: null, country: 'Không rõ', h3: null }
+  ], [
+    { name: 'lat', role: 'geo', geoLevel: 'point_lat' },
+    { name: 'lng', role: 'geo', geoLevel: 'point_lng' },
+    { name: 'country', role: 'geo', geoLevel: 'country' },
+    { name: 'h3', role: 'geo', geoLevel: 'h3' }
+  ]);
+  assert.deepEqual(result.records.map(({ lat, lng }) => [lat, lng]), [[21.2212, 105.8072], [-33.9399, 151.1753], [0, 0], [null, null]]);
+  assert.equal(result.validRowRate.lat, .75);
+  assert.equal(result.validRowRate.lng, .75);
+  assert.equal(result.records[0].country, 'Việt Nam');
+  assert.equal(result.records[2].country, '0');
+  assert.equal(result.records[2].h3, '123456789012345');
+});
+
 test("profile ngày có min/max chính xác và reservoir sampling lặp lại được", () => {
   const records = Array.from({ length: 30 }, (_, index) => ({ date: new Date(Date.UTC(2026, 8, index + 1)), value: index }));
   const first = profileTabularData(records, { includeSamples: true });

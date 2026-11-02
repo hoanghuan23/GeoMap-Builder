@@ -148,7 +148,9 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   });
   const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
     .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = testRuntimeOptions;\n")
-    .replace(/\/\/ Runtime public API[\s\S]*$/, "");
+    .replace(/\/\/ Runtime public API[\s\S]*$/, api => api
+      .slice(0, api.lastIndexOf('\n}\n\nif (typeof document'))
+      .replace('return {', 'globalThis.runtimeApi = {'));
   vm.runInContext(source, context);
   const run = code => vm.runInContext(code, context);
   run("map = testMap; state.aiDataset = dataset; state.mapType = 'polygon'; state.boundary = {features: testFeatures}; bindUI(); populateAiFilters(dataset);");
@@ -193,6 +195,40 @@ test('Arc Flow defaults to information and uses the shared card, date formatting
   h.run('arcFlow.openNode(state.arcFlowView.nodes.features.find(feature => feature.properties.__arcName === "A"))');
   assert.equal(popup.removed, true);
   assert.match(h.popups.at(-1).card.querySelector('.popup-info-details').querySelectorAll('*').map(node => node.textContent).join(' | '), /1.029 lượt/);
+});
+
+test('workspace metadata refresh preserves Arc Flow controls without a map recommendation', async () => {
+  const h = await arcHarness();
+  h.run('dataset.recommendation = null;');
+  const target = h.all('.field').find(label => label.children[0]?.textContent === 'Điểm đến').children[1];
+  target.value = h.run("state.arcFlowView.flows.find(flow => flow.target.name === 'B').target.id");
+  target.events.change();
+  h.published.at(-1).onClick(h.run("state.arcFlowView.flows.find(flow => flow.target.name === 'B')"));
+  const view = h.run('state.arcFlowView');
+
+  h.run('runtimeApi.refreshPopupMetadata()');
+
+  assert.equal(h.run('state.arcFlowView'), view);
+  assert.equal(h.run('dataset.recommendation'), null);
+  assert.equal(h.all('.field').find(label => label.children[0]?.textContent === 'Điểm đến').children[1].value, target.value);
+  assert.equal(h.all('.ai-popup-type')[0].dataset.popupMode, 'info');
+  assert.equal(h.popups.at(-1).removed, undefined);
+  assert.equal(h.popups.at(-1).card.className, 'weather-popup');
+});
+
+test('Arc Flow image popup opens without a map recommendation or configured title field', async () => {
+  const h = await arcHarness([{ name: 'info_image', confidence: .95 }, { name: 'info', confidence: .8 }]);
+  h.dataset.recommendation = null;
+  h.dataset.analysis = { ...arcAnalysis, columns: [...arcAnalysis.columns, { name: 'photo', role: 'text' }],
+    popupContent: { imageFields: ['photo'] } };
+  h.dataset.records.forEach(record => { record.photo = 'https://example.com/airport.png'; });
+  h.run('dataset.popupSelections = {}; arcFlow.refreshControls();');
+  h.published.at(-1).onClick(h.run("state.arcFlowView.flows.find(flow => flow.target.name === 'B')"));
+
+  const card = h.popups.at(-1).card;
+  assert.equal(card.className, 'info-image-popup');
+  assert.equal(card.querySelector('.info-image-body').children[0].textContent, 'A → B');
+  assert.equal(card.querySelector('.info-image-photo').src, 'https://example.com/airport.png');
 });
 
 test('Arc Flow respects AI popup ranking, charts only the clicked OD, and closes stale data after filtering', async () => {

@@ -11,6 +11,7 @@ import { describeWorkspaceLayer, layerData, tableRecords, csvForRecords } from '
 import { normalizeCompositionInput } from '../src/map-composition-contract.js';
 import { nativeMapDataset } from '../src/native-map-data.js';
 import { analysis, bindings, columns, row, suggestion } from './fixtures/arc-flow-fixture.js';
+import { airportArcFlowFixture } from './fixtures/airport-arc-flow-fixture.js';
 
 test('Arc Flow contract validates real, distinct endpoint bindings and remains compatible with old maps', () => {
   const profile = profileTabularData([row()]);
@@ -19,12 +20,43 @@ test('Arc Flow contract validates real, distinct endpoint bindings and remains c
   assert.deepEqual(normalized.suggestions[0].bindings, bindings);
   assert.ok(supportedChartsForPrompt().arc_flow);
   assert.ok(ANALYSIS_RESPONSE_SCHEMA.properties.suggestions.items.properties.bindings.required.includes('targetLat'));
-  for (const changes of [{ targetLat: null }, { targetLat: 'missing' }, { source: ['origin'] }, { sourceLat: 'origin' }, { targetLng: 'origin_lng' }, { value: 'period' }]) {
+  for (const changes of [{ targetLat: null }, { targetLat: 'missing' }, { source: ['origin'] }, { sourceLat: 'origin' }, { targetLng: 'origin_lng' }, { value: 'period' }, { value: null }, { value: 7200 }]) {
     const result = validateAndNormalizeAnalysis({ ...analysis, suggestions: [{ ...suggestion, bindings: { ...bindings, ...changes } }] }, profile);
     assert.equal(result.suggestions.length, 0);
   }
   const point = validateAndNormalizeAnalysis({ ...analysis, suggestions: [{ ...suggestion, chartType: 'point', bindings: { lat: 'origin_lat', lng: 'origin_lng' } }] }, profile);
   assert.equal(point.suggestions[0].chartType, 'point');
+});
+
+test('airport spreadsheet preserves its passenger measure through normalization and Arc Flow rendering', () => {
+  const fixture = airportArcFlowFixture();
+  const profile = profileTabularData(fixture.records);
+  assert.equal(profile.columns.find(column => column.name === fixture.bindings.value).inferredType, 'number');
+  const normalized = validateAndNormalizeAnalysis(fixture.analysis, profile);
+  assert.deepEqual(normalized.validationErrors, []);
+  const { group, ...requiredAndTimeBindings } = fixture.bindings;
+  assert.deepEqual(normalized.suggestions[0].bindings, requiredAndTimeBindings);
+  const data = normalizeTabularRecords(fixture.records, normalized.columns);
+  const prepared = prepareSuggestions(normalized, data.records, data.validRowRate, { mapOnly: true })[0];
+  assert.equal(prepared.available, true);
+  const model = createArcFlowModel(data.records, normalized.columns, prepared);
+  const view = buildArcFlowView(model, { topN: 'all' });
+  assert.equal(model.stats.invalidRows, 0);
+  assert.equal(view.flows.length, 20);
+  assert.equal(view.nodes.features.length, 12);
+  assert.equal(view.total, 262850);
+  assert.equal(view.model.aggregation, 'sum');
+  assert.equal(view.model.unit, 'lượt hành khách');
+});
+
+test('unknown aggregation or unit does not erase a known Arc Flow value binding', () => {
+  const raw = { ...analysis, columns: columns.map(column => ({ ...column, unit: null, aggDefault: null })),
+    suggestions: [{ ...suggestion, agg: null }] };
+  const normalized = validateAndNormalizeAnalysis(raw, profileTabularData([row()]));
+  assert.deepEqual(normalized.validationErrors, []);
+  assert.equal(normalized.suggestions[0].bindings.value, 'passengers');
+  assert.equal(normalized.suggestions[0].agg, null);
+  assert.equal(normalized.columns.find(column => column.name === 'passengers').unit, null);
 });
 
 test('OD direction, aggregation and identities preserve reciprocal flows and names at different coordinates', () => {

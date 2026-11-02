@@ -266,9 +266,11 @@ export function parseTimeValue(value, hint = null, granularity = null) {
 
 export function normalizeTabularRecords(records, columns) {
   const columnMap = new Map((columns || []).map(column => [column.name, column]));
+  const numericColumns = new Set((columns || []).filter(column => column.role === "measure"
+    || column.role === "geo" && ["point_lat", "point_lng"].includes(column.geoLevel)).map(column => column.name));
   const commaDecimal = new Map();
   for (const column of columns || []) {
-    if (column.role !== "measure") continue;
+    if (!numericColumns.has(column.name)) continue;
     const strings = records.map(record => record?.[column.name]).filter(value => typeof value === "string" && value.trim());
     commaDecimal.set(column.name, strings.length > 0 && strings.every(value => /^-?\d+(?:,\d+)?$/.test(value.trim())) && strings.some(value => value.includes(",")));
   }
@@ -279,7 +281,7 @@ export function normalizeTabularRecords(records, columns) {
       if (column.role === "time") {
         next[name] = normalizeTimeValue(record?.[name], column);
       }
-      else if (column.role === "measure") next[name] = numericValue(record?.[name], commaDecimal.get(name));
+      else if (numericColumns.has(name)) next[name] = numericValue(record?.[name], commaDecimal.get(name));
       if (next[name] !== null && next[name] !== "" && next[name] !== undefined) validByColumn.set(name, validByColumn.get(name) + 1);
     }
     return next;

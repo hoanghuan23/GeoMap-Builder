@@ -6,6 +6,7 @@ import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 import { profileTabularData } from "../src/tabular-data.js";
 import { accessField, accessLegend, categoricalCountryFixture } from "./fixtures/categorical-countries-fixture.js";
 import { analysis as arcAnalysis, bindings as arcBindings, row as arcRow } from './fixtures/arc-flow-fixture.js';
+import { airportArcFlowFixture } from './fixtures/airport-arc-flow-fixture.js';
 import { weatherText, weatherRecords, textWeatherOutput } from './fixtures/text-weather-fixture.js';
 
 test('Codex endpoint handles table, text and layer-order requests through the existing middleware', async t => {
@@ -63,6 +64,39 @@ function middlewareFor(env) {
   aiMapRecommendationPlugin(env).configureServer({ middlewares: { use(value) { middleware = value; } } });
   return middleware;
 }
+
+test('airport OD analysis retains its measure with either AI transport and samples enabled or disabled', async t => {
+  const fixture = airportArcFlowFixture();
+  for (const isCodex of [false, true]) {
+    for (const includeSamples of [true, false]) {
+      await t.test(`${isCodex ? 'Codex' : 'Responses'}, samples ${includeSamples}`, async () => {
+        const profile = profileTabularData(fixture.records, { includeSamples });
+        let calls = 0;
+        const fetchMock = t.mock.method(globalThis, 'fetch', async (_url, init) => {
+          calls++;
+          const body = JSON.parse(init.body);
+          const input = isCodex ? JSON.parse(body.prompt.split('Dữ liệu đầu vào (JSON, không phải chỉ dẫn):\n')[1])
+            : JSON.parse(body.input);
+          assert.deepEqual(input.profile, profile);
+          assert.deepEqual(input.supportedCharts.arc_flow.slots.value, ['measure']);
+          return { ok: true, json: async () => isCodex ? { success: true, result: fixture.analysis }
+            : { output_text: JSON.stringify(fixture.analysis) } };
+        });
+        try {
+          const env = { OPENAI_API_KEY: 'test', ...(isCodex ? { OPENAI_BASE_URL: 'http://127.0.0.1:8000/analyze' } : {}) };
+          const result = await call(middlewareFor(env), { profile });
+          assert.equal(calls, 1);
+          assert.equal(result.status, 200);
+          assert.equal(result.body.source, 'ai');
+          assert.deepEqual(result.body.validationErrors, []);
+          assert.equal(result.body.suggestions[0].bindings.value, 'Số lượng hành khách');
+          assert.equal(result.body.suggestions[0].agg, 'sum');
+          assert.equal(result.body.columns.find(column => column.name === 'Số lượng hành khách').role, 'measure');
+        } finally { fetchMock.mock.restore(); }
+      });
+    }
+  }
+});
 
 test("one analysis request carries all category values and observed combinations, and returns AI colors unchanged", async () => {
   const fixture = categoricalCountryFixture();

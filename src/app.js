@@ -986,8 +986,8 @@ function renderMapPopup(view) {
   if (selection.mode === "info_image") {
     const content = dataset.analysis.popupContent || {};
     const titleField = content.titleField || dataset.nativeTitleField || (activeMapPopupSuggestion()?.chartType === "point"
-      ? pointTitleField(dataset.analysis.columns) || dataset.analysis.search_fields?.[0] : dataset.recommendation.geometry?.field);
-    const baseRecords = view.arcInfo?.records || popupRegionRecords(dataset.records, view.feature, dataset.recommendation.geometry?.field,
+      ? pointTitleField(dataset.analysis.columns) || dataset.analysis.search_fields?.[0] : dataset.recommendation?.geometry?.field);
+    const baseRecords = view.arcInfo?.records || popupRegionRecords(dataset.records, view.feature, dataset.recommendation?.geometry?.field,
       { chartType: activeMapPopupSuggestion().chartType, columns: dataset.analysis.columns, bindings: activeMapPopupSuggestion().bindings });
     card = createInfoImagePopup(document, { sources: [{ title: dataset.fileName || dataset.analysis.datasetTitle,
       columns: dataset.analysis.columns, popupContent: { ...content, titleField }, records: baseRecords.length ? baseRecords : [view.feature.properties || {}] }, ...joined],
@@ -3798,11 +3798,7 @@ return {
     else showUploadedFeaturePopup(feature, { name: state.fileName || "Dữ liệu", role: state.mapType }, center);
   },
   refreshPopupMetadata() {
-    if (activeMapPopupSuggestion()) {
-      if (activeMapPopupSuggestion().chartType === "point") populatePointControls(activeMapPopupSuggestion());
-      else populateAiFilters(state.aiDataset);
-      if (mapPopupView) renderMapPopup(mapPopupView);
-    }
+    if (activeMapPopupSuggestion()) refreshMapPopupControls();
   },
   searchData: currentDataSearch,
   setVisible(value) { $("show-map-layers").checked = value; $("show-map-layers-status").textContent = value ? "Đang bật" : "Đang tắt"; applyMapLayerVisibility(); },
