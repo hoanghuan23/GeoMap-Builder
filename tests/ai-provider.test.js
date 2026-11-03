@@ -14,9 +14,9 @@ test('Codex uses its exact endpoint, header, prompt-only request and wrapped res
     assert.equal(init.headers.Authorization, undefined);
     assert.equal(init.signal, controller.signal);
     const body = JSON.parse(init.body);
-    assert.deepEqual(Object.keys(body), ['prompt', 'mode', 'output_format']);
-    assert.equal(body.mode, 'text_analysis');
-    assert.equal(body.output_format, 'web');
+    assert.deepEqual(Object.keys(body), ['prompt']);
+    assert.equal(typeof body.prompt, 'string');
+    assert.ok(body.prompt.includes(JSON.stringify(request.schema)));
     assert.ok(body.prompt.startsWith(request.instructions));
     assert.ok(body.prompt.endsWith(JSON.stringify(request.input)));
     return { ok: true, json: async () => ({ success: true, result: '{"fields":["A"],"rows":[[1]]}' }) };
@@ -39,6 +39,22 @@ test('Codex errors and malformed output fail without treating them as analysis',
 test('non-JSON HTTP failures identify the endpoint and status', async () => {
   await assert.rejects(requestAiJson(env, request, async () => ({ ok: false, status: 404,
     json: async () => { throw new SyntaxError('HTML'); } })), /AI HTTP 404.*127\.0\.0\.1:8000\/analyze/);
+});
+
+test('validation errors identify rejected fields without exposing their input values', async () => {
+  let calls = 0;
+  await assert.rejects(requestAiJson(env, request, async () => {
+    calls++;
+    return { ok: false, status: 422, json: async () => ({ detail: [
+      { loc: ['body', 'mode'], msg: 'Extra inputs are not permitted', input: 'private-mode' },
+      { loc: ['body', 'output_format'], msg: 'Extra inputs are not permitted', input: 'private-format' }
+    ] }) };
+  }), error => {
+    assert.equal(error.message, 'body.mode: Extra inputs are not permitted; body.output_format: Extra inputs are not permitted');
+    assert.doesNotMatch(error.message, /private-/);
+    return true;
+  });
+  assert.equal(calls, 1);
 });
 
 test('both transports accept a single JSON code fence and preserve string contents', async () => {

@@ -82,7 +82,7 @@ OPENAI_API_KEY=your_codex_server_api_key
 OPENAI_BASE_URL=http://127.0.0.1:8000/analyze
 ```
 
-Ứng dụng nhận diện URL kết thúc bằng `/analyze`, gửi key qua `x-api-key` và dùng hợp đồng `prompt`, `mode`, `output_format: "web"`; đọc kết quả từ `{ success: true, result }`. Prompt chứa instructions, schema và dữ liệu đầu vào. Các chế độ bảng, văn bản và tổ hợp lần lượt dùng `analysis`, `text_analysis`, `composition`; sắp xếp lớp dùng `analysis` với schema riêng trong prompt. Model do server Codex cấu hình, `OPENAI_MODEL` không được gửi trong chế độ này. Những base URL khác vẫn gọi OpenAI Responses API tại `${OPENAI_BASE_URL}/responses`. Khởi động lại `npm run dev` sau khi đổi `.env`.
+Ứng dụng nhận diện URL kết thúc bằng `/analyze`, gửi key qua `x-api-key` và body chỉ gồm `{ prompt }`; đọc kết quả từ `{ success: true, result }`. Prompt chứa instructions, schema riêng của từng tác vụ và dữ liệu đầu vào cho phân tích bảng, văn bản, tổ hợp hoặc sắp xếp lớp. Server chỉ chấp nhận `prompt`, không gửi `mode`, `output_format` hay `input` ở cấp body vì sẽ bị từ chối với HTTP 422 (`Extra inputs are not permitted`). Model do server Codex cấu hình, `OPENAI_MODEL` không được gửi trong chế độ này. Những base URL khác vẫn gọi OpenAI Responses API tại `${OPENAI_BASE_URL}/responses`. Khởi động lại `npm run dev` sau khi đổi `.env`.
 
 Phản hồi JSON được chấp nhận khi trả trực tiếp hoặc bọc toàn bộ trong một khối Markdown JSON. JSON sai cú pháp bị từ chối sau một request, không tự sửa nội dung hoặc gọi lại AI. Thông báo lỗi cho biết server trả kết quả lỗi và vị trí lỗi nếu có. Khi bật `AI_DEBUG=true`, phản hồi sai được ghi ở mục `AI invalid JSON debug` trên console server để kiểm tra; mặc định không ghi nội dung này.
 

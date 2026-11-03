@@ -77,8 +77,7 @@ export function aiMapRecommendationPlugin(env) {
       const startedAt = Date.now();
       const parsed = await requestAiJson(env, {
         instructions, input: aiInput, schema,
-        name: isLayerOrder ? "layer_order" : isText ? "text_map_recommendation" : "map_recommendation",
-        mode: isText ? "text_analysis" : "analysis"
+        name: isLayerOrder ? "layer_order" : isText ? "text_map_recommendation" : "map_recommendation"
       });
       let records;
       let profile = body.profile;

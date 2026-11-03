@@ -31,7 +31,7 @@ export async function analyzeMapComposition(body, env, fetchImpl = fetch) {
   const instructions = `${COMPOSITION_INSTRUCTIONS}\n\nChỉ trả về một JSON object đúng schema sau, không bọc trong Markdown. Dùng chính xác tên field, kiểu dữ liệu và giá trị enum trong schema:\n${JSON.stringify(MAP_COMPOSITION_SCHEMA)}`;
   try {
     const parsed = await requestAiJson(env, { instructions, input, schema: MAP_COMPOSITION_SCHEMA,
-      name: 'map_composition', mode: 'composition', signal: controller.signal }, fetchImpl);
+      name: 'map_composition', signal: controller.signal }, fetchImpl);
     const normalized = normalizeCompositionResult(parsed, input);
     if (env.AI_DEBUG === 'true') {
       console.debug('AI map composition debug\n', JSON.stringify({ instructions, input, rawOutput: parsed, normalizedOutput: normalized }, null, 2));
