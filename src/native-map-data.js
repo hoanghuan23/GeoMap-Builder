@@ -24,7 +24,7 @@ export function nativeMapDataset(data, pipeline, fileName) {
     bindings: { ...supplied.bindings, lat: null, lng: null, region: identityField, nativeIdentity: identityField, value: supplied.bindings.value || null },
     available: true, feasibilityScore: 1, effectiveConfidence: supplied.confidence, nativeGeometry: true } : null;
   const arcs = prepareSuggestions({ ...pipeline.analysis, columns, suggestions: pipeline.analysis.suggestions.filter(item => item.chartType === 'arc_flow') },
-    records, pipeline.validRowRate, { mapOnly: true });
+    records, pipeline.validRowRate);
   const suggestions = [...(suggestion ? [suggestion] : []), ...arcs].sort((a, b) => b.confidence - a.confidence);
   return { ...pipeline, records, rawRecords: pipeline.rawRecords || features.map(feature => feature.properties || {}), analysis: { ...pipeline.analysis, columns }, fileName,
     suggestions, selectedSuggestionId: suggestions.find(item => item.available)?.id || null,

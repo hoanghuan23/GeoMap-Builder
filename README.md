@@ -1,5 +1,7 @@
 # GeoMap Builder
 
+Luồng nhập dữ liệu hiện hỗ trợ Polygon, Line, Point và Arc Flow 3D. Lưới H3 là chế độ hiển thị của Polygon; biểu đồ cột/đường chỉ dùng trong popup. Đã gỡ Heatmap, H3 độc lập, biểu đồ toàn màn hình (cột/đường/tròn), OpenWeather và các renderer không được gọi. Cấu hình và bộ điều chỉnh của các chế độ này không còn được giữ trong ứng dụng.
+
 ## Arc Flow 3D
 
 AI có thể đề xuất `arc_flow` khi mỗi dòng có quan hệ điểm đi → điểm đến, định danh hai đầu, hai cặp tọa độ và lưu lượng. Contract dùng `bindings.source/target/sourceLat/sourceLng/targetLat/targetLng/value`, thêm `time/group` khi có. Các binding phải tham chiếu cột thật; dữ liệu được kiểm tra tại client, không nhận dạng theo tên file hoặc lĩnh vực. Giữ nguyên endpoint phân tích và tùy chọn gửi mẫu; lọc, style và popup không gọi AI lại.
@@ -106,11 +108,12 @@ Prompt thống nhất các cách diễn đạt của cùng đại lượng thàn
 
 Kiểm thử ngữ nghĩa với AI thực tế: `npm run eval:text` (dùng API/model trong `.env`, có gọi API). Các ca gồm báo cáo sốt rét có chú thích phân nhóm, báo cáo nhà máy với nguyên nhân đơn lẻ và bảng so sánh tổng–phân nhóm độc lập. Kiểm thử unit dùng phản hồi giả để kiểm tra truyền dữ liệu/metadata/popup; chúng không thay thế kiểm thử chất lượng trích xuất của model.
 
-Mỗi dataset tạo một request phân tích nội dung OpenAI; đánh giá tổ hợp giữa các dataset là bước riêng theo từng đợt import. Server tự đưa registry được phép vào prompt, coi tên cột và mẫu là dữ liệu không tin cậy, rồi kiểm tra structured output trước khi trả về client. Đầu vào chỉ hỗ trợ ba kiểu bản đồ:
+Mỗi dataset tạo một request phân tích nội dung OpenAI; đánh giá tổ hợp giữa các dataset là bước riêng theo từng đợt import. Server tự đưa registry được phép vào prompt, coi tên cột và mẫu là dữ liệu không tin cậy, rồi kiểm tra structured output trước khi trả về client. Đầu vào hỗ trợ bốn kiểu bản đồ:
 
 - `choropleth`: **Bản đồ Polygon**, theo khu vực hành chính như tỉnh/thành phố.
 - `map_line`: **Bản đồ Line**, theo tên đường hoặc chuỗi tọa độ.
 - `point`: **Bản đồ Point**, theo tọa độ của từng đối tượng.
+- `arc_flow`: **Bản đồ Arc Flow 3D**, theo lưu lượng có hướng giữa hai điểm có tọa độ.
 
 AI quyết định mức phù hợp, role, bindings, đơn vị, phép gộp, chỉ số và thứ tự ưu tiên của từng kiểu bản đồ. Client chỉ kiểm tra cấu trúc phản hồi, tên cột và khả năng render; không sửa role theo tên cột, không bổ sung Polygon/Line/Point hoặc biểu đồ khi AI bỏ sót, không tự ưu tiên kiểu bản đồ theo lĩnh vực. Điểm hiển thị giữ nguyên confidence của AI, tách biệt với độ phủ/khả năng ghép geometry. AI trả `suggestions: []` thì không dựng bản đồ, kể cả khi GeoJSON có geometry sẵn. AI lỗi hoặc phản hồi không hợp lệ giữ dữ liệu và hiển thị lý do, không tạo đề xuất thay thế. Cột thiếu metadata được giữ ở trạng thái chưa phân loại.
 

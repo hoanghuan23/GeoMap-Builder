@@ -12,7 +12,7 @@ export function createMapLayerManager(nativeMap, id, { onChange = () => {}, onIn
   const notify = () => { if (!disposed) onChange(); };
   const topFeature = event => {
     const ids = nativeMap.getStyle()?.layers?.filter(layer => layer.metadata?.workspaceLayer
-      && !/--selected-cell|(?:-|--)border$|(?:-|--)labels$/.test(layer.id) && layer.type !== 'heatmap').map(layer => layer.id) || [];
+      && !/--selected-cell|(?:-|--)border$|(?:-|--)labels$/.test(layer.id)).map(layer => layer.id) || [];
     return ids.length ? nativeMap.queryRenderedFeatures(event.point, { layers: ids })[0] : null;
   };
   const handlers = {

@@ -67,7 +67,7 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => roads })
   return { context, get, sources, layers, descendants, filters: () => descendants(get("ai-filter-controls")).filter(node => node.className === "ai-generated-filter") };
 }
 
-test("AI map_line dùng bộ lọc chung, đổi giờ, ẩn/hiện và dọn dữ liệu khi chuyển biểu đồ", async () => {
+test("AI map_line dùng bộ lọc chung, đổi giờ, ẩn/hiện và dọn dữ liệu khi chuyển bản đồ", async () => {
   let calls = 0;
   const { context, get, sources, layers, descendants, filters } = harness(async () => { calls++; return { ok: true, json: async () => roads }; });
   await vm.runInContext("activateAiRoadMap(state.aiDataset.suggestions[0])", context);
@@ -100,7 +100,7 @@ test("AI map_line dùng bộ lọc chung, đổi giờ, ẩn/hiện và dọn d�
   assert.equal(get("ai-line-legend").hidden, true);
   get("show-map-layers").checked = true;
   get("show-map-lines").checked = true;
-  vm.runInContext("clearMapForAiChart(); state.mapType = 'line-chart'; updateModelSections();", context);
+  vm.runInContext("clearMapData(); state.mapType = null; updateModelSections();", context);
   assert.equal(sources.get("line-data").data.features.length, 0);
   assert.equal(get("ai-line-legend").hidden, true);
   await vm.runInContext("activateAiRoadMap(state.aiDataset.suggestions[0])", context);

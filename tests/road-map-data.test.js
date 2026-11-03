@@ -62,8 +62,8 @@ test("Line metric changes replace the old AI legend and preserve category colors
 test("map_line có registry và validation, không tự thêm khi AI chưa đề xuất", () => {
   assert.equal(AI_CHART_REGISTRY.map_line.renderer, "MapLibre");
   assert.equal(AI_CHART_REGISTRY.map_line.label, "Bản đồ Line");
-  assert.equal(AI_CHART_REGISTRY.line.renderer, "Recharts");
-  assert.deepEqual(analysis.suggestions.map(item => item.chartType), ["map_line", "line", "bar"]);
+  assert.equal(AI_CHART_REGISTRY.line, undefined);
+  assert.deepEqual(analysis.suggestions.map(item => item.chartType), ["map_line"]);
   assert.deepEqual(analysis.validationErrors, []);
   assert.deepEqual(fallbackAnalysis(profile).suggestions, []);
   const bad = validateAndNormalizeAnalysis({ ...trafficAiAnalysis, suggestions: [

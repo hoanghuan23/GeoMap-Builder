@@ -66,12 +66,8 @@ export function createHarness() {
       geometry: { type: "LineString", coordinates: [[105.8, 21], [105.81, 21.01]] }
     }] }) }),
     CONFIG: { DEFAULT_RESOLUTION: 5, MAX_RENDER_CELLS: 120000 },
-    DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
-    mergeBarConfig: () => ({}), mergePieConfig: () => ({}),
-    clearDataMappingPanel() {}, clearBarStylePanel() {}, clearPieStylePanel() {}, renderMapIcon() {}, renderChartIcon() {},
+    renderMapIcon() {}, renderChartIcon() {},
     humanizeField: field => field, keepSelectOpenAfterMouseClick: control => control,
-    geoJSONToCells() { throw new Error("Metro polygons must not be regenerated as H3"); },
-    geoJSONToH3FeatureCollection: () => ({ type: "FeatureCollection", features: [] }),
     document: { getElementById: get, createElement: element, querySelector: () => element(),
       querySelectorAll: selector => selector === "#ai-filter-controls .ai-generated-filter"
         ? descendants(get("ai-filter-controls")).filter(node => node.className === "ai-generated-filter") : [] },

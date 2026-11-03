@@ -183,7 +183,7 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
   return {
     async activate(suggestion) {
       const model = modelFor(suggestion); if (!model.available) return false;
-      currentSuggestion = suggestion; state.mapType = 'arc_flow'; state.chartConfig = null; state.chartMapping = null;
+      currentSuggestion = suggestion; state.mapType = 'arc_flow';
       active = $('show-map-layers').checked;
       refresh(); renderStyle();
       const ok = overlay ? await overlay.updateLayer(id, payload) : false;

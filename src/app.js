@@ -3,25 +3,12 @@ import { createArcFlowController } from "./arc-flow-controller.js";
 import { startMapWorkspace } from "./map-workspace-ui.js";
 import { nativeMapDataset, nativeMapView } from "./native-map-data.js";
 import { CONFIG } from "./config.js";
-import { geoJSONToCells, geoJSONToH3FeatureCollection, recordsToAggregatedH3, recordsToPointGeoJSON } from "./h3-utils.js";
+import { recordsToPointGeoJSON } from "./h3-utils.js";
 import { buildRegionHexGrid } from "./region-hex-grid.js";
 import { analyzeSpatialData, compatibleMapTypes, describeDataProfile } from "./data-capabilities.js";
-import { BarRenderer, analyzeBarData } from "./charts/bar-chart.js";
-import { createLineOption, LINE_COLORS, lineSeriesFromFields, LineRenderer } from "./charts/line-chart.js";
-import {
-  clearPieStylePanel,
-  createPieOptions,
-  DEFAULT_PIE_CONFIG,
-  mergePieConfig,
-  PIE_COLORS,
-  pieSeriesFromFields,
-  PieRenderer,
-  renderPieStylePanel
-} from "./charts/pie-chart.js";
-import { DEFAULT_BAR_CONFIG, mergeBarConfig } from "./charts/configs/bar-config.js";
-import { clearBarStylePanel, renderBarStylePanel } from "./charts/components/bar-style-panel.jsx";
-import { clearDataMappingPanel, renderDataMappingPanel } from "./charts/components/data-mapping-panel.jsx";
-import { BAR_COLORS, dataForBarMapping, defaultMetricSelection, humanizeField, reconcileSeriesColors, seriesFromFields, validateBarMapping } from "./charts/data-transformers.js";
+import { BarRenderer } from "./charts/bar-chart.js";
+import { LineRenderer } from "./charts/line-chart.js";
+import { humanizeField } from "./charts/data-transformers.js";
 import { renderChartIcon } from "./charts/chart-icons.js";
 import { renderMapIcon } from "./renderers/map-icons.js";
 import { PointRenderer } from "./renderers/point-renderer.js";
@@ -39,7 +26,7 @@ import { parseTextDocumentFile } from "./text-document-worker-client.js";
 import { keepSelectOpenAfterMouseClick } from "./select-control.js";
 import { createAiPopupContent } from "./ai-popup.js";
 import { createInfoImagePopup } from "./info-image-popup.js";
-import { administrativeContextFields, geographicLocationName, applyPipelineFilters, barMetricOptions, chartOptionForSuggestion, defaultBarLimit, defaultBarMetrics, defaultTimeFilter, normalizeBarSelection, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
+import { administrativeContextFields, geographicLocationName, applyPipelineFilters, barMetricOptions, defaultBarMetrics, defaultTimeFilter, prepareSuggestions, resolveAggregation, withSuggestionMetric } from "./ai-chart-pipeline.js";
 import { compareTimeValues, filterTimeRange, formatTimeValue, timeValueInfo, uniqueTimeValues } from "./time-values.js";
 import { AI_CHART_REGISTRY } from "./ai-chart-contract.js";
 import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupChartColumns, popupDisplayOptions, popupFeaturesMatch, popupRegionRecords, popupTimeColumn } from "./ai-popup-chart.js";
@@ -117,7 +104,6 @@ function renderSupportedMapCatalog(document) {
     item.className = "supported-chart-type";
     item.setAttribute("role", "listitem");
     if (type.kind === "map") renderMapIcon(icon, type.icon);
-    else renderChartIcon(icon, type.icon);
     label.textContent = type.label;
     item.append(icon, label);
     return item;
@@ -130,13 +116,12 @@ const maplibregl = options.maplibregl || globalThis.maplibregl;
 const $ = id => document.getElementById(id);
 const controlId = control => control.dataset?.controlId || control.id;
 const state = {
-  resolution: CONFIG.DEFAULT_RESOLUTION, boundary: null, sourceBoundary: null, h3Data: { type: "FeatureCollection", features: [] },
-  page: 1, pageSize: 10, query: "", baselineCount: null,
+  boundary: null, sourceBoundary: null, h3Data: { type: "FeatureCollection", features: [] },
+  page: 1, pageSize: 10, query: "",
   mapType: null, dataProfile: null,
   regionHexEnabled: false, regionHexResolution: CONFIG.DEFAULT_RESOLUTION,
   pointData: { type: "FeatureCollection", features: [] },
-  chartConfig: null, chartOptions: [], chartAnalysis: null, chartMapping: null, mappingWarning: "", activeChartKind: null,
-  barStyle: { ...DEFAULT_BAR_CONFIG }, pieStyle: { ...DEFAULT_PIE_CONFIG }, pointStyle: { ...DEFAULT_POINT_STYLE },
+  pointStyle: { ...DEFAULT_POINT_STYLE },
   roadDisplayStyle: { ...DEFAULT_ROAD_DISPLAY_STYLE }, polygonPalette: null,
   lineData: EMPTY_FEATURE_COLLECTION,
   dataOrigin: null,
@@ -149,7 +134,6 @@ let mapPopupView = null;
 let layerOrderRevision = 0;
 let mapLayerEventsBound = false;
 const uploadedPointerLayerIds = new Set();
-let mapReady = false;
 let pendingMapStyle = null;
 let mapStyleLoadTimer = null;
 let tabularLoadRevision = 0;
@@ -216,22 +200,8 @@ function openCellPopup(popup, feature, layerId) {
   return popup;
 }
 
-function chartRenderer(kind = state.chartConfig?.chartKind) {
-  return kind === "line" ? LineRenderer : kind === "pie" ? PieRenderer : BarRenderer;
-}
-
-function renderChartCanvas() {
-  if (!state.chartConfig) return;
-  const nextKind = ["line", "pie"].includes(state.chartConfig.chartKind) ? state.chartConfig.chartKind : "bar";
-  if (state.activeChartKind && state.activeChartKind !== nextKind) chartRenderer(state.activeChartKind).clear($("chart-canvas"));
-  chartRenderer(nextKind).render($("chart-canvas"), state.chartConfig);
-  state.activeChartKind = nextKind;
-}
-
-function clearChartCanvas() {
-  if (state.activeChartKind) chartRenderer(state.activeChartKind).clear($("chart-canvas"));
-  else $("chart-canvas")?.replaceChildren();
-  state.activeChartKind = null;
+function chartRenderer(kind) {
+  return kind === "line" ? LineRenderer : BarRenderer;
 }
 
 function showToast(message) { const el = $("toast"); el.textContent = message; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2800); }
@@ -268,41 +238,33 @@ function syncRegionHexControls() {
 
 function updateModelSections() {
   const hasModel = Boolean(state.mapType);
-  const isChart = Boolean(state.chartConfig);
-  const isPoint = !isChart && state.mapType === "point";
-  const isArc = !isChart && state.mapType === "arc_flow";
+  const isPoint = state.mapType === "point";
+  const isArc = state.mapType === "arc_flow";
   const isRoad = Boolean(activeRoadSuggestion());
-  $("line-toggle-field").hidden = isChart || isRoad || !state.lineData.features.length;
+  $("line-toggle-field").hidden = isRoad || !state.lineData.features.length;
   $("line-toggle-label").textContent = activeRoadSuggestion() ? "Hiển thị tuyến đường" : "Hiển thị đường nối giữa các điểm";
-  $("chart-data-mapping-section").hidden = !isChart || !state.chartMapping;
-  $("resolution-section").hidden = !hasModel || isChart || state.mapType !== "h3";
-  $("feature-section").hidden = !hasModel || isChart;
-  $("region-hex-controls").hidden = isChart || state.mapType !== "polygon";
+  $("feature-section").hidden = !hasModel;
+  $("region-hex-controls").hidden = state.mapType !== "polygon";
   syncRegionHexControls();
-  $("style-section").hidden = !hasModel || (!isChart && !["h3", "polygon", "point", "arc_flow"].includes(state.mapType) && !isRoad);
-  $("map-style-controls").hidden = isChart || isPoint || isRoad || isArc;
+  $("style-section").hidden = !hasModel || (!["polygon", "point", "arc_flow"].includes(state.mapType) && !isRoad);
+  $("map-style-controls").hidden = isPoint || isRoad || isArc;
   $("arc-flow-style-controls").hidden = !isArc;
   $("point-style-controls").hidden = !isPoint;
   $("road-style-controls").hidden = !isRoad;
-  $("cell-stats-card").hidden = !hasModel || isChart || state.mapType !== "h3";
-  const activeAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
   $("ai-filter-description").textContent = activePointSuggestion()
     ? "Chọn chỉ số, nhóm điểm và thời gian hiển thị"
     : activeMapPopupSuggestion()
     ? "Chọn cách hiển thị và chỉ số dữ liệu"
-    : activeAiSuggestion?.chartType === "bar"
-      ? "Chọn cách hiển thị và chỉ số dữ liệu"
-      : "Chọn chỉ số, nhóm dữ liệu và khoảng thời gian";
-  if (!isChart) {
-    const isPolygon = state.mapType === "polygon";
-    const isAiThematic = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
-    $("style-description").textContent = isArc ? "Chiều cao cung, độ dày, chuyển động và chú giải" : isRoad ? "Chú giải màu, độ dày và độ mờ tuyến" : isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
-    $("polygon-color-ramp").hidden = !isPolygon && !isAiThematic;
-    $("border-color-field").hidden = isPolygon;
-    $("show-border-field").hidden = false;
-    $("line-width-field").hidden = false;
-    if (isPolygon || isAiThematic) syncPolygonPaletteControls();
-  }
+    : "Chọn chỉ số, nhóm dữ liệu và khoảng thời gian";
+
+  const isPolygon = state.mapType === "polygon";
+  $("style-description").textContent = isArc ? "Chiều cao cung, độ dày, chuyển động và chú giải" : isRoad ? "Chú giải màu, độ dày và độ mờ tuyến" : isPoint ? "Kích thước, màu sắc, độ mờ, đường viền và chú giải" : isPolygon ? "Màu cố định, dải màu, độ mờ và đường viền" : "Màu sắc, độ mờ và đường viền";
+  $("polygon-color-ramp").hidden = !isPolygon;
+  $("border-color-field").hidden = isPolygon;
+  $("show-border-field").hidden = false;
+  $("line-width-field").hidden = false;
+  if (isPolygon) syncPolygonPaletteControls();
+
   if (isPoint) renderPointStyleControls();
   if (isRoad) renderRoadStyleControls();
   renderPointLegend();
@@ -329,7 +291,7 @@ function usesCategoricalPolygonColor() {
 
 function activePolygonLegendScale() {
   const suggestion = activePolygonSuggestion();
-  if (!suggestion?.bindings.value || !["polygon", "h3"].includes(state.mapType)) return null;
+  if (!suggestion?.bindings.value || state.mapType !== "polygon") return null;
   const dataset = state.aiDataset; const columns = dataset.analysis.columns;
   const cache = dataset.polygonLegendScaleCache ||= { resolved: null, logged: new Set() };
   const column = columns.find(item => item.name === suggestion.bindings.value);
@@ -377,7 +339,7 @@ function syncPolygonPaletteControls(resolvedScale = activePolygonLegendScale()) 
 
 function renderWeatherLegend(resolvedScale = activePolygonLegendScale()) {
   const legend = $("weather-legend");
-  const isAiMap = Boolean(state.aiDataset) && ["h3", "polygon"].includes(state.mapType);
+  const isAiMap = Boolean(state.aiDataset) && state.mapType === "polygon";
   const show = $("show-map-layers").checked && isAiMap && !usesDefaultPolygonColor();
   legend.hidden = !show;
   if (!show) return;
@@ -425,7 +387,7 @@ function renderWeatherLegend(resolvedScale = activePolygonLegendScale()) {
   $("weather-legend-note").textContent = [period,
     categorical && scale.mixed.some(entry => !entry.color) ? "Chưa có màu AI cho một số tổ hợp phân loại." : "",
     categorical && scale.unmappedValues.length ? `Chưa có màu AI cho: ${scale.unmappedValues.join(", ")}.` : "",
-    isRegionHexMode() ? `Dữ liệu tải lên · H3 res ${state.regionHexResolution}` : state.mapType === "h3" ? `Dữ liệu tải lên · H3 res ${state.resolution}` : "Dữ liệu tải lên · Polygon"].filter(Boolean).join(" · ");
+    isRegionHexMode() ? `Dữ liệu tải lên · H3 res ${state.regionHexResolution}` : "Dữ liệu tải lên · Polygon"].filter(Boolean).join(" · ");
 }
 
 function renderCategoricalPolygonLegend(scale) {
@@ -451,7 +413,7 @@ function renderScopeLegend() {
   if (!legend) return;
   const markers = activePolygonSuggestion() ? (state.boundary?.features || []).filter(feature =>
     feature.geometry?.type === "Point" && feature.properties?.__geographic_scope === "marker") : [];
-  legend.hidden = !$("show-map-layers").checked || !markers.length || !["polygon", "h3"].includes(state.mapType);
+  legend.hidden = !$("show-map-layers").checked || !markers.length || state.mapType !== "polygon";
   if (legend.hidden) return;
   legend.replaceChildren(...markers.map(feature => {
     const row = document.createElement("div"); row.className = "scope-legend-row";
@@ -517,14 +479,13 @@ function applyMapLayerVisibility(resolvedScale = activePolygonLegendScale()) {
   const showLayers = $("show-map-layers")?.checked ?? false;
   arcFlow.setActive(showLayers && state.mapType === "arc_flow");
   if (!showLayers) closeMapPopup();
-  const showH3 = showLayers && (state.mapType === "h3" || isRegionHexMode());
+  const showH3 = showLayers && isRegionHexMode();
   const showPolygon = showLayers && state.mapType === "polygon" && !isRegionHexMode();
-  const showScopes = showLayers && Boolean(activePolygonSuggestion()) && ["polygon", "h3"].includes(state.mapType);
+  const showScopes = showLayers && Boolean(activePolygonSuggestion()) && state.mapType === "polygon";
   for (const id of ["scope-marker"]) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", showScopes ? "visible" : "none");
   if (map.getLayer("h3-fill")) map.setLayoutProperty("h3-fill", "visibility", showH3 ? "visible" : "none");
   if (map.getLayer("h3-border")) map.setLayoutProperty("h3-border", "visibility", showH3 && $("show-border").checked ? "visible" : "none");
   if (map.getLayer("point-marker")) map.setLayoutProperty("point-marker", "visibility", showLayers && state.mapType === "point" ? "visible" : "none");
-  if (map.getLayer("point-heatmap")) map.setLayoutProperty("point-heatmap", "visibility", showLayers && state.mapType === "heatmap" ? "visible" : "none");
   if (map.getLayer("polygon-fill")) map.setLayoutProperty("polygon-fill", "visibility", showPolygon ? "visible" : "none");
   if (map.getLayer("polygon-border")) map.setLayoutProperty("polygon-border", "visibility", showPolygon && $("show-border").checked ? "visible" : "none");
   if (map.getLayer("vietnam-border")) map.setLayoutProperty("vietnam-border", "visibility", showLayers && !isRegionHexMode() ? "visible" : "none");
@@ -549,11 +510,6 @@ function addMapLayers() {
   map.addLayer({ id: "h3-fill", type: "fill", source: "h3-grid", paint: { "fill-color": fillExpression(), "fill-opacity": .72 } });
   map.addLayer({ id: "h3-border", type: "line", source: "h3-grid", paint: { "line-color": "#ffffff", "line-width": .5, "line-opacity": .75 } });
   map.addSource("point-data", { type: "geojson", data: state.pointData });
-  map.addLayer({ id: "point-heatmap", type: "heatmap", source: "point-data", maxzoom: 16, paint: {
-    "heatmap-weight": 1, "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, .7, 12, 2.5],
-    "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(33,102,172,0)", .2, "#2c7bb6", .4, "#00a6ca", .6, "#fdae61", .8, "#f46d43", 1, "#d73027"],
-    "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 12, 28], "heatmap-opacity": .82
-  } });
   PointRenderer.render(map, state.pointData, {
     sourceId: "point-data",
     layerId: "point-marker",
@@ -1077,24 +1033,6 @@ function refreshMapPopup() {
   renderMapPopup(view);
 }
 
-function applyHeatmapWeight() {
-  if (!map?.getLayer("point-heatmap")) return;
-  const field = state.dataProfile?.numericFields?.[0];
-  const values = field ? polygonColorField(state.pointData, { numericFields: [field] }).values : [];
-  const min = values.length ? Math.min(...values) : 0; const max = values.length ? Math.max(...values) : 0;
-  if (field) {
-    const weight = max > min ? ["interpolate", ["linear"], ["to-number", ["get", field], min], min, .15, max, 1] : 1;
-    map.setPaintProperty("point-heatmap", "heatmap-weight", ["case", ["==", ["typeof", ["get", field]], "number"], weight, 0]);
-  } else {
-    map.setPaintProperty("point-heatmap", "heatmap-weight", 1);
-  }
-}
-
-function estimateCellCount(resolution) {
-  if (!state.baselineCount) return 0;
-  return Math.round(state.baselineCount * Math.pow(7, resolution - CONFIG.DEFAULT_RESOLUTION));
-}
-
 let regionHexBuildRevision = 0;
 
 async function rebuildRegionHexGrid({ fit = false } = {}) {
@@ -1115,8 +1053,6 @@ async function rebuildRegionHexGrid({ fit = false } = {}) {
     $("region-hex-note").textContent = result.resolution !== requestedResolution
       ? `Đã dùng độ phân giải ${result.resolution} để giữ số ô trong giới hạn ${CONFIG.MAX_RENDER_CELLS.toLocaleString("vi-VN")} ô.`
       : !count ? "Chưa có ô ở độ phân giải này. Tăng độ phân giải để hiển thị vùng nhỏ." : "";
-    $("cell-count").textContent = count.toLocaleString("vi-VN");
-    $("cell-label").textContent = `Tổng số cell (res ${result.resolution})`;
     state.page = 1; updateDashboard();
     syncPolygonPaletteControls(); applyStyle();
     if (fit && count) fitBoundary();
@@ -1129,46 +1065,15 @@ async function rebuildRegionHexGrid({ fit = false } = {}) {
   }
 }
 
-async function rebuildGrid({ fit = false } = {}) {
+async function refreshBoundary({ fit = false } = {}) {
   if (isRegionHexMode()) return rebuildRegionHexGrid({ fit });
-  const selectedAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
-  if (selectedAiSuggestion?.chartType === "hex_h3") return refreshAiH3({ fit });
-  if (!state.boundary) { setStatus("Hãy upload dữ liệu không gian trước."); return; }
-  const estimate = estimateCellCount(state.resolution);
-  if (estimate > CONFIG.MAX_RENDER_CELLS) {
-    const previous = state.resolution;
-    state.resolution = Math.max(3, Math.min(7, CONFIG.DEFAULT_RESOLUTION + Math.floor(Math.log(CONFIG.MAX_RENDER_CELLS / state.baselineCount) / Math.log(7))));
-    $("resolution").value = state.resolution; $("resolution-value").value = state.resolution;
-    showToast(`Resolution ${previous} ước tính ${estimate.toLocaleString("vi-VN")} ô, vượt giới hạn an toàn.`);
-    return rebuildGrid({ fit });
-  }
-  setStatus(`Đang tạo H3 resolution ${state.resolution}…`);
-  await new Promise(resolve => setTimeout(resolve, 20));
-  try {
-    state.h3Data = geoJSONToH3FeatureCollection(state.boundary, state.resolution);
-    const cellCount = state.h3Data.features.length;
-    if (!state.baselineCount) {
-      state.baselineCount = Math.max(1, Math.round(cellCount / Math.pow(7, state.resolution - CONFIG.DEFAULT_RESOLUTION)));
-    }
-    const source = map.getSource("h3-grid"); if (source) source.setData(state.h3Data);
-    $("cell-count").textContent = cellCount.toLocaleString("vi-VN"); $("cell-label").textContent = `Tổng số cell (res ${state.resolution})`;
-    state.page = 1; updateDashboard();
-    if (fit) fitBoundary();
-    syncPolygonPaletteControls();
-    applyStyle();
-    setStatus(`Đã vẽ ${cellCount.toLocaleString("vi-VN")} ô H3.`, true);
-  } catch (error) { console.error(error); setStatus("Không thể tạo lưới H3."); showToast(error.message || "Dữ liệu không hợp lệ."); }
+  if (fit) fitBoundary();
+  syncPolygonPaletteControls(); applyStyle(); updateDashboard();
 }
 function updateDashboard() { renderTable(); }
 
-function filteredFeatures() { const q = state.query.trim().toLowerCase(); return q ? state.h3Data.features.filter(f => f.properties.h3.toLowerCase().includes(q)) : state.h3Data.features; }
 function renderTable() {
-  if (options.renderTable?.(state)) return;
-  const all = filteredFeatures(); const pages = Math.max(1, Math.ceil(all.length / state.pageSize)); state.page = Math.min(state.page, pages); const start = (state.page - 1) * state.pageSize; const rows = all.slice(start, start + state.pageSize);
-  $("data-body").innerHTML = rows.length ? rows.map((f, i) => { const p = f.properties; return `<tr><td>${start + i + 1}</td><td><b>${p.h3}</b></td><td>${fmt(p.center_lat, 5)}, ${fmt(p.center_lng, 5)}</td><td>•••</td></tr>`; }).join("") : `<tr><td colspan="4" class="empty-row">Không tìm thấy dữ liệu.</td></tr>`;
-  const end = Math.min(start + state.pageSize, all.length); $("table-summary").textContent = `Hiển thị ${rows.length} / ${all.length.toLocaleString("vi-VN")} bản ghi`; $("pagination-info").textContent = `${all.length ? start + 1 : 0}–${end} của ${all.length.toLocaleString("vi-VN")}`;
-  $("prev-page").disabled = state.page <= 1; $("next-page").disabled = state.page >= pages;
-  const nums = [1, state.page - 1, state.page, state.page + 1, pages].filter((v, i, a) => v > 0 && v <= pages && a.indexOf(v) === i).sort((a, b) => a - b); let last = 0; $("page-buttons").innerHTML = nums.map(n => { const gap = n - last > 1 ? "<em>…</em>" : ""; last = n; return `${gap}<button class="${n === state.page ? "active" : ""}" data-page="${n}">${n}</button>` }).join("");
+  options.renderTable?.(state);
 }
 
 function boundaryProvinceName(feature) {
@@ -1281,13 +1186,10 @@ function clearUploadedData({ preserveUploads = false } = {}) {
   state.pointData = { type: "FeatureCollection", features: [] };
   state.lineData = EMPTY_FEATURE_COLLECTION;
   map?.getSource("line-data")?.setData(state.lineData);
-  state.mapType = null; state.dataProfile = null; state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; state.baselineCount = null; state.page = 1; state.dataOrigin = null; state.aiDataset = null; state.pendingSheet = null;
+  state.mapType = null; state.dataProfile = null; state.page = 1; state.dataOrigin = null; state.aiDataset = null; state.pendingSheet = null;
   $("sheet-selector-field").hidden = true; $("sheet-selector").replaceChildren();
   $("ai-data-filters").hidden = true;
   updateModelSections();
-  clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
-  showChartStyleControls(false);
-  clearDataMappingPanel($("data-mapping-controls"));
   $("map-type-grid").className = "map-type-grid is-empty"; $("map-type-grid").textContent = "Chưa có dữ liệu để đề xuất mô hình.";
   $("map-type-summary").textContent = "";
   showSupportedChartCatalog(true);
@@ -1304,15 +1206,10 @@ async function resetConfiguration() {
   state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
   $("region-hex-note").textContent = "";
   syncRegionHexControls();
-  state.resolution = CONFIG.DEFAULT_RESOLUTION;
-  state.barStyle = mergeBarConfig();
-  state.pieStyle = mergePieConfig();
   state.pointStyle = mergePointStyle();
   state.roadDisplayStyle = { ...DEFAULT_ROAD_DISPLAY_STYLE };
   state.polygonPalette = state.aiDataset ? "diverging" : null;
 
-  $("resolution").value = CONFIG.DEFAULT_RESOLUTION;
-  $("resolution-value").value = CONFIG.DEFAULT_RESOLUTION;
   $("fixed-color").value = "#6c5ce7";
   $("fixed-color-value").textContent = "#6C5CE7";
   $("opacity").value = .72;
@@ -1327,33 +1224,13 @@ async function resetConfiguration() {
   $("road-line-opacity").value = DEFAULT_ROAD_DISPLAY_STYLE.opacity;
   $("road-line-opacity-value").value = "100%";
   $("road-show-legend").checked = DEFAULT_ROAD_DISPLAY_STYLE.showLegend;
-  if (!state.chartConfig) syncPolygonPaletteControls();
+  syncPolygonPaletteControls();
   $("show-map-layers").checked = true;
   $("show-map-layers-status").textContent = "Đang bật";
   cellPopup?.remove();
   for (const id of ["show-map-lines"]) $(id).checked = true;
 
-  if (state.chartConfig) {
-    const defaultOption = state.chartOptions.find(option => option.id === state.mapType);
-    if (defaultOption) {
-      const defaultSeries = Array.isArray(defaultOption.config.series)
-        ? defaultOption.config.series.map(item => ({ ...item }))
-        : [];
-      const chartStyle = defaultOption.config.chartKind === "pie" ? state.pieStyle : state.barStyle;
-      state.chartConfig = { ...defaultOption.config, ...chartStyle, series: defaultSeries };
-      state.chartMapping = {
-        datasetPath: defaultOption.config.sourcePath,
-        xField: defaultOption.config.xField,
-        metrics: defaultSeries.map(item => item.key)
-      };
-      state.mappingWarning = "";
-    } else {
-      state.chartConfig = { ...state.chartConfig, ...state.barStyle };
-    }
-    renderChartCanvas();
-    renderChartDataMapping();
-    renderChartStyleControls();
-  } else if (state.mapType === "point") {
+  if (state.mapType === "point") {
     if (state.aiDataset) state.aiDataset.pointColorOverrides = Object.create(null);
     refreshPointStyle(); renderPointStyleControls();
   } else if (activeRoadSuggestion()) {
@@ -1361,7 +1238,7 @@ async function resetConfiguration() {
     state.aiDataset.roadStyle = aiLineStyle(state.lineData, suggestion);
     renderRoadStyleControls();
   } else if (state.boundary) {
-    await rebuildGrid();
+    await refreshBoundary();
   }
 
   applyStyle();
@@ -1375,146 +1252,8 @@ function deleteData() {
   state.query = "";
   $("table-search").value = "";
   $("coordinate-input").value = "";
-  $("cell-count").textContent = "0";
-  $("cell-label").textContent = `Tổng số cell (res ${state.resolution})`;
   applyMapLayerVisibility();
   updateDashboard();
-}
-
-function renderChartStyleControls() {
-  if (!state.chartConfig) return;
-  if (state.chartConfig.chartKind === "pie") {
-    clearBarStylePanel($("bar-style-controls"));
-    $("style-description").textContent = "Dữ liệu, kích thước hình tròn, màu sắc, nhãn và chú giải";
-    renderPieStylePanel($("bar-style-controls"), {
-      config: { ...state.pieStyle, variant: state.chartConfig.variant },
-      rowCount: state.chartConfig.data.length,
-      series: state.chartConfig.series,
-      onChange(nextConfig) {
-        state.pieStyle = mergePieConfig(nextConfig);
-        state.chartConfig = { ...state.chartConfig, ...state.pieStyle };
-        renderChartCanvas();
-        renderChartStyleControls();
-      },
-      onSeriesChange(index, color) {
-        state.chartConfig = {
-          ...state.chartConfig,
-          series: state.chartConfig.series.map((item, itemIndex) => itemIndex === index ? { ...item, color } : item)
-        };
-        renderChartCanvas();
-        renderChartStyleControls();
-      }
-    });
-    return;
-  }
-  clearPieStylePanel($("bar-style-controls"));
-  const activeAiSuggestion = state.aiDataset?.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
-  const isAiBar = activeAiSuggestion?.chartType === "bar" && state.chartConfig.chartKind === "bar";
-  const panelConfig = isAiBar
-    ? { ...state.barStyle, limit: state.aiDataset.barLimits?.[activeAiSuggestion.id] ?? defaultBarLimit(activeAiSuggestion, state.aiDataset.analysis.columns) }
-    : state.chartConfig.chartKind === "line"
-      ? { ...state.barStyle, showDataLabels: Boolean(state.chartConfig.showDataLabels) }
-      : state.barStyle;
-  $("style-description").textContent = state.chartConfig.chartKind === "line"
-    ? "Màu đường, nhãn, chú giải và tooltip"
-    : "Dữ liệu, màu sắc, kích thước cột, nhãn và trục";
-  renderBarStylePanel($("bar-style-controls"), {
-    config: panelConfig,
-    chartKind: state.chartConfig.chartKind || "bar",
-    rowCount: isAiBar ? state.aiDataset.activeChartOption?.totalCategories || state.chartConfig.data.length : state.chartConfig.data.length,
-    series: state.chartConfig.series,
-    onChange(nextConfig) {
-      state.barStyle = mergeBarConfig(nextConfig);
-      if (state.chartConfig.chartKind === "line") state.lineLabelsOn = Boolean(nextConfig.showDataLabels);
-      if (isAiBar && nextConfig.limit !== panelConfig.limit) {
-        state.aiDataset.barLimits[activeAiSuggestion.id] = nextConfig.limit;
-        activateAiChartSuggestion(activeAiSuggestion);
-        return;
-      }
-      state.chartConfig = { ...state.chartConfig, ...state.barStyle, ...(isAiBar ? { limit: "all" } : {}) };
-      renderChartCanvas();
-      renderChartStyleControls();
-    },
-    onSeriesChange(index, color) {
-      state.chartConfig = {
-        ...state.chartConfig,
-        series: state.chartConfig.series.map((item, itemIndex) => itemIndex === index ? { ...item, color } : item)
-      };
-      renderChartCanvas();
-      renderChartStyleControls();
-    }
-  });
-}
-
-function renderChartDataMapping() {
-  if (!state.chartAnalysis || !state.chartMapping || !state.chartConfig) return;
-  renderDataMappingPanel($("data-mapping-controls"), {
-    analysis: state.chartAnalysis,
-    ...state.chartMapping,
-    variant: state.chartConfig.variant,
-    warning: state.mappingWarning,
-    onChange: applyChartMappingChange,
-    onResetMetrics: resetDisplayedMetrics
-  });
-}
-
-function resetDisplayedMetrics() {
-  const dataset = state.chartAnalysis?.datasets.find(item => item.path === state.chartMapping?.datasetPath);
-  if (!dataset) return;
-  const variant = state.chartConfig?.variant;
-  applyChartMappingChange({ metrics: defaultMetricSelection(dataset, variant) });
-  showToast("Đã đặt lại chỉ số hiển thị.");
-}
-
-function applyChartMappingChange(change) {
-  let mapping = { ...state.chartMapping, ...change };
-  if (change.datasetPath) {
-    const nextDataset = state.chartAnalysis.datasets.find(dataset => dataset.path === change.datasetPath);
-    mapping = { datasetPath: nextDataset.path, xField: nextDataset.suggestedCategory, metrics: defaultMetricSelection(nextDataset, state.chartConfig.variant) };
-  }
-  state.chartMapping = mapping;
-  const dataset = state.chartAnalysis.datasets.find(item => item.path === mapping.datasetPath);
-  const validation = validateBarMapping(dataset, mapping, state.chartConfig.variant);
-  state.mappingWarning = validation.message;
-  if (validation.valid) {
-    const defaultSeries = state.chartConfig.chartKind === "line" ? lineSeriesFromFields(mapping.metrics) : state.chartConfig.chartKind === "pie" ? pieSeriesFromFields(mapping.metrics) : seriesFromFields(mapping.metrics);
-    const palette = state.chartConfig.chartKind === "line" ? LINE_COLORS : state.chartConfig.chartKind === "pie" ? PIE_COLORS : BAR_COLORS;
-    const series = reconcileSeriesColors(defaultSeries, state.chartConfig.series, palette);
-    state.chartConfig = {
-      ...state.chartConfig,
-      data: dataForBarMapping(dataset, mapping),
-      sourcePath: dataset.path,
-      xField: mapping.xField,
-      series,
-      title: state.chartConfig.variant === "line"
-        ? `Xu hướng theo ${humanizeField(mapping.xField).toLowerCase()}`
-        : state.chartConfig.chartKind === "pie"
-        ? mapping.metrics.length === 1
-          ? `${humanizeField(mapping.metrics[0])} theo ${humanizeField(mapping.xField).toLowerCase()}`
-          : `Cơ cấu các chỉ số theo ${humanizeField(mapping.xField).toLowerCase()}`
-        : state.chartConfig.variant === "single"
-        ? `${humanizeField(mapping.metrics[0])} theo ${humanizeField(mapping.xField).toLowerCase()}`
-        : `So sánh nhiều chỉ số · ${dataset.label}`
-    };
-    renderChartCanvas();
-    renderChartStyleControls();
-  }
-  renderChartDataMapping();
-}
-
-function showChartStyleControls(show) {
-  const isPoint = !show && state.mapType === "point";
-  const isRoad = !show && Boolean(activeRoadSuggestion());
-  $("map-style-controls").hidden = show || isPoint || isRoad;
-  $("point-style-controls").hidden = !isPoint;
-  $("road-style-controls").hidden = !isRoad;
-  $("bar-style-controls").hidden = !show;
-  $("style-description").textContent = show ? "Tùy chỉnh biểu đồ" : isRoad ? "Chú giải màu, độ dày và độ mờ tuyến" : "Màu sắc, độ mờ và đường viền";
-  if (show) renderChartStyleControls();
-  else {
-    clearBarStylePanel($("bar-style-controls"));
-    clearPieStylePanel($("bar-style-controls"));
-  }
 }
 
 function aiLineStyle(data, suggestion) {
@@ -1578,18 +1317,6 @@ async function analyzeTabularRecords(records, profile, { signal, source = null }
   return { kind: "ai-pipeline", pipeline: { ...pipeline, rawRecords: records, spatialData } };
 }
 
-async function parseSpreadsheetUpload(file, options) {
-  if (typeof parseSpreadsheetFile === "function") return parseSpreadsheetFile(file, options);
-  if (!globalThis.XLSX) throw new Error("Không tải được thư viện đọc bảng dữ liệu.");
-  const workbook = globalThis.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
-  const sheetNames = workbook.SheetNames || [];
-  if (!options.sheetName && sheetNames.length > 1) return { needsSheet: true, sheetNames };
-  if (options.sheetName && !sheetNames.includes(options.sheetName)) throw new Error(`Không tìm thấy bảng (sheet) "${options.sheetName}" trong file Excel. Hãy chọn lại bảng cần phân tích.`);
-  const selectedSheet = options.sheetName || sheetNames[0];
-  const records = globalThis.XLSX.utils.sheet_to_json(workbook.Sheets[selectedSheet], { defval: "", raw: true });
-  return { records, profile: typeof summarizeTabularData === "function" ? summarizeTabularData(records, { includeSamples: options.includeSamples }) : null };
-}
-
 async function readSpatialFile(file, { sheetName = null, signal } = {}) {
   if (options.preparsedResults?.has(file)) return options.preparsedResults.get(file);
   const extension = file.name.toLowerCase().split(".").pop();
@@ -1608,7 +1335,7 @@ async function readSpatialFile(file, { sheetName = null, signal } = {}) {
     throw new Error("Định dạng chưa hỗ trợ. Hãy chọn CSV, Excel, JSON, GeoJSON, TXT hoặc DOCX.");
   }
   if (["xlsx", "xls", "csv"].includes(extension)) {
-    const parsed = await parseSpreadsheetUpload(file, {
+    const parsed = await parseSpreadsheetFile(file, {
       extension,
       sheetName,
       includeSamples: Boolean($("ai-include-samples")?.checked),
@@ -1669,29 +1396,6 @@ function uniqueRecordValues(records, field) {
   return [...values.entries()];
 }
 
-function lineSelectionFor(dataset, suggestion) {
-  dataset.lineSelections ||= {};
-  return dataset.lineSelections[suggestion.id] ||= {
-    measure: null,
-    scope: suggestion.bindings.series ? "pick" : "all",
-    picked: [],
-    from: null,
-    to: null
-  };
-}
-
-function barSelectionFor(dataset, suggestion) {
-  dataset.barSelections ||= {};
-  return dataset.barSelections[suggestion.id] = normalizeBarSelection(suggestion, dataset.analysis.columns, dataset.barSelections[suggestion.id]);
-}
-
-function aiLineRegionField(dataset, suggestion) {
-  if (suggestion.bindings.series) return suggestion.bindings.series;
-  const columns = dataset.analysis.columns;
-  const geo = columns.find(column => column.role === "geo" && ["admin1", "admin2", "country"].includes(column.geoLevel));
-  return (geo || columns.find(column => column.role === "category"))?.name || null;
-}
-
 function mapMetricColumns(dataset, suggestion) {
   if (!dataset || !suggestion) return [];
   if (suggestion.chartType === "point") return pointModelFor(suggestion).measures;
@@ -1718,8 +1422,8 @@ function renderMapMetricControls() {
   if (!control) return;
   const dataset = state.aiDataset;
   const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-  const mapTypes = { choropleth: ["polygon", "h3"], hex_h3: ["h3"], map_line: ["line"], point: ["point"] };
-  const buttons = !state.chartConfig && mapTypes[suggestion?.chartType]?.includes(state.mapType) ? mapMetricButtons(dataset, suggestion) : [];
+  const mapTypes = { choropleth: ["polygon"], map_line: ["line"], point: ["point"] };
+  const buttons = mapTypes[suggestion?.chartType]?.includes(state.mapType) ? mapMetricButtons(dataset, suggestion) : [];
   control.hidden = buttons.length < 2;
   if (control.hidden) {
     $("map-metric-list").replaceChildren();
@@ -1764,7 +1468,7 @@ function renderMapMetricControls() {
 async function changeAiMapMetric(field) {
   const dataset = state.aiDataset;
   const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-  if (!suggestion || !["choropleth", "hex_h3", "map_line", "point"].includes(suggestion.chartType)
+  if (!suggestion || !["choropleth", "map_line", "point"].includes(suggestion.chartType)
     || !mapMetricColumns(dataset, suggestion).some(column => column.name === field)) return;
   if (suggestion.chartType === "point") {
     pointSelectionFor(suggestion).metricField = field;
@@ -1775,8 +1479,7 @@ async function changeAiMapMetric(field) {
     dataset.recommendation = recommendationForSuggestion(suggestion);
     for (const select of document.querySelectorAll("#ai-filter-controls .ai-metric-selector")) select.value = field;
     renderMapMetricControls();
-    if (suggestion.chartType === "hex_h3") await refreshAiH3();
-    else await filteredAiBoundary();
+    await filteredAiBoundary();
   }
 }
 
@@ -1893,7 +1596,7 @@ function recommendationForSuggestion(suggestion) {
   const columns = new Map(dataset.analysis.columns.map(column => [column.name, column]));
   const coordinateLine = isCoordinateLine(suggestion);
   const coordinateMap = coordinateLine || suggestion.chartType === "point";
-  const valueField = suggestion.bindings.value || (Array.isArray(suggestion.bindings.y) ? suggestion.bindings.y[0] : suggestion.bindings.y)
+  const valueField = suggestion.bindings.value
     || (coordinateMap ? dataset.analysis.columns.find(column => column.role === "measure" && ![suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x].includes(column.name))?.name : null) || null;
   const regionField = suggestion.bindings.region;
   const region = columns.get(regionField);
@@ -1903,7 +1606,7 @@ function recommendationForSuggestion(suggestion) {
   const timeFilter = coordinateLine ? null : defaultTimeFilter(dataset.records, dataset.analysis.columns, suggestion.chartType);
   return {
     canRenderMap: true,
-    visualization: suggestion.chartType === "map_line" ? "line" : suggestion.chartType === "choropleth" ? "polygon" : suggestion.chartType === "point" ? "point" : "h3",
+    visualization: suggestion.chartType === "map_line" ? "line" : suggestion.chartType === "choropleth" ? "polygon" : "point",
     geometry: coordinateMap ? { field: regionField || null, latField: suggestion.bindings.lat, lngField: suggestion.bindings.lng, provider: "coordinates", placeType: coordinateLine ? "line" : "point" } : regionField
       ? { field: regionField, provider: suggestion.chartType === "map_line" ? "local-roads" : "maptiler",
         placeType: region?.geoLevel === "country" ? "country" : region?.geoLevel === "admin2" ? "county" : "region",
@@ -1941,10 +1644,7 @@ function createAiSuggestionButton(suggestion) {
   button.dataset.type = suggestion.id;
   button.disabled = !suggestion.available && !suggestion.repairable;
   button.title = suggestion.available ? suggestion.reason : suggestion.repairable ? `${suggestion.unavailableReason} Bấm để sửa alias.` : suggestion.unavailableReason;
-  if (["choropleth", "point", "hex_h3", "map_line", "arc_flow"].includes(suggestion.chartType)) {
-    renderMapIcon(icon, AI_CHART_REGISTRY[suggestion.chartType].icon);
-  }
-  else renderChartIcon(icon, suggestion.chartType === "line" ? "line" : "singleBar");
+  renderMapIcon(icon, AI_CHART_REGISTRY[suggestion.chartType].icon);
   title.className = "ai-suggestion-title"; title.textContent = AI_CHART_REGISTRY[suggestion.chartType].label;
   reason.className = "ai-suggestion-reason"; reason.textContent = suggestion.available ? suggestion.reason : suggestion.unavailableReason;
   score.className = "ai-suggestion-score"; score.textContent = `${Math.round(suggestion.effectiveConfidence * 100)}%${suggestion.effectiveConfidence < .6 ? " ⚠" : ""}`;
@@ -1969,7 +1669,7 @@ function renderAiSuggestionGrid() {
   showSupportedChartCatalog(false);
 }
 
-function clearMapForAiChart() {
+function clearMapData() {
   closeMapPopup();
   state.boundary = null; state.sourceBoundary = null; state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = EMPTY_FEATURE_COLLECTION;
   state.lineData = EMPTY_FEATURE_COLLECTION;
@@ -2182,187 +1882,6 @@ function changeMapPopupControl(control) {
   refreshMapPopupControls();
 }
 
-function buildAiSeriesPicker(option) {
-  const box = document.createElement("div");
-  box.className = "ai-series-picker";
-  const search = Object.assign(document.createElement("input"), {
-    type: "search",
-    className: "ai-series-search",
-    placeholder: "Tìm…"
-  });
-  const counter = document.createElement("span");
-  counter.dataset.role = "series-count";
-  counter.textContent = `${option.selectedSeries.length}/${option.maxSeries}`;
-  const reset = Object.assign(document.createElement("button"), {
-    type: "button",
-    className: "ai-series-reset secondary-button",
-    textContent: "Đặt lại (top 5)"
-  });
-  const head = document.createElement("div");
-  head.className = "ai-series-head";
-  head.append(counter, reset);
-  const list = document.createElement("div");
-  list.className = "ai-series-list";
-  list.replaceChildren(...option.availableSeries.map(item => {
-    const row = document.createElement("label");
-    const input = document.createElement("input");
-    const text = document.createElement("span");
-    input.type = "checkbox";
-    input.className = "ai-series-filter";
-    input.value = item.key;
-    input.checked = option.selectedSeries.includes(item.key);
-    text.textContent = item.label;
-    row.append(input, text);
-    return row;
-  }));
-  box.append(search, head, list);
-  return box;
-}
-
-function populateAiLineSelection(option, suggestion) {
-  const dataset = state.aiDataset;
-  const sel = lineSelectionFor(dataset, suggestion);
-  const columns = new Map(dataset.analysis.columns.map(column => [column.name, column]));
-  const labelOf = name => columns.get(name)?.labelVi || humanizeField(name);
-  const nodes = [];
-  if (option.availableMeasures.length > 1) {
-    nodes.push(aiField("Chỉ số", aiSelect(
-      "ai-line-measure-selector",
-      option.availableMeasures.map(item => [item.key, item.label]),
-      option.activeMeasure
-    )));
-  }
-  const regionField = aiLineRegionField(dataset, suggestion);
-  if (regionField) {
-    const regionLabel = labelOf(regionField);
-    nodes.push(aiField(regionLabel, aiSelect("ai-line-scope", [
-      ["all", `Gộp tất cả ${regionLabel.toLowerCase()}`],
-      ["pick", `Chọn từng ${regionLabel.toLowerCase()}`]
-    ], sel.scope)));
-    if (sel.scope === "pick") nodes.push(buildAiSeriesPicker(option));
-  }
-  const time = dataset.analysis.columns.find(column => column.name === suggestion.bindings.x && column.role === "time");
-  const times = time ? uniqueTimeValues(dataset.records, time) : [];
-  if (times.length > 1) {
-    const hasTime = times.some(value => value instanceof Date && !value.toISOString().endsWith("T00:00:00.000Z"));
-    const choices = times.map(value => [comparableFilterValue(value), formatTimeValue(value, time, hasTime)]);
-    const from = aiSelect("ai-line-range", choices, sel.from ?? choices[0][0]);
-    const to = aiSelect("ai-line-range", choices, sel.to ?? choices.at(-1)[0]);
-    from.dataset.edge = "from";
-    to.dataset.edge = "to";
-    nodes.push(aiField(`${labelOf(time.name)} từ`, from), aiField("đến", to));
-  }
-  $("ai-filter-controls").replaceChildren(...nodes);
-  $("ai-data-filters").hidden = nodes.length === 0;
-}
-
-function syncAiLineSelection(option) {
-  const selected = new Set(option.selectedSeries);
-  document.querySelectorAll("#ai-filter-controls .ai-series-filter").forEach(input => {
-    input.checked = selected.has(input.value);
-  });
-  const counter = document.querySelector("#ai-filter-controls [data-role='series-count']");
-  if (counter) counter.textContent = `${option.selectedSeries.length}/${option.maxSeries}`;
-}
-
-function populateAiBarMetric(suggestion) {
-  const controls = $("ai-filter-controls");
-  const dataset = state.aiDataset;
-  const selection = barSelectionFor(dataset, suggestion);
-  const choices = barMetricOptions(dataset.analysis.columns);
-  controls.replaceChildren();
-  const typeField = document.createElement("div");
-  const typeCaption = document.createElement("span");
-  const typeOptions = document.createElement("div");
-  typeField.className = "ai-control-group"; typeCaption.textContent = "Hình thức hiển thị"; typeOptions.className = "ai-bar-chart-types";
-  for (const item of [
-    { variant: "single", label: "Cột đơn", icon: "singleBar" },
-    { variant: "grouped", label: "Cột ghép", icon: "groupedBar" }
-  ]) {
-    const button = document.createElement("button"); const icon = document.createElement("span"); const text = document.createElement("span");
-    button.type = "button"; button.className = `ai-bar-chart-type${selection.variant === item.variant ? " active" : ""}`;
-    button.dataset.barVariant = item.variant; button.setAttribute("aria-pressed", String(selection.variant === item.variant));
-    button.disabled = item.variant === "grouped" && defaultBarMetrics(suggestion, dataset.analysis.columns, "grouped").length < 2;
-    renderChartIcon(icon, item.icon); text.textContent = item.label; button.append(icon, text); typeOptions.append(button);
-  }
-  typeField.append(typeCaption, typeOptions);
-
-  let metricControl;
-  if (selection.variant === "single") {
-    const select = keepSelectOpenAfterMouseClick(document.createElement("select"));
-    select.className = "ai-chart-metric-selector"; select.setAttribute("aria-label", "Chọn chỉ số cho biểu đồ cột");
-    select.replaceChildren(...choices.map(item => Object.assign(document.createElement("option"), { value: item.key, textContent: item.label })));
-    select.value = selection.metrics[0];
-    metricControl = select;
-  } else {
-    const picker = document.createElement("div"); const head = document.createElement("div"); const list = document.createElement("div");
-    picker.className = "ai-bar-metric-picker"; head.className = "ai-bar-metric-head"; list.className = "ai-bar-metric-list";
-    head.textContent = `${selection.metrics.length} đã chọn · Tối thiểu 2`;
-    list.replaceChildren(...choices.map(item => {
-      const row = document.createElement("label"); const input = document.createElement("input"); const text = document.createElement("span");
-      input.type = "checkbox"; input.className = "ai-bar-metric-checkbox"; input.value = item.key; input.checked = selection.metrics.includes(item.key);
-      text.textContent = item.label; row.append(input, text); return row;
-    }));
-    picker.append(head, list); metricControl = picker;
-  }
-  const metricField = document.createElement("div"); const metricCaption = document.createElement("span");
-  metricField.className = "ai-control-group"; metricCaption.textContent = "Chỉ số"; metricField.append(metricCaption, metricControl);
-  const aggregationControl = aiSelect("ai-bar-aggregation-selector", [
-    ["auto", "Theo từng chỉ số"],
-    ["sum", "Tổng (SUM)"],
-    ["mean", "Trung bình (AVG)"],
-    ["min", "Nhỏ nhất (MIN)"],
-    ["max", "Lớn nhất (MAX)"]
-  ], selection.aggregation);
-  aggregationControl.disabled = selection.metrics.every(metric => metric === "count");
-  if (aggregationControl.disabled) aggregationControl.title = "Số bản ghi luôn đếm số dòng dữ liệu.";
-  controls.append(typeField, metricField, aiField("Cách tính giá trị", aggregationControl));
-  $("ai-data-filters").hidden = false;
-}
-
-function activateAiChartSuggestion(suggestion, { rebuildControls = true } = {}) {
-  const dataset = state.aiDataset;
-  const isLine = suggestion.chartType === "line";
-  const sel = isLine ? lineSelectionFor(dataset, suggestion) : null;
-  const regionField = isLine ? aiLineRegionField(dataset, suggestion) : null;
-  const time = isLine ? dataset.analysis.columns.find(column => column.name === suggestion.bindings.x && column.role === "time") : null;
-  const records = isLine && time && sel.from && sel.to
-    ? filterTimeRange(dataset.records, time, sel.from, sel.to)
-    : dataset.records;
-  const top = suggestion.chartType === "bar" ? dataset.barLimits?.[suggestion.id] ?? defaultBarLimit(suggestion, dataset.analysis.columns) : undefined;
-  const barSelection = suggestion.chartType === "bar" ? barSelectionFor(dataset, suggestion) : null;
-  const lineOptions = isLine ? {
-    measure: sel.measure,
-    seriesField: !regionField || sel.scope === "all" ? null : regionField,
-    selectedSeries: sel.scope === "pick" && sel.picked.length ? sel.picked : null,
-    scopeLabel: regionField && sel.scope === "all"
-      ? `${uniqueRecordValues(dataset.records, regionField).length} ${(dataset.analysis.columns.find(column => column.name === regionField)?.labelVi || humanizeField(regionField)).toLowerCase()}`
-      : ""
-  } : {};
-  const option = chartOptionForSuggestion(suggestion, records, dataset.analysis.columns, {
-    top,
-    ...(barSelection ? { variant: barSelection.variant, metrics: barSelection.metrics, aggregation: barSelection.aggregation } : {}),
-    ...lineOptions
-  });
-  if (!option?.config?.data?.length) throw new Error("Không còn dữ liệu hợp lệ để dựng biểu đồ.");
-  dataset.activeChartOption = option;
-  clearMapForAiChart();
-  state.mapType = suggestion.id; state.chartMapping = null; state.mappingWarning = "";
-  const chartStyle = option.config.chartKind === "pie" ? state.pieStyle : state.barStyle;
-  // line dùng chung barStyle nhưng nhãn số mặc định tắt; chỉ bật khi người dùng tự bật
-  const lineOverrides = option.config.chartKind === "line" ? { showDataLabels: state.lineLabelsOn ?? false } : {};
-  state.chartConfig = { ...option.config, ...chartStyle, ...lineOverrides, ...(suggestion.chartType === "bar" ? { limit: "all" } : {}) };
-  $("chart-canvas").hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
-  setDataPanelVisible(false); showChartStyleControls(true); renderChartCanvas();
-  if (isLine) {
-    if (rebuildControls) populateAiLineSelection(option, suggestion);
-    else syncAiLineSelection(option);
-  }
-  else populateAiBarMetric(suggestion);
-  updateModelSections(); renderAiSuggestionGrid();
-  setStatus(`Đang hiển thị ${suggestion.title}.`, true);
-}
-
 function renderGeoRepair(unmatched = []) {
   const controls = $("ai-filter-controls");
   const previous = controls.querySelector(".geo-repair");
@@ -2412,7 +1931,7 @@ function renderGeoRepair(unmatched = []) {
 }
 
 function activePointSuggestion() {
-  if (state.mapType !== "point" || state.chartConfig) return null;
+  if (state.mapType !== "point") return null;
   const dataset = state.aiDataset;
   const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
   return suggestion?.chartType === "point" ? suggestion : null;
@@ -2608,7 +2127,7 @@ function refreshPointView(suggestion, { rebuildControls = false } = {}) {
 function activeRoadSuggestion() {
   const dataset = state.aiDataset;
   const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-  return state.mapType === "line" && !state.chartConfig && suggestion?.chartType === "map_line" ? suggestion : null;
+  return state.mapType === "line" && suggestion?.chartType === "map_line" ? suggestion : null;
 }
 
 function renderRoadLegend() {
@@ -2743,16 +2262,14 @@ async function activateAiRoadMap(suggestion) {
   const dataset = state.aiDataset;
   dataset.recommendation = recommendationForSuggestion(suggestion);
   populateAiFilters(dataset);
-  state.chartConfig = null; state.chartMapping = null; state.mappingWarning = "";
-  clearChartCanvas(); clearMapForAiChart();
+
+  clearMapData();
   state.mapType = "line"; state.dataProfile = null;
   $("show-map-lines").checked = true;
-  $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
-  setDataPanelVisible(false); showChartStyleControls(false);
-  renderAiSuggestionGrid();
+  setDataPanelVisible(false); renderAiSuggestionGrid();
   map.resize();
   if (isCoordinateLine(suggestion)) {
-    cancelAiBoundaryLoad(); refreshAiCoordinateLine({ fit: true }); return true;
+  cancelAiBoundaryLoad(); refreshAiCoordinateLine({ fit: true }); return true;
   }
   return loadAiRoadNetwork({ fit: true });
 }
@@ -2762,57 +2279,10 @@ function activateAiPoint(suggestion) {
   const dataset = state.aiDataset;
   const firstActivation = !dataset.pointSelections?.[suggestion.id];
   dataset.recommendation = recommendationForSuggestion(suggestion);
-  state.chartConfig = null; state.chartMapping = null; state.mappingWarning = "";
-  clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
-  setDataPanelVisible(false); showChartStyleControls(false);
-  refreshPointView(suggestion, { rebuildControls: true });
+
+  setDataPanelVisible(false); refreshPointView(suggestion, { rebuildControls: true });
   renderAiSuggestionGrid();
   if (firstActivation) fitGeoJSON(pointModelFor(suggestion).data);
-  return true;
-}
-
-async function refreshAiH3({ fit = false } = {}) {
-  const dataset = state.aiDataset; const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-  if (!dataset || suggestion?.chartType !== "hex_h3") return;
-  const filters = selectedAiFilters(); dataset.filters = filters;
-  const records = applyPipelineFilters(dataset.records, filters);
-  const aggregation = resolveAggregation(suggestion, dataset.analysis.columns);
-  const result = recordsToAggregatedH3(records, {
-    latField: suggestion.bindings.lat,
-    lngField: suggestion.bindings.lng,
-    valueField: suggestion.bindings.value,
-    aggregation,
-    resolution: state.resolution,
-    columns: dataset.analysis.columns
-  });
-  if (result.stats.coordinateRate < .7 || result.stats.cellCount < 2) throw new Error("Không đủ tọa độ hợp lệ để tạo ít nhất hai ô H3.");
-  dataset.spatialData = {
-    type: "FeatureCollection",
-    features: records.flatMap(record => {
-      const pair = coordinatePair(record, suggestion.bindings);
-      return pair ? [{ type: "Feature", properties: { ...record }, geometry: { type: "Point", coordinates: pair } }] : [];
-    })
-  };
-  state.h3Data = result.data; state.pointData = dataset.spatialData || EMPTY_FEATURE_COLLECTION;
-  state.boundary = state.pointData; state.sourceBoundary = state.pointData; state.mapType = "h3";
-  state.dataProfile = analyzeSpatialData(result.data, { numericFields: [suggestion.bindings.value].filter(Boolean) });
-  map.getSource("h3-grid")?.setData(result.data); map.getSource("point-data")?.setData(state.pointData);
-  map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
-  $("cell-count").textContent = result.stats.cellCount.toLocaleString("vi-VN"); $("cell-label").textContent = `Tổng số cell (res ${state.resolution})`;
-  updateModelSections(); syncPolygonPaletteControls(); applyStyle(); updateDashboard();
-  if (fit) fitGeoJSON(state.pointData);
-  setCurrentFileNote(`${result.stats.cellCount} ô H3 · ${Math.round(result.stats.coordinateRate * 100)}% tọa độ hợp lệ`);
-}
-
-async function activateAiH3(suggestion) {
-  cancelAiBoundaryLoad();
-  const dataset = state.aiDataset;
-  dataset.recommendation = recommendationForSuggestion(suggestion);
-  populateAiFilters(dataset);
-  state.chartConfig = null; state.chartMapping = null; clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode"); showChartStyleControls(false);
-  state.polygonPalette = state.polygonPalette || "viridis";
-  await refreshAiH3({ fit: true }); renderAiSuggestionGrid();
-  setStatus(`Đã tạo ${suggestion.title}.`, true);
   return true;
 }
 
@@ -2821,7 +2291,7 @@ async function selectAiSuggestion(id) {
   if (!suggestion) return false;
   if (state.aiDataset.selectedSuggestionId !== id) closeMapPopup();
   if (!suggestion.available && suggestion.repairable) {
-    cancelAiBoundaryLoad();
+  cancelAiBoundaryLoad();
     state.aiDataset.selectedSuggestionId = id;
     state.aiDataset.recommendation = recommendationForSuggestion(suggestion);
     populateAiFilters(state.aiDataset);
@@ -2833,30 +2303,22 @@ async function selectAiSuggestion(id) {
   if (!suggestion.available) return false;
   state.aiDataset.selectedSuggestionId = id;
   if (suggestion.chartType === "arc_flow") {
-    cancelAiBoundaryLoad(); clearChartCanvas();
-    $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode"); showChartStyleControls(false);
-    map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
+  cancelAiBoundaryLoad(); map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
     const activated = await arcFlow.activate(suggestion);
     updateModelSections(); applyMapLayerVisibility(); renderAiSuggestionGrid(); updateDashboard();
     return activated;
   }
   if (state.aiDataset.nativeGeometry) { activateNativeMap(suggestion); return true; }
-  if (["bar", "line"].includes(suggestion.chartType)) {
-    cancelAiBoundaryLoad();
-    activateAiChartSuggestion(suggestion);
-    return true;
-  }
   if (suggestion.chartType === "point") return activateAiPoint(suggestion);
   if (suggestion.chartType === "map_line") return activateAiRoadMap(suggestion);
   if (suggestion.chartType === "choropleth") return activateAiChoropleth(suggestion);
-  return activateAiH3(suggestion);
+  return false;
 }
 
 async function filteredAiBoundary({ fit = false } = {}) {
   if (!state.aiDataset) return;
   if (state.aiDataset.nativeGeometry) return refreshNativeMap({ fit });
   const selected = state.aiDataset.suggestions?.find(item => item.id === state.aiDataset.selectedSuggestionId);
-  if (selected?.chartType === "hex_h3") return refreshAiH3({ fit });
   if (selected?.chartType === "map_line") return refreshAiRoadMap({ fit });
   if (selected?.chartType !== "choropleth") return;
   const { records, boundaries, recommendation } = state.aiDataset;
@@ -2871,7 +2333,7 @@ async function filteredAiBoundary({ fit = false } = {}) {
     : collapseCountryFeatures(searchBoundary, recommendation.geometry.field);
   state.aiDataset.searchBoundary = categorical ? joined : recommendation.metricField ? searchBoundary : data;
   state.boundary = data; state.sourceBoundary = data;
-  state.baselineCount = null;
+
   const numericFields = [recommendation.metricField, ...recommendation.numericFields].filter((field, index, fields) => recommendation.numericFields.includes(field) && fields.indexOf(field) === index);
   state.dataProfile = analyzeSpatialData(data, { numericFields, hasArea: true });
   const polygonData = { ...data, features: data.features.filter(feature => feature.properties?.__geographic_scope !== "marker") };
@@ -2880,7 +2342,7 @@ async function filteredAiBoundary({ fit = false } = {}) {
   map.getSource("polygon-data")?.setData(polygonData);
   map.getSource("vietnam-boundary")?.setData(polygonData);
   map.getSource("scope-marker-data")?.setData(scopeData);
-  if (state.mapType === "h3" || isRegionHexMode()) await rebuildGrid({ fit });
+  if (isRegionHexMode()) await refreshBoundary({ fit });
   else {
     syncPolygonPaletteControls(); applyStyle();
     if (fit && data.features.length) fitBoundary();
@@ -2955,8 +2417,7 @@ async function activateAiChoropleth(suggestion) {
     suggestion.repairable = resolvedBoundaries.unmatched.length > 0;
     suggestion.geoUnmatched = resolvedBoundaries.unmatched;
     suggestion.unavailableReason = `Chỉ khớp ${boundaries.features.length}/${locations.length} địa danh (${Math.round(resolvedBoundaries.matchRate * 100)}%). Hãy sửa tên hoặc chọn vùng chưa khớp.`;
-    clearMapForAiChart(); clearChartCanvas(); state.chartConfig = null; state.mapType = null;
-    $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
+    clearMapData(); state.mapType = null;
     updateModelSections(); renderAiSuggestionGrid();
     setStatus(suggestion.unavailableReason, true);
     return false;
@@ -2976,21 +2437,13 @@ async function activateAiChoropleth(suggestion) {
   return true;
 }
 
-async function replaceAiMapData(records, recommendation, name) {
-  const profile = { rowCount: records.length, columns: recommendation.numericFields.map(field => ({ name: field, inferredType: "number" })) };
-  const pipeline = await requestAiDataAnalysis(records, { profile, source: { fileName: name } });
-  return replaceAiPipelineData({ ...pipeline, rawRecords: records }, name);
-}
-
 async function replaceAiPipelineData(pipeline, name) {
-  clearAiMapState(); clearChartCanvas();
-  state.chartConfig = null; state.chartMapping = null; state.mappingWarning = ""; state.activeChartKind = null;
-  state.mapType = null; state.dataProfile = null;
+  clearAiMapState(); state.mapType = null; state.dataProfile = null;
   state.dataOrigin = "ai"; state.boundary = null; state.sourceBoundary = null; state.h3Data = EMPTY_FEATURE_COLLECTION; state.pointData = EMPTY_FEATURE_COLLECTION;
   map.getSource("h3-grid")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("point-data")?.setData(EMPTY_FEATURE_COLLECTION);
   map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
-  state.chartAnalysis = null; state.chartOptions = [];
-  const suggestions = prepareSuggestions(pipeline.analysis, pipeline.records, pipeline.validRowRate, { mapOnly: true });
+
+  const suggestions = prepareSuggestions(pipeline.analysis, pipeline.records, pipeline.validRowRate);
   state.aiDataset = {
     ...pipeline,
     fileName: name,
@@ -3000,17 +2453,12 @@ async function replaceAiPipelineData(pipeline, name) {
     selectedSuggestionId: null,
     geoAliases: {},
     geoSelections: {},
-    lineSelections: {},
-    barSelections: {},
-    barLimits: {},
     popupSelections: {},
     recommendation: null,
     boundaries: null
   };
   showCurrentFile(name, `${pipeline.records.length.toLocaleString("vi-VN")} bản ghi · ${pipeline.analysis.source === "ai" ? "AI đã phân tích" : "AI chưa phân tích được dữ liệu"}`);
-  $("chart-canvas").hidden = true;
-  document.querySelector(".map-panel").classList.remove("chart-mode"); setDataPanelVisible(false); showChartStyleControls(false);
-  renderAiSuggestionGrid();
+  setDataPanelVisible(false); renderAiSuggestionGrid();
   let selected = false;
   const visibleSuggestions = mapDisplaySuggestions(suggestions);
   const initialSuggestions = visibleSuggestions;
@@ -3025,73 +2473,26 @@ async function replaceAiPipelineData(pipeline, name) {
   }
 }
 
-function selectChartOption(type) {
-  const option = state.chartOptions.find(item => item.id === type);
-  if (!option) return false;
-  if (state.aiDataset) {
-    state.aiDataset.selectedSuggestionId = null;
-    $("ai-filter-controls").replaceChildren(); $("ai-data-filters").hidden = true;
-  }
-  const chartStyle = option.config.chartKind === "pie" ? state.pieStyle : state.barStyle;
-  const lineOverrides = option.config.chartKind === "line" ? { showDataLabels: state.lineLabelsOn ?? false } : {};
-  state.mapType = option.id; state.chartConfig = { ...option.config, ...chartStyle, ...lineOverrides };
-  state.chartMapping = { datasetPath: option.config.sourcePath, xField: option.config.xField, metrics: option.config.series.map(item => item.key) };
-  state.mappingWarning = "";
-  document.querySelectorAll("#map-type-grid .map-type").forEach(button => button.classList.toggle("active", button.dataset.type === type));
-  renderChartCanvas(); renderChartDataMapping(); renderChartStyleControls();
-  updateModelSections();
-  if (state.aiDataset) renderAiSuggestionGrid();
-  setStatus(`Đang hiển thị kiểu ${option.label}.`, true);
-  return true;
-}
-
-function replaceChartData(analysis, name) {
-  clearAiMapState();
-  state.dataOrigin = "upload";
-  const primaryDataset = analysis.datasets.find(dataset => dataset.path === analysis.sourcePath) || analysis.datasets[0];
-  const lineOption = createLineOption(primaryDataset, analysis.titlePrefix);
-  const pieOptions = createPieOptions(primaryDataset, `Cơ cấu các chỉ số · ${analysis.titlePrefix}`);
-  const options = [...analysis.options, ...(lineOption ? [lineOption] : []), ...pieOptions];
-  state.chartAnalysis = { ...analysis, options }; state.chartOptions = options; state.boundary = null; state.sourceBoundary = null; state.dataProfile = null;
-  state.h3Data = { type: "FeatureCollection", features: [] }; state.pointData = { type: "FeatureCollection", features: [] };
-  map.getSource("h3-grid")?.setData(state.h3Data); map.getSource("point-data")?.setData(state.pointData); map.getSource("vietnam-boundary")?.setData(EMPTY_FEATURE_COLLECTION);
-  map.getSource("polygon-data")?.setData(EMPTY_FEATURE_COLLECTION);
-  setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
-  showSupportedChartCatalog(false);
-  $("map-type-grid").className = "map-type-grid";
-  $("map-type-grid").replaceChildren(...options.map(option => {
-    const button = document.createElement("button"); const icon = document.createElement("span");
-    button.type = "button"; button.className = "map-type"; button.dataset.type = option.id; button.dataset.label = option.label;
-    button.title = `${option.label} · Recharts`; renderChartIcon(icon, option.icon); button.append(icon, option.label); return button;
-  }));
-  $("map-type-summary").textContent = `Tìm thấy ${analysis.rowCount} bản ghi tại ${analysis.sourcePath} · ${analysis.numericFields.length} trường số · ${options.length} kiểu biểu đồ phù hợp`;
-  showCurrentFile(name, "Dữ liệu biểu đồ đã tải · đang sử dụng");
-  const canvas = $("chart-canvas"); canvas.hidden = false; document.querySelector(".map-panel").classList.add("chart-mode");
-  setDataPanelVisible(false); showChartStyleControls(true); selectChartOption(options[0].id);
-}
 async function replaceBoundary(data, name, profile = null, { preservePolygons = false, preserveAi = false } = {}) {
   regionHexBuildRevision += 1;
   state.regionHexEnabled = false; state.regionHexResolution = CONFIG.DEFAULT_RESOLUTION;
   $("region-hex-note").textContent = "";
   if (!preserveAi) clearAiMapState();
-  state.chartConfig = null; state.chartOptions = []; state.chartAnalysis = null; state.chartMapping = null; state.mappingWarning = ""; clearDataMappingPanel($("data-mapping-controls")); clearChartCanvas(); $("chart-canvas").hidden = true; document.querySelector(".map-panel").classList.remove("chart-mode");
-  showChartStyleControls(false);
   if (!data) throw new Error("Không tìm thấy dữ liệu.");
   state.dataOrigin = "upload";
   if (preservePolygons) state.mapType = "polygon";
-  else geoJSONToCells(data, Math.min(state.resolution, 3));
   state.sourceBoundary = data; state.boundary = data;
   setupProvinceFilter(preserveAi ? EMPTY_FEATURE_COLLECTION : data);
   renderCompatibleMapTypes(data, profile || analyzeSpatialData(data));
-  state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData); applyHeatmapWeight();
+  state.pointData = pointFeatureCollection(data); map.getSource("point-data")?.setData(state.pointData);
   const features = data.type === "FeatureCollection" ? data.features : data.type === "Feature" ? [data] : [{ type: "Feature", properties: {}, geometry: data }];
   state.lineData = { type: "FeatureCollection", features: features.filter(feature => ["LineString", "MultiLineString"].includes(feature.geometry?.type)) };
   map.getSource("line-data")?.setData(state.lineData);
   map.getSource("polygon-data")?.setData(data); updateModelSections();
-  map.getSource("vietnam-boundary")?.setData(data); showCurrentFile(name, "Dữ liệu đã tải · đang sử dụng"); state.baselineCount = null;
+  map.getSource("vietnam-boundary")?.setData(data); showCurrentFile(name, "Dữ liệu đã tải · đang sử dụng");
   if (preservePolygons) {
     state.h3Data = EMPTY_FEATURE_COLLECTION; map.getSource("h3-grid")?.setData(state.h3Data); updateDashboard(); fitBoundary();
-  } else await rebuildGrid({ fit: true });
+  } else await refreshBoundary({ fit: true });
   refreshClippedUploadLayers();
   applyStyle();
 }
@@ -3099,9 +2500,8 @@ async function replaceBoundary(data, name, profile = null, { preservePolygons = 
 // Search follows the active filters and retains regions with a missing color metric.
 function currentDataSearch() {
   if (state.mapType === "arc_flow") return arcFlow.searchData();
-  if (!state.mapType || state.chartConfig || !state.aiDataset && !state.dataProfile) { return {}; }
-  const suggestion = activeMapPopupSuggestion()
-    || state.aiDataset?.suggestions.find(item => item.id === state.aiDataset.selectedSuggestionId && item.chartType === "hex_h3");
+  if (!state.mapType || !state.aiDataset && !state.dataProfile) { return {}; }
+  const suggestion = activeMapPopupSuggestion();
   const dataset = state.aiDataset;
   const data = state.mapType === "point" ? state.pointData
     : state.mapType === "line" ? state.lineData
@@ -3157,8 +2557,6 @@ async function applyReadResult(result, file) {
     }
   }
   if (result.kind === "ai-pipeline") await replaceAiPipelineData(result.pipeline, file.name);
-  else if (result.kind === "ai-map") await replaceAiMapData(result.records, result.recommendation, file.name);
-  else if (result.kind === "chart") replaceChartData(result.analysis, file.name);
   else throw new Error("Chưa có kết quả phân tích AI cho dữ liệu này.");
   renderUploadedFiles();
 }
@@ -3420,86 +2818,8 @@ function bindUI() {
       refreshPointView(suggestion, { rebuildControls });
       return;
     }
-    const activeLine = () => {
-      const dataset = state.aiDataset;
-      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-      return suggestion?.chartType === "line" ? suggestion : null;
-    };
-    if (event.target.matches(".ai-bar-aggregation-selector")) {
-      const dataset = state.aiDataset;
-      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-      if (suggestion?.chartType !== "bar" || !["auto", "sum", "mean", "min", "max"].includes(event.target.value)) return;
-      barSelectionFor(dataset, suggestion).aggregation = event.target.value;
-      activateAiChartSuggestion(suggestion);
-      return;
-    }
-    if (event.target.matches(".ai-chart-metric-selector")) {
-      const dataset = state.aiDataset;
-      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-      if (suggestion?.chartType !== "bar") return;
-      const selection = barSelectionFor(dataset, suggestion);
-      selection.variant = "single"; selection.metrics = [event.target.value]; selection.aggregation = "auto";
-      Object.assign(suggestion, withSuggestionMetric(suggestion, event.target.value, dataset.analysis.columns));
-      activateAiChartSuggestion(suggestion);
-      return;
-    }
-    if (event.target.matches(".ai-bar-metric-checkbox")) {
-      const dataset = state.aiDataset;
-      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-      if (suggestion?.chartType !== "bar") return;
-      const checked = [...document.querySelectorAll("#ai-filter-controls .ai-bar-metric-checkbox:checked")];
-      if (checked.length < 2) {
-        event.target.checked = true;
-        showToast("Cột ghép cần ít nhất 2 chỉ số.");
-        return;
-      }
-      const selection = barSelectionFor(dataset, suggestion);
-      selection.variant = "grouped"; selection.metrics = checked.map(input => input.value);
-      activateAiChartSuggestion(suggestion);
-      return;
-    }
     if (event.target.matches(".ai-metric-selector")) {
       await changeAiMapMetric(event.target.value);
-      return;
-    }
-    if (event.target.matches(".ai-line-measure-selector")) {
-      const suggestion = activeLine();
-      if (!suggestion) return;
-      lineSelectionFor(state.aiDataset, suggestion).measure = event.target.value;
-      activateAiChartSuggestion(suggestion, { rebuildControls: false });
-      return;
-    }
-    if (event.target.matches(".ai-line-scope")) {
-      const suggestion = activeLine();
-      if (!suggestion) return;
-      lineSelectionFor(state.aiDataset, suggestion).scope = event.target.value;
-      activateAiChartSuggestion(suggestion);
-      return;
-    }
-    if (event.target.matches(".ai-line-range")) {
-      const suggestion = activeLine();
-      if (!suggestion) return;
-      const sel = lineSelectionFor(state.aiDataset, suggestion);
-      const [from, to] = ["from", "to"].map(edge => document.querySelector(`#ai-filter-controls .ai-line-range[data-edge='${edge}']`));
-      if (!from || !to) return;
-      const time = state.aiDataset.analysis.columns.find(column => column.name === suggestion.bindings.x);
-      if (compareTimeValues(from.value, to.value, time) > 0) (event.target === from ? to : from).value = event.target.value;
-      sel.from = from.value;
-      sel.to = to.value;
-      activateAiChartSuggestion(suggestion, { rebuildControls: false });
-      return;
-    }
-    if (event.target.matches(".ai-series-filter")) {
-      const suggestion = activeLine();
-      if (!suggestion) return;
-      const checked = [...document.querySelectorAll("#ai-filter-controls .ai-series-filter:checked")];
-      const limit = state.aiDataset.activeChartOption?.maxSeries ?? 8;
-      if (checked.length > limit) { event.target.checked = false; showToast(`Chỉ có thể hiển thị tối đa ${limit} chuỗi.`); return; }
-      if (!checked.length) { event.target.checked = true; showToast("Cần chọn ít nhất một chuỗi."); return; }
-      const sel = lineSelectionFor(state.aiDataset, suggestion);
-      sel.scope = "pick";
-      sel.picked = checked.map(input => input.value);
-      activateAiChartSuggestion(suggestion, { rebuildControls: false });
       return;
     }
     if (!event.target.matches(".ai-generated-filter")) return;
@@ -3544,36 +2864,12 @@ function bindUI() {
       refreshMapPopupControls();
       return;
     }
-    const barVariant = event.target.closest(".ai-bar-chart-type");
-    if (barVariant) {
-      const dataset = state.aiDataset;
-      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-      if (suggestion?.chartType !== "bar") return;
-      const selection = barSelectionFor(dataset, suggestion);
-      const variant = barVariant.dataset.barVariant;
-      if (!variant || selection.variant === variant) return;
-      selection.variant = variant;
-      selection.metrics = defaultBarMetrics(suggestion, dataset.analysis.columns, variant);
-      if (variant === "single" && selection.metrics[0]) {
-        Object.assign(suggestion, withSuggestionMetric(suggestion, selection.metrics[0], dataset.analysis.columns));
-      }
-      activateAiChartSuggestion(suggestion);
-      return;
-    }
     if (event.target.closest(".ai-point-reset")) {
       const suggestion = activePointSuggestion();
       if (!suggestion) return;
       const selection = pointSelectionFor(suggestion);
       state.aiDataset.pointSelections[suggestion.id] = normalizePointSelection(pointModelFor(suggestion), { ...selection, selectedValues: [] });
       refreshPointView(suggestion, { rebuildControls: true });
-      return;
-    }
-    if (event.target.closest(".ai-series-reset")) {
-      const dataset = state.aiDataset;
-      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-      if (suggestion?.chartType !== "line") return;
-      lineSelectionFor(dataset, suggestion).picked = [];
-      activateAiChartSuggestion(suggestion);
       return;
     }
     const applyAliases = event.target.closest(".apply-geo-aliases");
@@ -3634,7 +2930,6 @@ function bindUI() {
     state.regionHexResolution = Number(event.target.value);
     await rebuildRegionHexGrid();
   });
-  $("resolution").addEventListener("input", e => $("resolution-value").value = e.target.value); $("resolution").addEventListener("change", async e => { state.resolution = Number(e.target.value); await rebuildGrid(); });
   $("opacity").addEventListener("input", e => { $("opacity-value").value = `${Math.round(e.target.value * 100)}%`; applyStyle(); }); $("line-width").addEventListener("input", e => { $("line-width-value").value = `${e.target.value} px`; applyStyle(); });
   for (const id of ["fixed-color", "border-color"]) { $(id).addEventListener("input", e => {
     if (id === "fixed-color" && activePolygonLegendScale()) return;
@@ -3659,7 +2954,6 @@ function bindUI() {
       catch (error) { if (error?.name !== "AbortError") { console.error(error); showToast(error.message || "Không thể dựng đề xuất này."); } }
       return;
     }
-    if (selectChartOption(button.dataset.type)) return;
     document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active"));
     button.classList.add("active");
     regionHexBuildRevision += 1;
@@ -3667,8 +2961,7 @@ function bindUI() {
     $("region-hex-note").textContent = "";
     state.mapType = button.dataset.type;
     updateModelSections();
-    if (state.mapType === "h3" && state.boundary) await rebuildGrid();
-    else applyStyle();
+    applyStyle();
     setStatus(`Đang hiển thị kiểu ${button.dataset.label}.`, true);
   });
   bindFileDropZone();
@@ -3704,11 +2997,11 @@ function bindUI() {
   $("province-filter-options").addEventListener("change", () => updateProvinceFilterLabel());
   $("clear-provinces").addEventListener("click", () => { document.querySelectorAll('#province-filter-options input:checked').forEach(input => input.checked = false); updateProvinceFilterLabel([]); });
   $("apply-provinces").addEventListener("click", async () => {
-    const names = selectedProvinceNames(); const toggle = $("province-filter-toggle"); state.boundary = boundaryForProvinces(state.sourceBoundary, names); state.baselineCount = null;
+    const names = selectedProvinceNames(); const toggle = $("province-filter-toggle"); state.boundary = boundaryForProvinces(state.sourceBoundary, names);
     map.getSource("vietnam-boundary")?.setData(state.boundary); setCurrentFileNote(names.length ? `Đang lọc: ${names.map(formatProvinceName).join(", ")}` : "Dữ liệu đã tải · đang sử dụng");
     map.getSource("polygon-data")?.setData(state.boundary);
     $("province-filter-menu").hidden = true; toggle.setAttribute("aria-expanded", "false"); toggle.disabled = true;
-    try { await rebuildGrid({ fit: true }); refreshClippedUploadLayers(); } finally { toggle.disabled = false; }
+    try { await refreshBoundary({ fit: true }); refreshClippedUploadLayers(); } finally { toggle.disabled = false; }
   });
   document.addEventListener("click", event => {
     if (!event.target.closest("[data-control-id=province-filter], #province-filter")) { $("province-filter-menu").hidden = true; $("province-filter-toggle").setAttribute("aria-expanded", "false"); }
@@ -3742,51 +3035,9 @@ function bindUI() {
 }
 
 function exportCSV() {
-  if (options.exportData?.(state)) return;
-  const rows = [["H3 Index", "Latitude", "Longitude"], ...filteredFeatures().map(({ properties: p }) => [p.h3, p.center_lat, p.center_lng])];
-  const blob = new Blob(["\ufeff" + rows.map(row => row.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n")], { type: "text/csv;charset=utf-8" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `h3-res-${state.resolution}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  options.exportData?.(state);
 }
 
-function observeMapSize() {
-  if (typeof ResizeObserver === "undefined") return;
-  const observer = new ResizeObserver(() => {
-    map?.resize();
-    if (mapPopupView) sizeMapPopup(mapPopupView);
-  });
-  observer.observe($("map"));
-}
-
-async function init() {
-  renderSupportedChartCatalog();
-  bindUI(); syncMapStyleControls();
-  map = new maplibregl.Map({ container: "map", style: MAP_STYLES[state.mapStyle], center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
-  observeMapSize();
-  mapSearch = createMapSearch({ map, minFilteredObjects: CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS });
-  map.on("style.load", () => {
-    const switchedStyle = pendingMapStyle;
-    if (switchedStyle) state.mapStyle = switchedStyle;
-    pendingMapStyle = null;
-    clearTimeout(mapStyleLoadTimer);
-    syncMapStyleControls(false);
-    try {
-      addMapLayers();
-      restoreUploadedLayers();
-      applyStyle();
-      mapSearch?.refreshHighlight();
-    } catch (error) {
-      console.error("Không thể phục hồi lớp dữ liệu sau khi đổi nền:", error);
-      setStatus("Nền đã đổi nhưng một số lớp dữ liệu chưa thể phục hồi.", true);
-    }
-    if (!mapReady) {
-      mapReady = true;
-      setupProvinceFilter(EMPTY_FEATURE_COLLECTION);
-      updateDashboard();
-    } else if (switchedStyle) {
-      setStatus(`Đã chuyển sang nền ${MAP_STYLE_LABELS[state.mapStyle]}.`, true);
-    }
-  });
-  map.on("error", event => console.warn("MapLibre:", event.error?.message || event.error));
-}
 // Runtime public API. Every callback closes over this layer's state and DOM.
 return {
   state, readSpatialFile, applyReadResult, processSpatialFiles, removeUploadedFile,
@@ -3807,7 +3058,7 @@ return {
   update() { updateModelSections(); applyStyle(); },
   async load(result, file) { state.fileName = file.name; await applyReadResult(result, file); renderTable(); },
   initialize() {
-    map = options.map; mapReady = true;
+    map = options.map;
     mapSearch = { setData() { options.onChange?.(); }, refreshHighlight() {} };
     renderSupportedChartCatalog(); bindUI(); addMapLayers(); updateDashboard();
   },
@@ -3815,8 +3066,7 @@ return {
     arcFlow.dispose();
     tabularAbortController?.abort(); cancelAiBoundaryLoad(); regionHexBuildRevision++;
     clearTimeout(toastTimer); clearTimeout(statusTimer); clearTimeout(layerOrderTimer);
-    closeMapPopup(); cellPopup?.remove(); pointPopup?.remove(); clearChartCanvas();
-    clearBarStylePanel($("bar-style-controls")); clearPieStylePanel($("bar-style-controls")); clearDataMappingPanel($("data-mapping-controls"));
+    closeMapPopup(); cellPopup?.remove(); pointPopup?.remove();
   }
 };
 }

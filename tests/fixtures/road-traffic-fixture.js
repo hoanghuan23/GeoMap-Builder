@@ -35,12 +35,6 @@ export const trafficAiAnalysis = {
     { id: "traffic-map-line", chartType: "map_line", title: "Biểu đồ mạng lưới",
       bindings: { region: "Tên đường", value: "Mức độ ùn tắc" }, agg: null, confidence: .99,
       reason: "Thể hiện mức độ ùn tắc của từng tuyến tại vị trí thực tế trên bản đồ." },
-    { id: "traffic-line", chartType: "line", title: "Tốc độ theo thời điểm",
-      bindings: { x: "Thời điểm", y: [TRAFFIC_SPEED], series: "Tên đường" }, agg: "mean", confidence: .95,
-      reason: "So sánh thay đổi tốc độ giữa các thời điểm của từng tuyến." },
-    { id: "traffic-bar", chartType: "bar", title: "Tốc độ trung bình theo tuyến",
-      bindings: { x: "Tên đường", y: TRAFFIC_SPEED }, agg: "mean", confidence: .9,
-      reason: "So sánh tốc độ trung bình giữa các tuyến đường." }
   ]
 };
 

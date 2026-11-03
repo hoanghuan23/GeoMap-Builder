@@ -24,7 +24,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   const metricOriginal = $('map-metric-control');
   const legendOriginal = document.querySelector('.map-legends');
   const tableOriginal = $('data-panel');
-  const templates = [sidebar.cloneNode(true), metricOriginal.cloneNode(true), legendOriginal.cloneNode(true), tableOriginal.cloneNode(true), $('chart-canvas').cloneNode(true)];
+  const templates = [sidebar.cloneNode(true), metricOriginal.cloneNode(true), legendOriginal.cloneNode(true), tableOriginal.cloneNode(true)];
   const empty = $('map-type-grid').closest('.panel-section');
   const sidebars = textNode('div', '', 'layer-sidebars');
   const actions = sidebar.querySelector('.builder-actions');
@@ -81,7 +81,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
 
   function makeRuntime(id, preparsedResults = new Map()) {
     const dom = createLayerDocument(document, id, templates);
-    const [panel, metric, legends, table, chart] = dom.roots;
+    const [panel, metric, legends, table] = dom.roots;
     panel.className = 'layer-sidebar'; panel.dataset.layerId = id;
     [...panel.children].slice(0, 2).forEach(element => { element.hidden = true; });
     const actions = panel.querySelector('.builder-actions'); if (actions) actions.hidden = true;
@@ -119,8 +119,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       exportData(state) { downloadRecords(state, workspace.layersById[id]?.title || 'Dữ liệu', api.searchData()); return true; }
     });
     api.initialize();
-    const item = { id, api, manager, dom, panel, metric, legends, table, chart, heading, tabs, layerCount, metricHeading, legendHeading, genericLegend, tableSnapshot: null, preparsedResults };
-    for (const node of [panel, metric, legends, table, chart]) node.hidden = true;
+    const item = { id, api, manager, dom, panel, metric, legends, table, heading, tabs, layerCount, metricHeading, legendHeading, genericLegend, tableSnapshot: null, preparsedResults };
+    for (const node of [panel, metric, legends, table]) node.hidden = true;
     return item;
   }
 
@@ -227,7 +227,6 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
           : item.api.state.mapType === 'arc_flow' ? item.api.state.arcFlowStyle.showLegend : true;
       item.genericLegend.hidden = !legendEnabled || otherLegend || !count;
       if (!item.genericLegend.hidden) item.genericLegend.textContent = `${workspace.layersById[id]?.title} · ${count.toLocaleString('vi-VN')} đối tượng`;
-      item.chart.hidden = true;
       item.table.hidden = !active || !tableShown;
       const toggle = item.dom.elements.get('show-map-layers'); toggle.checked = group?.visible ?? true;
       item.dom.elements.get('show-map-layers-status').textContent = toggle.checked ? 'Đang bật' : 'Đang tắt';
@@ -426,7 +425,6 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
           descriptor: describeWorkspaceLayer(runtimeId, state, title) });
         runtimes.set(layer.id, item);
         sidebars.append(item.panel); metrics.append(item.metric); legendOriginal.append(item.legends); tables.append(item.table);
-        document.querySelector('.map-panel').append(item.chart);
         upload.processing = false; upload.sheets = null;
         upload.layerId = layer.id; upload.status = layer.sourceKind === 'attribute' ? 'Chờ liên kết' : state.mapType ? 'Sẵn sàng' : 'Chưa có bản đồ';
         upload.message = layer.sourceKind === 'attribute' ? `Chờ liên kết${state.aiDataset?.fallbackReason ? ` · ${state.aiDataset.fallbackReason}` : ''}`

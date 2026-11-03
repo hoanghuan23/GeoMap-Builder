@@ -91,53 +91,6 @@ test("bar ghép áp dụng phép tính đã chọn cho mọi chỉ số, tính K
   ]);
 });
 
-test("bảng doanh thu giữ đúng đề xuất Line của AI và không tự bổ sung Bar", () => {
-  const records = Array.from({ length: 12 }, (_, index) => ({
-    "Tháng": `T${String(index + 1).padStart(2, "0")}`,
-    "Miền Bắc": 100 + index,
-    "Miền Trung": 80 + index,
-    "Miền Nam": 70 + index,
-    "Tổng doanh thu": 250 + index * 3
-  }));
-  const profile = {
-    rowCount: records.length,
-    columns: [
-      { name: "Tháng", inferredType: "text", uniqueCount: 12 },
-      { name: "Miền Bắc", inferredType: "number", uniqueCount: 12 },
-      { name: "Miền Trung", inferredType: "number", uniqueCount: 12 },
-      { name: "Miền Nam", inferredType: "number", uniqueCount: 12 },
-      { name: "Tổng doanh thu", inferredType: "number", uniqueCount: 12 }
-    ]
-  };
-  const analysis = validateAndNormalizeAnalysis({
-    datasetTitle: "Doanh thu theo tháng và miền",
-    grain: "một tháng",
-    columns: [
-      { name: "Tháng", role: "time", timeParse: "text", granularity: "month", labelVi: "Tháng" },
-      { name: "Miền Bắc", role: "measure", aggDefault: "sum", unit: "VND" },
-      { name: "Miền Trung", role: "measure", aggDefault: "sum", unit: "VND" },
-      { name: "Miền Nam", role: "measure", aggDefault: "sum", unit: "VND" },
-      { name: "Tổng doanh thu", role: "measure", aggDefault: "sum", unit: "VND" }
-    ],
-    suggestions: [{
-      id: "revenue-line",
-      chartType: "line",
-      title: "Biểu đồ đường theo tháng",
-      bindings: { x: "Tháng", y: ["Miền Bắc", "Miền Trung", "Miền Nam"] },
-      confidence: .98
-    }]
-  }, profile);
-  const normalized = normalizeTabularRecords(records, analysis.columns);
-  const suggestions = prepareSuggestions(analysis, normalized.records, normalized.validRowRate);
-  const line = suggestions.find(item => item.chartType === "line");
-  const bar = suggestions.find(item => item.chartType === "bar");
-
-  assert.equal(line.available, true);
-  assert.equal(bar, undefined);
-  const option = buildLineChartOption(line, normalized.records, analysis.columns);
-  assert.deepEqual(option.config.data.map(row => row["Tháng"]), records.map(record => record["Tháng"]));
-});
-
 test("line long format chỉ chọn năm series có nhiều điểm nhất và pivot đúng", () => {
   const records = [];
   for (let province = 0; province < 7; province++) {
@@ -250,26 +203,6 @@ test("line giới hạn selectedSeries theo maxSeries", () => {
   assert.equal(option.maxSeries, 3);
   assert.deepEqual(option.selectedSeries, ["P0", "P1", "P2"]);
   assert.equal(option.config.series.length, 3);
-});
-
-test("feasibility khóa line chỉ có một mốc và giữ nguyên confidence AI", () => {
-  const result = evaluateSuggestion(
-    { id: "line", chartType: "line", title: "L", bindings: { x: "date", y: ["rain"] }, confidence: .9 },
-    [{ date: new Date(), rain: 1 }], columns, { date: 1, rain: 1 }
-  );
-  assert.equal(result.available, false);
-  assert.equal(result.effectiveConfidence, .9);
-});
-
-test("H3 bị khóa nếu các điểm hợp lệ chỉ tạo thành một cell", () => {
-  const result = evaluateSuggestion(
-    { id: "h3", chartType: "hex_h3", title: "H3", bindings: { lat: "lat", lng: "lng", value: "rain" }, confidence: .9 },
-    [{ lat: 21.0285, lng: 105.8542, rain: 1 }, { lat: 21.02851, lng: 105.85421, rain: 2 }],
-    [{ name: "lat", role: "geo" }, { name: "lng", role: "geo" }, { name: "rain", role: "measure" }],
-    { lat: 1, lng: 1, rain: 1 }
-  );
-  assert.equal(result.available, false);
-  assert.match(result.unavailableReason, /hai ô H3/);
 });
 
 test("AI suggestions remain empty across weather, traffic and coordinate datasets", () => {

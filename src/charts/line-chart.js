@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { dataForBarMapping, humanizeField } from "./data-transformers.js";
+import { humanizeField } from "./data-transformers.js";
 
 const roots = new WeakMap();
 const h = React.createElement;
@@ -29,37 +29,6 @@ function compactNumber(value) {
   if (Math.abs(number) >= 1_000_000) return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 }).format(number / 1_000_000)} Tr`;
   if (Math.abs(number) >= 1_000) return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 }).format(number / 1_000)} N`;
   return new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 }).format(number);
-}
-
-export function lineSeriesFromFields(fields) {
-  return fields.map((key, index) => ({ key, label: humanizeField(key), color: LINE_COLORS[index % LINE_COLORS.length] }));
-}
-
-export function createLineOption(dataset, title = "Biểu đồ đường") {
-  if (!dataset?.suggestedCategory || !dataset.suggestedMetrics.length) return null;
-  const metrics = dataset.suggestedMetrics.slice(0, Math.min(3, dataset.suggestedMetrics.length));
-  const data = dataForBarMapping(dataset, { xField: dataset.suggestedCategory, metrics });
-  if (!data.length) return null;
-  return {
-    id: "line_chart",
-    label: "Biểu đồ đường",
-    icon: "line",
-    config: {
-      chartKind: "line",
-      variant: "line",
-      title: title && title !== dataset.label ? title : `Xu hướng theo ${humanizeField(dataset.suggestedCategory).toLowerCase()}`,
-      subtitle: "Dữ liệu theo chuỗi thời gian hoặc danh mục",
-      unit: "",
-      sourcePath: dataset.path,
-      xField: dataset.suggestedCategory,
-      series: lineSeriesFromFields(metrics),
-      data,
-      showGrid: true,
-      showLegend: true,
-      showTooltip: true,
-      showDataLabels: false
-    }
-  };
 }
 
 export function normalizeLineChartConfig(input) {

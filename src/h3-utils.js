@@ -1,5 +1,4 @@
-import { polygonToCells, latLngToCell, cellToBoundary, cellToLatLng, cellToParent, getResolution } from "h3-js";
-import { summarizeFeatureProperties } from "./feature-properties.js";
+import { polygonToCells, latLngToCell, cellToBoundary, cellToLatLng } from "h3-js";
 import { numericMapValue } from "./map-value.js";
 
 function geometriesFromGeoJSON(data) {
@@ -52,28 +51,6 @@ export function geoJSONToH3FeatureCollection(data, resolution) {
   return collection;
 }
 
-export function cellAtMaxResolution(cell, maxResolution = 5) {
-  return getResolution(cell) > maxResolution ? cellToParent(cell, maxResolution) : cell;
-}
-
-export function h3CellCenter(cell) {
-  const [latitude, longitude] = cellToLatLng(cell);
-  return [longitude, latitude];
-}
-
-export function csvPointsToGeoJSON(text) {
-  const lines = text.trim().split(/\r?\n/); const originalHeaders = lines.shift().split(",").map(x => x.trim()); const headers = originalHeaders.map(x => x.toLowerCase());
-  const latIndex = headers.findIndex(x => ["lat","latitude","vĩ độ"].includes(x)); const lngIndex = headers.findIndex(x => ["lng","lon","longitude","kinh độ"].includes(x));
-  if (latIndex < 0 || lngIndex < 0) throw new Error("CSV cần có cột lat và lng.");
-  const features = lines.map(line => line.split(",").map(value => value.trim())).filter(row => Number.isFinite(Number(row[latIndex])) && Number.isFinite(Number(row[lngIndex]))).map(row => ({
-    type: "Feature",
-    properties: Object.fromEntries(originalHeaders.map((header, index) => [header, Number.isFinite(Number(row[index])) && row[index] !== "" ? Number(row[index]) : row[index] ?? ""])),
-    geometry: { type: "Point", coordinates: [Number(row[lngIndex]), Number(row[latIndex])] }
-  }));
-  if (!features.length) throw new Error("CSV không có tọa độ hợp lệ.");
-  return { type: "FeatureCollection", features };
-}
-
 const LATITUDE_FIELDS = new Set(["lat", "latitude", "vĩ độ", "vi do"]);
 const LONGITUDE_FIELDS = new Set(["lng", "lon", "long", "longitude", "kinh độ", "kinh do"]);
 
@@ -105,53 +82,4 @@ export function recordsToPointGeoJSON(records, { latField = null, lngField = nul
   });
   if (!features.length) throw new Error("Không tìm thấy tọa độ hợp lệ trong file.");
   return { type: "FeatureCollection", features };
-}
-
-function aggregateNumbers(values, aggregation) {
-  if (aggregation === "count") return values.length;
-  const numbers = values.map(Number).filter(Number.isFinite);
-  if (!numbers.length) return null;
-  if (aggregation === "sum") return numbers.reduce((sum, value) => sum + value, 0);
-  if (aggregation === "min") return Math.min(...numbers);
-  if (aggregation === "max") return Math.max(...numbers);
-  return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
-}
-
-export function recordsToAggregatedH3(records, { latField, lngField, valueField, aggregation = "mean", resolution = 6, columns = null } = {}) {
-  const groups = new Map();
-  let coordinateRows = 0;
-  for (const record of records || []) {
-    if (!isFiniteValue(record?.[latField]) || !isFiniteValue(record?.[lngField])) continue;
-    const latitude = Number(record?.[latField]); const longitude = Number(record?.[lngField]);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) continue;
-    coordinateRows += 1;
-    const value = numericMapValue(record?.[valueField]);
-    const cell = latLngToCell(latitude, longitude, resolution);
-    const group = groups.get(cell) || { values: [], records: [] };
-    if (value != null) group.values.push(value);
-    group.records.push(record); groups.set(cell, group);
-  }
-  const collection = cellsToFeatureCollection([...groups.keys()]);
-  for (const feature of collection.features) {
-    const group = groups.get(feature.properties.h3);
-    if (columns?.length) {
-      const { h3, center_lat, center_lng } = feature.properties;
-      Object.assign(feature.properties, summarizeFeatureProperties(group.records, columns, {
-        metricField: valueField,
-        metricAggregation: aggregation
-      }), { h3, center_lat, center_lng });
-    }
-    feature.properties[valueField] = aggregateNumbers(group.values, aggregation);
-    feature.properties.__metric = feature.properties[valueField];
-    feature.properties.__record_count = group.records.length;
-  }
-  return {
-    data: collection,
-    stats: {
-      totalRows: records?.length || 0,
-      coordinateRows,
-      coordinateRate: records?.length ? coordinateRows / records.length : 0,
-      cellCount: collection.features.length
-    }
-  };
 }

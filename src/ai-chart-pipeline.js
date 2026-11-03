@@ -4,7 +4,6 @@ import { serializeTabularValue } from "./tabular-data.js";
 import { chartTimeValue, compareTimeValues, timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "./time-values.js";
 import { AGGREGATION_VALUES, measureAggregation, measureUnit } from "./measure-semantics.js";
 import { normalizePolygonLegendRecommendation, polygonLegendTarget } from "./polygon-legend-contract.js";
-import { latLngToCell } from "h3-js";
 import { buildCoordinateLines, isCoordinateLine } from "./coordinate-data.js";
 import { createArcFlowModel } from "./arc-flow-data.js";
 import { administrativeContextFields, geographicLocationName, preferredAdministrativeColumn } from "./geographic-grain.js";
@@ -112,19 +111,6 @@ export function defaultBarMetrics(suggestion, columns, variant = "single") {
   const measures = available.filter(key => key !== "count" && key !== primary
     && primary !== "count" && measureUnit(byName.get(key)) === measureUnit(byName.get(primary)));
   return [primary, ...measures].filter(Boolean).slice(0, 2);
-}
-
-export function normalizeBarSelection(suggestion, columns, saved = {}) {
-  const available = new Set(barMetricOptions(columns).map(item => item.key));
-  let variant = saved.variant === "grouped" ? "grouped" : "single";
-  let metrics = [...new Set(saved.metrics || [])].filter(metric => available.has(metric));
-  if (metrics.length < (variant === "grouped" ? 2 : 1)) metrics = defaultBarMetrics(suggestion, columns, variant);
-  if (variant === "grouped" && metrics.length < 2) variant = "single";
-  return {
-    variant,
-    metrics: variant === "single" ? metrics.slice(0, 1) : metrics,
-    aggregation: AGGREGATIONS.has(saved.aggregation) && saved.aggregation !== "count" ? saved.aggregation : "auto"
-  };
 }
 
 export function defaultBarLimit(suggestion, columns) {
@@ -318,7 +304,7 @@ export function buildLineChartOption(suggestion, records, columns, { selectedSer
 }
 
 export function defaultTimeFilter(records, columns, chartType) {
-  if (!["choropleth", "hex_h3", "map_line"].includes(chartType)) return null;
+  if (!["choropleth", "map_line"].includes(chartType)) return null;
   const time = (columns || []).find(column => column.role === "time");
   if (!time) return null;
   const values = uniqueTimeValues(records, time);
@@ -341,7 +327,10 @@ function requiredCoverage(suggestion, validRowRate) {
   return fields.length ? Math.min(...fields.map(field => Number(validRowRate?.[field] || 0))) : 0;
 }
 
-export function evaluateSuggestion(suggestion, records, columns, validRowRate, { h3Resolution = 6 } = {}) {
+export function evaluateSuggestion(suggestion, records, columns, validRowRate) {
+  if (!["choropleth", "map_line", "point", "arc_flow"].includes(suggestion.chartType)) {
+    return { ...suggestion, available: false, feasibilityScore: 0, effectiveConfidence: 0, unavailableReason: "Kiểu bản đồ không được hỗ trợ." };
+  }
   let feasibilityScore = requiredCoverage(suggestion, validRowRate);
   let available = true;
   let unavailableReason = "";
@@ -349,25 +338,6 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
     const model = createArcFlowModel(records, columns, suggestion);
     feasibilityScore = model.stats.validRate;
     available = model.available; unavailableReason = model.unavailableReason;
-  } else if (["bar", "line"].includes(suggestion.chartType)) {
-    const dimension = columnMap(columns).get(suggestion.bindings.x);
-    const metrics = [suggestion.bindings.y].flat();
-    const groups = groupRecords(records, suggestion.bindings.x, dimension).filter(group =>
-      group.records.some(record => metrics.some(metric => metric === "count" || isFiniteValue(record?.[metric]))));
-    const aggregationGroups = suggestion.chartType === "line" && suggestion.bindings.series
-      ? groups.flatMap(group => groupRecords(group.records, suggestion.bindings.series)) : groups;
-    feasibilityScore = Math.min(feasibilityScore, Math.min(1, groups.length / 2));
-    if (groups.length < 2) {
-      available = false;
-      unavailableReason = suggestion.chartType === "line" ? "Cần ít nhất hai mốc thời gian hợp lệ có số liệu." : "Cần ít nhất hai nhóm dữ liệu có số liệu.";
-    } else if (dimension?.role === "time" && !timeValuesAreComparable(groups.map(group => group.value), dimension)) {
-      available = false;
-      unavailableReason = "Các giá trị thời gian chưa cùng hệ quy chiếu (kỳ lặp và ngày có năm).";
-    } else if (metrics.some((metric, index) => metric !== "count" && !resolveAggregation({ ...suggestion, agg: index === 0 ? suggestion.agg : null, bindings: { y: metric } }, columns)
-      && aggregationGroups.some(group => validMeasureRecords(group.records, metric).length > 1))) {
-      available = false;
-      unavailableReason = "Có nhiều bản ghi trong một nhóm nhưng chưa xác định được phép gộp có ý nghĩa cho chỉ số.";
-    }
   } else if (isCoordinateLine(suggestion)) {
     const data = buildCoordinateLines(records, columns, suggestion.bindings);
     feasibilityScore = Math.min(feasibilityScore, data.stats.coordinateRate);
@@ -391,35 +361,14 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate, {
     feasibilityScore = Math.min(feasibilityScore, coordinateRate);
     if (coordinateRate < .7) { available = false; unavailableReason = "Ít hơn 70% dòng có tọa độ hợp lệ."; }
     else if (!coordinateRows.length) { available = false; unavailableReason = "Không có tọa độ hợp lệ để hiển thị."; }
-  } else if (suggestion.chartType === "hex_h3") {
-    const { lat, lng, value } = suggestion.bindings;
-    const coordinateRows = records.filter(record => {
-      if (!isFiniteValue(record?.[lat]) || !isFiniteValue(record?.[lng])) return false;
-      const latitude = Number(record[lat]); const longitude = Number(record[lng]);
-      return Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180;
-    });
-    const coordinateRate = records.length ? coordinateRows.length / records.length : 0;
-    const cells = new Set(coordinateRows.flatMap(record => {
-      const latitude = Number(record?.[lat]); const longitude = Number(record?.[lng]);
-      return [latLngToCell(latitude, longitude, h3Resolution)];
-    }));
-    feasibilityScore = Math.min(feasibilityScore, coordinateRate);
-    if (coordinateRate < .7) { available = false; unavailableReason = "Ít hơn 70% dòng có tọa độ hợp lệ."; }
-    else if (cells.size < 2) { available = false; unavailableReason = "Cần ít nhất hai ô H3 có tọa độ hợp lệ."; }
   }
   const effectiveConfidence = Math.min(1, Math.max(0, suggestion.confidence));
   return { ...suggestion, feasibilityScore, effectiveConfidence, available, unavailableReason };
 }
 
 /** Check render feasibility only; every suggestion and its priority come from the analysis. */
-export function prepareSuggestions(analysis, records, validRowRate, options = {}) {
-  const suggestions = (analysis.suggestions || []).filter(suggestion => !options.mapOnly || ["choropleth", "map_line", "point", "arc_flow"].includes(suggestion.chartType));
-  return suggestions.map(suggestion => evaluateSuggestion(suggestion, records, analysis.columns, validRowRate, options))
+export function prepareSuggestions(analysis, records, validRowRate) {
+  const suggestions = (analysis.suggestions || []).filter(suggestion => ["choropleth", "map_line", "point", "arc_flow"].includes(suggestion.chartType));
+  return suggestions.map(suggestion => evaluateSuggestion(suggestion, records, analysis.columns, validRowRate))
     .sort((a, b) => b.confidence - a.confidence);
-}
-
-export function chartOptionForSuggestion(suggestion, records, columns, options = {}) {
-  if (suggestion.chartType === "bar") return buildBarChartOption(suggestion, records, columns, options);
-  if (suggestion.chartType === "line") return buildLineChartOption(suggestion, records, columns, options);
-  return null;
 }

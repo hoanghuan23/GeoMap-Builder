@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="GeoMap Builder - trực quan hoá dữ liệu không gian bằng H3">
+  <meta name="description" content="GeoMap Builder - trực quan hoá dữ liệu không gian">
   <title>GeoMap Builder</title>
   <link rel="icon" type="image/png" href="./favicon.png">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
@@ -71,18 +71,6 @@
         <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p id="ai-filter-description">Chọn chỉ số, nhóm dữ liệu và khoảng thời gian</p></div></div>
         <div id="ai-filter-controls" class="ai-filter-controls"></div>
       </section>
-      <section id="resolution-section" class="panel-section" hidden>
-        <div class="section-title"><span class="step">3</span><div><h2>Điều chỉnh Resolution</h2><p>Chọn độ chi tiết cho lưới H3 Hexagon</p></div></div>
-        <div class="field range-field resolution-control">
-          <div class="field-label"><label for="resolution">H3 Resolution</label><output id="resolution-value">6</output></div>
-          <input id="resolution" type="range" min="3" max="8" step="1" value="6">
-          <div class="resolution-hints" aria-hidden="true"><span>Ít ô</span><span>Chi tiết hơn</span></div>
-        </div>
-      </section>
-      <section id="chart-data-mapping-section" class="panel-section" hidden>
-        <div class="section-title"><span class="step">3</span><div><h2>Lựa chọn dữ liệu hiển thị</h2><p>Chọn thông tin để vẽ biểu đồ</p></div></div>
-        <div id="data-mapping-controls"></div>
-      </section>
       <section id="feature-section" class="panel-section feature-section" hidden>
         <button id="feature-toggle" class="section-title collapsible" aria-expanded="true"><span class="step">4</span><div><h2>Chức năng</h2><p>Bật/tắt tính năng bổ sung</p></div><span class="chevron">⌃</span></button>
         <div id="feature-controls" class="feature-controls">
@@ -137,13 +125,12 @@
             <label class="toggle-row"><span>Hiển thị chú giải</span><input id="road-show-legend" type="checkbox" checked><i></i></label>
           </div>
           <div id="arc-flow-style-controls" hidden></div>
-          <div id="bar-style-controls" hidden></div>
           <div class="builder-actions"><button id="reset-config">♙&nbsp; Đặt lại cấu hình</button><button id="clear-data">↻&nbsp; Xóa dữ liệu</button></div>
         </div>
       </section>
     </aside>
     <section class="content-area table-hidden">
-      <div class="map-panel"><div id="map"></div><div id="chart-canvas" class="chart-canvas" hidden></div><div id="status" class="status-pill" hidden></div>
+      <div class="map-panel"><div id="map"></div><div id="status" class="status-pill" hidden></div>
         <div id="map-metric-control" class="map-metric-control" hidden>
           <button id="map-metric-toggle" class="map-metric-toggle" type="button" aria-expanded="true" aria-controls="map-metric-list" title="Thu gọn danh sách chỉ số">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></svg>
@@ -180,14 +167,13 @@
         </div>
         </div>
         <div class="map-controls"><button id="zoom-in">+</button><button id="zoom-out">−</button><button id="fullscreen">⛶</button></div>
-        <div class="right-cards"><article id="cell-stats-card" class="map-card stats-card" hidden><div class="card-heading"><div><span class="card-icon purple">⌁</span><b>Thống kê</b></div><button>•••</button></div><div class="stat-primary"><span id="cell-count">0</span><small id="cell-label">Tổng số cell (res 5)</small></div></article></div>
         <div class="map-attribution">
           <span id="map4d-attribution" hidden><a href="https://map4d.vn/" target="_blank" rel="noopener">© Map4D · IOTLink</a></span>
           <span id="satellite-attribution" hidden><a href="https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer" target="_blank" rel="noopener">© Esri, Vantor, Earthstar Geographics, GIS User Community</a> · <a href="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer" target="_blank" rel="noopener">Esri, HERE, Garmin, © OpenStreetMap contributors, GIS User Community</a></span>
           <span id="vector-attribution"><a href="https://openfreemap.org/" target="_blank" rel="noopener">© OpenFreeMap</a></span>
         </div>
       </div>
-      <section id="data-panel" class="data-panel" hidden><div class="table-header"><div><h2 id="table-title">Dữ liệu H3</h2><p id="table-summary">Hiển thị 0 / 0 bản ghi</p></div><div class="table-actions"><label class="search-box"><span>⌕</span><input id="table-search" type="search" placeholder="Tìm kiếm H3 Index..."></label><button id="export-data" class="export-button">⇩ <span>Export data</span></button><button class="more-button">•••</button><button id="close-data-panel" class="close-data-panel" type="button" aria-label="Đóng bảng dữ liệu" title="Đóng bảng dữ liệu">×</button></div></div><div class="table-wrap"><table><thead id="data-head"><tr><th>#</th><th>H3 INDEX</th><th>TÂM Ô (LAT, LNG)</th><th></th></tr></thead><tbody id="data-body"><tr><td colspan="4" class="empty-row">Đang chuẩn bị dữ liệu…</td></tr></tbody></table></div><div class="pagination"><span id="pagination-info">0–0 của 0</span><div><button id="prev-page" disabled>‹</button><span id="page-buttons"></span><button id="next-page" disabled>›</button></div><label>Hiển thị <select id="page-size"><option>10</option><option>25</option><option>50</option></select> bản ghi</label></div></section>
+      <section id="data-panel" class="data-panel" hidden><div class="table-header"><div><h2 id="table-title">Dữ liệu bản đồ</h2><p id="table-summary">Hiển thị 0 / 0 bản ghi</p></div><div class="table-actions"><label class="search-box"><span>⌕</span><input id="table-search" type="search" placeholder="Tìm kiếm dữ liệu..."></label><button id="export-data" class="export-button">⇩ <span>Export data</span></button><button class="more-button">•••</button><button id="close-data-panel" class="close-data-panel" type="button" aria-label="Đóng bảng dữ liệu" title="Đóng bảng dữ liệu">×</button></div></div><div class="table-wrap"><table><thead id="data-head"><tr><th>#</th><th>ĐỐI TƯỢNG</th><th>THÔNG TIN</th><th></th></tr></thead><tbody id="data-body"><tr><td colspan="4" class="empty-row">Đang chuẩn bị dữ liệu…</td></tr></tbody></table></div><div class="pagination"><span id="pagination-info">0–0 của 0</span><div><button id="prev-page" disabled>‹</button><span id="page-buttons"></span><button id="next-page" disabled>›</button></div><label>Hiển thị <select id="page-size"><option>10</option><option>25</option><option>50</option></select> bản ghi</label></div></section>
     </section>
   </main>
 </div><div id="toast" class="toast" role="status"></div>

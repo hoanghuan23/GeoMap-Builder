@@ -13,7 +13,6 @@ import {
   YAxis
 } from "recharts";
 import { getBarAutoWindowSize, mergeBarConfig, prepareBarData } from "./configs/bar-config.js";
-import { analyzeDataSets, createBarOptions } from "./data-transformers.js";
 import { formatTimeValue } from "../time-values.js";
 
 const roots = new WeakMap();
@@ -27,24 +26,6 @@ function requireString(value, field) {
   // Field keys must match the spreadsheet record exactly, including whitespace.
   // Trimming a key silently turns valid popup values into missing observations.
   return value;
-}
-
-export function analyzeBarData(input) {
-  const datasets = analyzeDataSets(input).filter(dataset => dataset.suggestedCategory && dataset.numericFields.length);
-  const best = datasets.find(dataset => createBarOptions(dataset).length);
-  if (!best) throw new Error("Không tìm thấy bảng dữ liệu có trường phân loại và trường số để dựng biểu đồ.");
-  const titlePrefix = typeof input?.report_name === "string" ? input.report_name : best.label;
-  const options = createBarOptions(best, titlePrefix);
-  return {
-    datasets,
-    sourcePath: best.path,
-    rowCount: best.rowCount,
-    xField: best.suggestedCategory,
-    numericFields: best.numericFields.map(field => field.path),
-    schema: best.fields,
-    titlePrefix,
-    options
-  };
 }
 
 export function normalizeBarChartConfig(input) {

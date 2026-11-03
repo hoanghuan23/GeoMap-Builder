@@ -25,9 +25,9 @@ export function geometryExtent(data) {
 
 export function layerData(state) {
   if (state.mapType === 'arc_flow') return state.arcFlowView?.data;
-  if (state.mapType === 'point' || state.mapType === 'heatmap') return state.pointData;
+  if (state.mapType === 'point') return state.pointData;
   if (state.mapType === 'line') return state.lineData;
-  if (state.mapType === 'h3' || state.regionHexEnabled) return state.h3Data;
+  if (state.regionHexEnabled) return state.h3Data;
   return state.boundary || state.sourceBoundary || (state.uploadLayers?.length ? { type: 'FeatureCollection',
     features: state.uploadLayers.flatMap(layer => asFeatureCollection(layer.data).features) } : null);
 }

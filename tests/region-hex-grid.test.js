@@ -73,7 +73,7 @@ function harness() {
     createArcFlowController, maplibregl: {},
     buildRegionHexGrid, polygonFillExpression, resolvePolygonLegendConfig, resolveAggregation, polygonLegendKey, polygonLegendTarget, regions, testMap: map, setTimeout, console,
     CONFIG: { DEFAULT_RESOLUTION: 6, MAX_RENDER_CELLS: 1000 },
-    DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {}, DEFAULT_POINT_STYLE: {},
+     DEFAULT_POINT_STYLE: {},
     document: { getElementById: get, querySelectorAll: () => [] },
     joinRecordsToMapTilerBoundaries: () => ({ ...regions, features: regions.features.map(feature => ({
       ...feature, properties: { ...feature.properties, __metric: feature.properties.value }
@@ -145,24 +145,8 @@ test("switching away while hex generation is pending prevents a stale update", a
 
 test("hex controls are limited to regional polygon maps", () => {
   const { run, get } = harness();
-  run('state.mapType = "h3"; updateModelSections()');
+  run('state.mapType = "line"; updateModelSections()');
   assert.equal(get("region-hex-controls").hidden, true);
-  run('state.mapType = "polygon"; state.chartConfig = {}; updateModelSections()');
-  assert.equal(get("region-hex-controls").hidden, true);
-  run('state.chartConfig = null; updateModelSections()');
+  run('state.mapType = "polygon"; updateModelSections()');
   assert.equal(get("region-hex-controls").hidden, false);
-});
-
-test("map resize follows container changes", () => {
-  const { context, run, get } = harness();
-  let callback, observedElement, resizeCount = 0;
-  context.ResizeObserver = class {
-    constructor(handler) { callback = handler; }
-    observe(element) { observedElement = element; }
-  };
-  context.testMap.resize = () => { resizeCount += 1; };
-  run("observeMapSize()");
-  assert.equal(observedElement, get("map"));
-  callback(); callback();
-  assert.equal(resizeCount, 2);
 });

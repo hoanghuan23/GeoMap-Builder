@@ -316,28 +316,8 @@ test("mỗi kiểu chỉ giữ cấu hình hợp lệ có confidence cao nhất"
     ]
   }, profile);
   assert.equal(result.source, "ai");
-  assert.deepEqual(result.suggestions.map(item => item.id), ["map-high", "line", "bar-province"]);
+  assert.deepEqual(result.suggestions.map(item => item.id), ["map-high"]);
   assert.equal(new Set(result.suggestions.map(item => item.chartType)).size, result.suggestions.length);
-});
-
-test("bar chấp nhận cột thời gian làm trục x", () => {
-  const result = normalizeFixture({
-    columns: [
-      { name: "date", role: "time", timeParse: "iso", granularity: "day" },
-      { name: "temperature", role: "measure", aggDefault: "mean" }
-    ],
-    suggestions: [{
-      id: "time-bar",
-      chartType: "bar",
-      title: "Nhiệt độ theo ngày",
-      bindings: { x: "date", y: "temperature" },
-      confidence: .9
-    }]
-  }, profile);
-
-  assert.equal(result.suggestions[0].chartType, "bar");
-  assert.deepEqual(result.suggestions[0].bindings, { x: "date", y: "temperature" });
-  assert.deepEqual(result.validationErrors, []);
 });
 
 test("AI có thể không đề xuất kiểu nào và quyết định vẫn giữ nguyên khi normalize lần nữa", () => {

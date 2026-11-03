@@ -4,15 +4,6 @@ export const mapIcons = Object.freeze({
     <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="5" fill="#389e55" />
     </svg>`,
-  hexagon: `
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#389e55" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
-      <path d="M12 3L19.8 7.5V16.5L12 21L4.2 16.5V7.5Z" />
-    </svg>`,
-  heatmap: `
-    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" fill="none" stroke="#389e55" stroke-width="1.4" />
-      <circle cx="12" cy="12" r="6.6" fill="#389e55" fill-opacity="0.75" />
-    </svg>`,
   line: `
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#389e55" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <polygon points="12,4 18,8 18,16 12,20 6,16 6,8" />

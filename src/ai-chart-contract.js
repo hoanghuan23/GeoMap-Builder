@@ -24,7 +24,7 @@ export function normalizePopupSuggestions(raw) {
 }
 
 export function normalizeMetricButtons(raw, columns, suggestion, profile) {
-  if (!["choropleth", "map_line", "point", "hex_h3"].includes(suggestion.chartType)) return [];
+  if (!["choropleth", "map_line", "point"].includes(suggestion.chartType)) return [];
   const byName = new Map(columns.map(column => [column.name, column]));
   const profiles = new Map((profile?.columns || []).map(column => [column.name, column]));
   const excluded = new Set([suggestion.bindings.lat, suggestion.bindings.lng, suggestion.bindings.x, suggestion.bindings.region]);
@@ -68,35 +68,16 @@ export const AI_CHART_REGISTRY = Object.freeze({
     icon: "point",
     renderer: "MapLibre"
   }),
-  hex_h3: Object.freeze({
-    label: "Biểu đồ lục giác",
-    slots: Object.freeze({ lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]), value: Object.freeze(["measure"]) }),
-    icon: "hexagon",
-    renderer: "H3"
-  }),
   map_line: Object.freeze({
     label: "Bản đồ Line",
     slots: Object.freeze({ region: Object.freeze(["category", "geo", "id", "text"]), value: Object.freeze(["measure", "category"]),
       lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]), x: Object.freeze(["time", "id", "measure", "category"]) }),
     icon: "line",
     renderer: "MapLibre"
-  }),
-  line: Object.freeze({
-    label: "Biểu đồ đường",
-    slots: Object.freeze({ x: Object.freeze(["time"]), y: Object.freeze(["measure"]), series: Object.freeze(["category", "geo"]) }),
-    icon: "line",
-    renderer: "Recharts"
-  }),
-  bar: Object.freeze({
-    label: "Biểu đồ cột",
-    slots: Object.freeze({ x: Object.freeze(["category", "geo", "time"]), y: Object.freeze(["measure"]) }),
-    icon: "singleBar",
-    renderer: "Recharts"
   })
 });
 
-// Only these map types are accepted by the upload/AI interface. The other
-// registry entries remain internal chart/legacy renderers, not input models.
+// The map registry is shared by validation, the AI prompt and the upload interface.
 export const AI_MAP_REGISTRY = Object.freeze(Object.fromEntries(["choropleth", "map_line", "point", "arc_flow"].map(type => [type, AI_CHART_REGISTRY[type]])));
 
 export function supportedChartsForPrompt() {
@@ -166,7 +147,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
             type: "object",
             description: "Tên cột gốc theo từng kiểu bản đồ. Với arc_flow, source/target/sourceLat/sourceLng/targetLat/targetLng/value bắt buộc là bảy string khác nhau, không null; các binding không áp dụng mới trả null.",
             additionalProperties: false,
-            required: ["region", "value", "lat", "lng", "x", "y", "series", "source", "target", "sourceLat", "sourceLng", "targetLat", "targetLng", "time", "group"],
+            required: ["region", "value", "lat", "lng", "x", "source", "target", "sourceLat", "sourceLng", "targetLat", "targetLng", "time", "group"],
             properties: {
               source: { ...nullable({ type: "string" }), description: "Arc Flow: tên/mã điểm đi, bắt buộc có thật, role id/category/text/geo; kiểu khác null." },
               target: { ...nullable({ type: "string" }), description: "Arc Flow: tên/mã điểm đến, bắt buộc khác source, role id/category/text/geo; kiểu khác null." },
@@ -179,9 +160,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
               value: { ...nullable({ type: "string" }), description: "Arc Flow: bắt buộc là tên cột đo độ lớn luồng, role measure, không null dù unit/agg chưa rõ; không phải số tổng, tọa độ hay nhãn nhóm. Polygon/Line có thể null khi không có chỉ số phù hợp." },
               lat: nullable({ type: "string" }),
               lng: nullable({ type: "string" }),
-              x: nullable({ type: "string" }),
-              y: nullable({ anyOf: [{ type: "string" }, { type: "array", items: { type: "string" }, minItems: 1 }] }),
-              series: nullable({ type: "string" })
+              x: nullable({ type: "string" })
             }
           },
           agg: nullable({ type: "string", enum: AGG_VALUES }),
@@ -272,20 +251,14 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
   const nativeGeometry = profile?.spatial?.nativeGeometry === true && profile.spatial.geometryKinds?.includes(nativeKind);
   const required = raw.chartType === "arc_flow" ? ["source", "target", "sourceLat", "sourceLng", "targetLat", "targetLng", "value"]
     : nativeGeometry ? [] : coordinateLine ? ["lat", "lng"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["region"]
-    : raw.chartType === "point" ? ["lat", "lng"]
-      : raw.chartType === "hex_h3" ? ["lat", "lng", "value"]
-        : raw.chartType === "line" ? ["x", "y"] : ["x", "y"];
+    : ["lat", "lng"];
   const normalizedBindings = {};
   for (const slot of required) {
     const value = b[slot];
-    if (slot === "y" && raw.chartType === "bar" && value === "count") {
-      normalizedBindings.y = "count";
-      continue;
-    }
     const names = list(value).filter(name => typeof name === "string" && name);
     if (!names.length || raw.chartType === "arc_flow" && (typeof value !== "string" || names.length !== 1)
       || names.some(name => !fieldNames.has(name) || !spec.slots[slot]?.includes(roleOf.get(name)))) return null;
-    normalizedBindings[slot] = slot === "y" && raw.chartType === "line" ? [...new Set(names)] : names[0];
+    normalizedBindings[slot] = names[0];
   }
   if (raw.chartType === "arc_flow" && new Set(required.map(slot => b[slot])).size !== required.length) return null;
   for (const slot of raw.chartType === "arc_flow" ? ["time", "group"] : nativeGeometry ? ["region", "value"] : coordinateLine ? ["region", "x", "value"] : raw.chartType === "point" ? ["region"] : ["choropleth", "map_line"].includes(raw.chartType) ? ["value"] : []) {
@@ -295,10 +268,6 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
     normalizedBindings[slot] = b[slot];
   }
   if (["choropleth", "map_line"].includes(raw.chartType)) normalizedBindings.value ??= null;
-  if (raw.chartType === "line" && typeof b.series === "string" && b.series) {
-    if (!fieldNames.has(b.series) || !spec.slots.series.includes(roleOf.get(b.series))) return null;
-    normalizedBindings.series = b.series;
-  }
   seenIds.add(raw.id);
   return {
     id: raw.id,

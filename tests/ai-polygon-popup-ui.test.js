@@ -19,7 +19,6 @@ import * as coordinates from "../src/coordinate-data.js";
 import * as h3Utils from "../src/h3-utils.js";
 import * as pointStyle from "../src/renderers/point-style.js";
 import * as polygonStyle from "../src/renderers/polygon-style.js";
-import * as weatherStyle from "../src/renderers/weather-style.js";
 import * as polygonLegend from "../src/polygon-legend.js";
 import * as legendContract from "../src/polygon-legend-contract.js";
 import * as categoricalColor from "../src/categorical-color.js";
@@ -136,9 +135,9 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   const context = vm.createContext({
     testRuntimeOptions: arc ? { arcFlowOverlay: { async updateLayer(_id, payload) { published.push(payload); return true; }, removeLayer() {} } } : {},
     createArcFlowController,
-    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...h3Utils, ...pointStyle, ...polygonStyle, ...weatherStyle, ...polygonLegend, ...legendContract, ...categoricalColor,
+    ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...h3Utils, ...pointStyle, ...polygonStyle,  ...polygonLegend, ...legendContract, ...categoricalColor,
     fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, createInfoImagePopup, collapseCountryFeatures, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
-    CONFIG: { DEFAULT_RESOLUTION: 5 }, DEFAULT_BAR_CONFIG: {}, DEFAULT_PIE_CONFIG: {},
+    CONFIG: { DEFAULT_RESOLUTION: 5 },
     BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
     humanizeField: field => field, renderMapIcon() {}, renderChartIcon() {}, keepSelectOpenAfterMouseClick: value => value,
     document: { getElementById: get, createElement: () => new Element(), querySelector: () => new Element(), addEventListener() {},
@@ -510,9 +509,7 @@ test("map metric controls collapse, refresh for new data and hide outside maps o
   assert.equal(h.get("map-metric-caption").textContent, "Nhiệt độ trung bình");
   toggle.events.click();
   assert.equal(list.hidden, false);
-  h.run("state.chartConfig = {}; renderMapMetricControls();");
-  assert.equal(h.get("map-metric-control").hidden, true);
-  h.run("state.chartConfig = null; dataset.analysis.columns = dataset.analysis.columns.filter(column => column.name !== 'minimum'); renderMapMetricControls();");
+  h.run("dataset.analysis.columns = dataset.analysis.columns.filter(column => column.name !== 'minimum'); renderMapMetricControls();");
   assert.equal(h.get("map-metric-control").hidden, true);
   h.run(`state.aiDataset = {...dataset, metricControlCollapsed: false,
     suggestions: dataset.suggestions.map(suggestion => ({...suggestion,metricButtons:[
@@ -610,53 +607,6 @@ test("Point metric buttons sync size and sidebar without changing groups, map ti
   assert.equal(buttons[1].attributes["aria-pressed"], "true");
   const sidebar = h.all(".ai-point-metric")[0]; sidebar.value = "doanh_thu_vnd"; await h.change(sidebar);
   assert.equal(buttons[0].attributes["aria-pressed"], "true");
-});
-
-test("H3 missing-value cells and their searchable source points follow the active filters", async () => {
-  const h = harness({ thematic: true });
-  h.run(`
-    dataset.analysis.columns = [
-      {name:'name',role:'text'}, {name:'period',role:'category'},
-      {name:'lat',role:'geo',geoLevel:'point_lat'}, {name:'lng',role:'geo',geoLevel:'point_lng'},
-      {name:'metric',role:'measure',aggDefault:'sum'}
-    ];
-    dataset.analysis.search_bar = true; dataset.analysis.search_fields = ['name'];
-    dataset.records = ['A','B'].flatMap(period=>[0,1,2,3,4].map(index=>({
-      name:period+index,period,lat:20+index,lng:105,metric:index===0?null:index
-    })));
-    dataset.suggestions = [{id:'h3',chartType:'hex_h3',available:true,
-      bindings:{lat:'lat',lng:'lng',value:'metric'},filters:[{column:'period',control:'select'}]}];
-    dataset.selectedSuggestionId = 'h3';
-    dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]);
-    dataset.recommendation.filters.push({field:'period',control:'select'});
-    populateAiFilters(dataset);
-  `);
-  for (const period of ['A', 'B']) {
-    const control = h.all('.ai-generated-filter').find(control => control.dataset.field === 'period');
-    control.value = period;
-    await h.run("refreshAiH3()");
-    assert.equal(h.run("state.h3Data.features.length"), 5);
-    const index = buildDataSearchIndex(h.run("currentDataSearch()"));
-    assert.equal(index.enabled, true);
-    assert.equal(index.uniqueCount, 5);
-    assert.equal(searchDataIndex(index, `${period}0`)[0].feature.properties.metric, null);
-    assert.equal(searchDataIndex(index, `${period === 'A' ? 'B' : 'A'}0`).length, 0);
-    assert.equal(h.layers.get('h3-fill').paint['fill-color'][3], 'rgba(0, 0, 0, 0)');
-  }
-});
-
-test("Heatmap excludes missing selected measures from its weight without dropping searchable points", () => {
-  const h = harness({ point: true });
-  h.layers.set('point-heatmap', {paint:{}});
-  h.run(`state.pointData = {type:'FeatureCollection',features:[null,0,10].map((metric,index)=>({
-    type:'Feature',properties:{metric,name:'Điểm '+index},geometry:{type:'Point',coordinates:[105+index,21]}
-  }))}; state.dataProfile = {numericFields:['metric']}; applyHeatmapWeight();`);
-  const weight = h.layers.get('point-heatmap').paint['heatmap-weight'];
-  assert.equal(weight[0], 'case');
-  assert.equal(weight[3], 0);
-  assert.equal(weight[2][3], 0);
-  assert.equal(weight[2].at(-2), 10);
-  assert.equal(h.run('state.pointData.features.length'), 3);
 });
 
 test("Line metric buttons retain filters and the same eligible fields as the sidebar", async () => {
@@ -1201,7 +1151,7 @@ test("ambiguous geographic names show provinces and retries join exactly the cho
 test("popup switches charts, preserves map and per-kind settings, and releases chart roots", () => {
   const h = harness();
   h.mode("bar");
-  assert.equal(h.run("state.mapType"), "polygon"); assert.equal(h.run("state.chartConfig"), null);
+  assert.equal(h.run("state.mapType"), "polygon"); assert.equal(h.run("Object.hasOwn(state, 'chartConfig')"), false);
   assert.equal(h.all(".ai-popup-settings").length, 1);
   assert.equal(h.all(".ai-popup-range").length, 2);
   assert.equal(h.popups.length, 0, "choosing a type must not open a popup");
@@ -1310,7 +1260,7 @@ test("Bản đồ Line offers popup modes and keeps only maps in section 2", () 
   h.run("openMapPopup(state.lineData.features[0], [105.8,21], 'data-lines')");
   assert.equal(h.popups[0].card.children.length, 2, "information mode retains the source information cards");
   h.mode("bar");
-  assert.equal(h.run("state.mapType"), "line"); assert.equal(h.run("state.chartConfig"), null);
+  assert.equal(h.run("state.mapType"), "line"); assert.equal(h.run("Object.hasOwn(state, 'chartConfig')"), false);
   assert.equal(h.popups[0].card.children.length, 1, "chart mode hides all information above the chart");
   assert.deepEqual(h.rendered.at(-1).config.data.map(row => row[TRAFFIC_SPEED]), [24, 20, 38]);
   h.mode("line");
@@ -1473,7 +1423,6 @@ test("coordinate Line keeps coordinate/order fields out of metric controls and a
   assert.equal(h.get("road-color-field").querySelector(".road-style-color"), null);
   assert.equal(h.rendered.length, before, "changing line width does not rebuild popup charts");
 });
-
 
 test("image information follows AI rank, keeps image navigation out of chart settings, and switches modes without AI", () => {
   const h = harness({ point: true, popupSuggestions: [{ name: "info_image", confidence: .99 }, { name: "info", confidence: .9 }, { name: "bar", confidence: .8 }] });
