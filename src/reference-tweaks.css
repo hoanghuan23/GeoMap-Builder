@@ -7,3 +7,17 @@
 :is(#resolution-section,[data-control-id="resolution-section"]):not([hidden]) { display:grid; grid-template-columns:1fr; }
 .style-controls > .field { margin-top:6px; margin-bottom:6px; }
 .style-controls .toggle-row { margin:7px 0; }
+
+/* The template picker belongs to the shared sidebar, directly after data upload. */
+.map-template-heading { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.map-template-heading svg { width:20px; height:20px; flex:none; }
+.map-template-heading h2 { margin:0; font-size:13px; line-height:1.5; }
+.map-template-field { display:block; min-width:0; }
+.map-template-label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.map-template-field select { width:100%; min-width:0; padding:10px 12px; border:1px solid #9dbbff; border-radius:7px; background:#fff; color:var(--ink); font-size:11px; text-overflow:ellipsis; }
+.map-template-field select:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.map-template-field select:disabled { border-color:var(--line); color:var(--muted); }
+.map-template-status { margin:8px 0 0; font-size:10px; line-height:1.5; color:var(--muted); overflow-wrap:anywhere; }
+.map-template-status:empty { display:none; }
+#map-template-retry[hidden] { display:none; }
+@media (max-width:600px) { .map-template-heading h2 { font-size:12px; } .map-template-field select { font-size:10px; } }

@@ -112,8 +112,8 @@ function paddedDomain() {
 function LineTooltip({ active, payload, label, unit }) {
   if (!active || !payload?.length) return null;
   const items = payload.filter(item => item.value != null).sort((a, b) => b.value - a.value);
-  return h("div", { style: { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px", fontSize: 12, boxShadow: "0 8px 24px rgba(15,23,42,.10)" } },
-    h("div", { style: { fontWeight: 600, marginBottom: 4 } }, formatLineX(label, true)),
+  return h("div", { style: { background: "var(--template-surface, #fff)", color: "var(--template-text, #222)", border: "1px solid var(--template-border, #e2e8f0)", borderRadius: "var(--template-radius, 8px)", padding: "8px 10px", fontFamily: "var(--template-font, inherit)", fontSize: "var(--template-label-size, 12px)", boxShadow: "var(--template-shadow, 0 8px 24px rgba(15,23,42,.10))" } },
+    h("div", { style: { fontWeight: "var(--template-semibold-weight, 600)", marginBottom: 4 } }, formatLineX(label, true)),
     ...items.map(item => h("div", { key: item.dataKey, style: { display: "flex", gap: 8, alignItems: "center" } },
       h("span", { style: { width: 8, height: 8, borderRadius: 4, background: item.color } }),
       h("span", { style: { flex: 1 } }, item.name),
@@ -137,10 +137,10 @@ function Chart({ config }) {
     strokeWidth: hover === item.key ? 3 : 2,
     strokeOpacity: hover && hover !== item.key ? 0.2 : 1,
     dot: showDots ? { r: 2.5, fill: item.color, strokeWidth: 0 } : false,
-    activeDot: { r: 5, stroke: "#fff", strokeWidth: 2 },
+    activeDot: { r: 5, stroke: "var(--template-surface, #fff)", strokeWidth: 2 },
     isAnimationActive: false,
     connectNulls: false
-  }, labels ? h(LabelList, { dataKey: item.key, position: "top", formatter: compactNumber, fill: "#526174", fontSize: 10 }) : null));
+  }, labels ? h(LabelList, { dataKey: item.key, position: "top", formatter: compactNumber, fill: "var(--template-secondary, #526174)", fontSize: "var(--template-label-size, 10px)" }) : null));
 
   return h("section", { className: "bar-chart-card line-chart-card", "aria-label": config.title || "Biểu đồ đường" },
     h("header", { className: "bar-chart-heading" },
@@ -152,26 +152,26 @@ function Chart({ config }) {
     h("div", { className: "bar-chart-plot line-chart-plot" },
       h(ResponsiveContainer, { width: "100%", height: "100%" },
         h(LineChart, { data: config.data, margin: { top: 18, right: 18, left: 4, bottom: 8 } },
-          config.showGrid ? h(CartesianGrid, { stroke: "#e9edf2", strokeDasharray: "3 3", vertical: false }) : null,
+          config.showGrid ? h(CartesianGrid, { stroke: "var(--template-border, #e9edf2)", strokeDasharray: "3 3", vertical: false }) : null,
           h(XAxis, {
             type: "category", dataKey: config.xField, axisLine: false, tickLine: false,
-            tick: { fill: "#697586", fontSize: 11 },
+            tick: { fill: "var(--template-secondary, #697586)", fontSize: "var(--template-label-size, 11px)" },
             tickFormatter: value => formatLineX(value),
             interval: "preserveStartEnd", minTickGap: 24, height: 38
           }),
           h(YAxis, {
             type: "number", axisLine: false, tickLine: false,
-            tick: { fill: "#697586", fontSize: 11 },
+            tick: { fill: "var(--template-secondary, #697586)", fontSize: "var(--template-label-size, 11px)" },
             tickFormatter: compactNumber, width: 54,
             domain: paddedDomain(), allowDecimals: true
           }),
           config.showTooltip ? h(Tooltip, {
             content: h(LineTooltip, { unit: config.unit }),
-            cursor: { stroke: "#9ca3af", strokeDasharray: "3 3" }
+            cursor: { stroke: "var(--template-secondary, #9ca3af)", strokeDasharray: "3 3" }
           }) : null,
           config.showLegend ? h(Legend, {
             verticalAlign: "bottom", iconType: "circle", iconSize: 9,
-            wrapperStyle: { paddingTop: 14, fontSize: 12 },
+            wrapperStyle: { paddingTop: 14, fontSize: "var(--template-label-size, 12px)" },
             onMouseEnter: entry => setHover(entry.dataKey ?? null),
             onMouseLeave: () => setHover(null)
           }) : null,

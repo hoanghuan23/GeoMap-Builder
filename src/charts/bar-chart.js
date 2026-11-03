@@ -172,8 +172,8 @@ function Chart({ config }) {
     dataKey: item.key,
     position: isHorizontal ? "right" : "top",
     formatter: compactNumber,
-    fill: "#526174",
-    fontSize: 10
+    fill: "var(--template-secondary, #526174)",
+    fontSize: "var(--template-label-size, 10px)"
   }) : null));
 
   return h("section", { className: "bar-chart-card", "aria-label": config.title || "Biểu đồ cột" },
@@ -197,20 +197,20 @@ function Chart({ config }) {
     h("div", { className: "bar-chart-plot" },
       h(ResponsiveContainer, { width: "100%", height: "100%", onResize: handleResize },
         h(BarChart, { data, layout: isHorizontal ? "vertical" : "horizontal", margin: { top: 18, right: config.showDataLabels ? 50 : 20, left: isHorizontal ? 30 : 4, bottom: canZoom ? 4 : 8 }, barCategoryGap: `${config.barGap}%`, barGap: 3 },
-          config.showGrid ? h(CartesianGrid, { stroke: "#e9edf2", strokeDasharray: "3 3", vertical: isHorizontal }) : null,
+          config.showGrid ? h(CartesianGrid, { stroke: "var(--template-border, #e9edf2)", strokeDasharray: "3 3", vertical: isHorizontal }) : null,
           isHorizontal
-            ? h(XAxis, { type: "number", axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, tickFormatter: compactNumber })
-            : h(XAxis, { type: "category", dataKey: config.xField, tickFormatter: formatTime, axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, interval: config.timeColumn ? "preserveStartEnd" : 0, minTickGap: 8, height: 42 }),
+            ? h(XAxis, { type: "number", axisLine: false, tickLine: false, tick: { fill: "var(--template-secondary, #697586)", fontSize: "var(--template-label-size, 11px)" }, tickFormatter: compactNumber })
+            : h(XAxis, { type: "category", dataKey: config.xField, tickFormatter: formatTime, axisLine: false, tickLine: false, tick: { fill: "var(--template-secondary, #697586)", fontSize: "var(--template-label-size, 11px)" }, interval: config.timeColumn ? "preserveStartEnd" : 0, minTickGap: 8, height: 42 }),
           isHorizontal
-            ? h(YAxis, { type: "category", dataKey: config.xField, axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, interval: 0, width: 82 })
-            : h(YAxis, { type: "number", axisLine: false, tickLine: false, tick: { fill: "#697586", fontSize: 11 }, tickFormatter: compactNumber, width: 54 }),
+            ? h(YAxis, { type: "category", dataKey: config.xField, axisLine: false, tickLine: false, tick: { fill: "var(--template-secondary, #697586)", fontSize: "var(--template-label-size, 11px)" }, interval: 0, width: 82 })
+            : h(YAxis, { type: "number", axisLine: false, tickLine: false, tick: { fill: "var(--template-secondary, #697586)", fontSize: "var(--template-label-size, 11px)" }, tickFormatter: compactNumber, width: 54 }),
           config.showTooltip ? h(Tooltip, {
             labelFormatter: formatTime,
             formatter: (value, name, item) => tooltipValue(value, name, item, config.unit),
-            cursor: { fill: "rgba(15, 23, 42, 0.035)" },
-            contentStyle: { border: "1px solid #e2e8f0", borderRadius: 8, boxShadow: "0 8px 24px rgba(15,23,42,.10)" }
+            cursor: { fill: "var(--template-hover, rgba(15, 23, 42, 0.035))" },
+            contentStyle: { background: "var(--template-surface, #fff)", color: "var(--template-text, #222)", fontFamily: "var(--template-font, inherit)", fontSize: "var(--template-label-size, 12px)", border: "1px solid var(--template-border, #e2e8f0)", borderRadius: "var(--template-radius, 8px)", boxShadow: "var(--template-shadow, 0 8px 24px rgba(15,23,42,.10))" }
           }) : null,
-          config.showLegend ? h(Legend, { iconType: "circle", iconSize: 8, wrapperStyle: { paddingTop: 12, fontSize: 11 } }) : null,
+          config.showLegend ? h(Legend, { iconType: "circle", iconSize: 8, wrapperStyle: { paddingTop: 12, fontSize: "var(--template-label-size, 11px)" } }) : null,
           ...bars,
           canZoom ? h(Brush, {
             key: brushRevision,
@@ -220,8 +220,8 @@ function Chart({ config }) {
             startIndex: range.startIndex,
             endIndex: range.endIndex,
             onChange: next => next && setRange(next),
-            stroke: "#8aa8d8",
-            fill: "#f5f8fc"
+            stroke: "var(--template-secondary, #8aa8d8)",
+            fill: "var(--template-surface, #f5f8fc)"
           }) : null
         )
       )

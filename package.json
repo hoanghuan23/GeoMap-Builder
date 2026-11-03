@@ -9,6 +9,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test tests/*.test.js",
     "test:maps:browser": "node scripts/check-map-modules-browser.js",
+    "test:templates:browser": "node scripts/check-map-modules-browser.js --templates",
     "test:maps:webgl": "node scripts/check-map-modules-browser.js --webgl",
     "eval:text": "node scripts/eval-text-extraction.js"
   },

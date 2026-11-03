@@ -24,12 +24,14 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   const metricOriginal = $('map-metric-control');
   const legendOriginal = document.querySelector('.map-legends');
   const tableOriginal = $('data-panel');
-  const templates = [sidebar.cloneNode(true), metricOriginal.cloneNode(true), legendOriginal.cloneNode(true), tableOriginal.cloneNode(true)];
+  const sidebarTemplate = sidebar.cloneNode(true);
+  sidebarTemplate.querySelector('#map-template-section')?.remove();
+  const templates = [sidebarTemplate, metricOriginal.cloneNode(true), legendOriginal.cloneNode(true), tableOriginal.cloneNode(true)];
   const empty = $('map-type-grid').closest('.panel-section');
   const sidebars = textNode('div', '', 'layer-sidebars');
   const actions = sidebar.querySelector('.builder-actions');
   actions.hidden = true; sidebar.append(actions);
-  const configSections = [...sidebar.children].slice(2).filter(element => !element.classList.contains('builder-actions'));
+  const configSections = [...sidebar.children].slice(2).filter(element => !element.classList.contains('builder-actions') && element.id !== 'map-template-section');
   configSections.forEach(element => element.remove());
   sidebar.insertBefore(sidebars, actions);
   sidebars.append(empty); renderCatalog(document);

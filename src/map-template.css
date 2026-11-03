@@ -1,0 +1,145 @@
+/* Authored server tokens style the map UI only. Never target data swatches,
+   metric previews, map layers or chart series with presentation colors. */
+.content-area[data-template-ready="true"] {
+  --template-hover: color-mix(in srgb, var(--template-surface) 92%, var(--template-accent));
+  --template-active: color-mix(in srgb, var(--template-surface) 80%, var(--template-accent));
+  --template-control-height: calc(var(--template-body-size) * 2.75);
+  /* Zoom top offset + button height + frame padding/borders + 12px gap. */
+  --template-metrics-top: calc(10px + max(31px, var(--template-control-height)) + 10px + 12px);
+}
+
+.content-area[data-template-ready="true"] :is(.maplibregl-popup-content, .map-search, .map-region-navigation, .map-metric-control, .map-legends, .map-controls) {
+  font-family: var(--template-font);
+  font-size: var(--template-body-size);
+  font-weight: var(--template-normal-weight);
+  line-height: var(--template-line-height);
+  color: var(--template-text);
+}
+
+.content-area[data-template-ready="true"] :is(.maplibregl-popup-content, .point-legend, .weather-legend, .map-search-form, .map-search-results, .map-search-selection, .map-region-navigation, .map-metric-toggle, .map-metric-button, .map-controls) {
+  background: var(--template-background);
+  color: var(--template-text);
+  border: 1px solid var(--template-border);
+  border-radius: var(--template-radius);
+  box-shadow: var(--template-shadow);
+}
+
+.content-area[data-template-ready="true"] :is(.weather-popup, .info-image-popup, .data-feature-popup) {
+  font-family: var(--template-font);
+  font-size: var(--template-popup-size);
+  font-weight: var(--template-normal-weight);
+  line-height: var(--template-line-height);
+  color: var(--template-text);
+}
+.content-area[data-template-ready="true"] .weather-popup { padding: var(--template-spacing); }
+.content-area[data-template-ready="true"] .info-image-body { padding: var(--template-spacing); }
+.content-area[data-template-ready="true"] :is(.popup-info-heading, .popup-country-title, .popup-source-record + .popup-source-record, .weather-popup .popup-info-meta, .info-image-source + .info-image-source, .info-image-actions, .data-feature-popup dl) {
+  border-color: var(--template-border);
+}
+.content-area[data-template-ready="true"] :is(.weather-popup > strong, .popup-info-heading > strong, .info-image-body h2, .data-feature-popup > strong) {
+  font-size: var(--template-heading-size);
+  font-weight: var(--template-bold-weight);
+  line-height: var(--template-line-height);
+  color: var(--template-text);
+}
+.content-area[data-template-ready="true"] :is(.maplibregl-popup-content b, .maplibregl-popup-content strong, .info-image-body h3, .info-image-body h4) { font-weight: var(--template-bold-weight); }
+.content-area[data-template-ready="true"] :is(.weather-popup dd, .weather-popup .popup-info-description dd, .weather-popup .popup-info-note dd, .info-image-details dd, .info-image-description, .data-feature-popup dd) {
+  font-size: var(--template-popup-size);
+  line-height: var(--template-line-height);
+  color: var(--template-text);
+}
+.content-area[data-template-ready="true"] .weather-popup dd { font-weight: var(--template-bold-weight); }
+.content-area[data-template-ready="true"] :is(.weather-popup .popup-info-description dd, .weather-popup .popup-info-note dd, .weather-popup .popup-info-meta dd) { font-weight: var(--template-normal-weight); }
+.content-area[data-template-ready="true"] :is(.weather-popup dt, .popup-info-caption, .weather-popup > small, .popup-scope-note, .weather-popup-status, .info-image-address, .info-image-source-label, .info-image-details dt, .info-image-placeholder, .data-feature-popup dt, .data-feature-popup > small) {
+  color: var(--template-secondary);
+  font-size: var(--template-label-size);
+  line-height: var(--template-line-height);
+}
+.content-area[data-template-ready="true"] :is(.weather-popup dl > div, .weather-popup .popup-info-chip dd, .weather-popup .popup-info-note, .info-image-media) {
+  background: var(--template-surface);
+  border-color: var(--template-border);
+  border-radius: var(--template-radius);
+}
+.content-area[data-template-ready="true"] .weather-popup .popup-info-details > div:not(.popup-info-note) { background: none; border-radius: 0; }
+.content-area[data-template-ready="true"] .weather-popup .popup-info-note dt { color: var(--template-text); font-weight: var(--template-semibold-weight); }
+.content-area[data-template-ready="true"] :is(.maplibregl-popup-close-button, .info-image-navigation button, .info-image-counter, .info-image-directions) {
+  background: var(--template-surface);
+  color: var(--template-text);
+  border: 1px solid var(--template-border);
+  font-family: var(--template-font);
+  box-shadow: var(--template-shadow);
+}
+.content-area[data-template-ready="true"] :is(.info-image-directions, .info-image-links a) { color: var(--template-text); font-size: var(--template-label-size); }
+.content-area[data-template-ready="true"] .info-image-directions { border-radius: var(--template-radius); }
+.content-area[data-template-ready="true"] .maplibregl-popup-close-button { font-size: var(--template-title-size); }
+.content-area[data-template-ready="true"] .maplibregl-popup-tip { border-top-color: var(--template-background); border-bottom-color: var(--template-background); }
+
+/* Legend framing and labels; ramps and categorical/point/line symbols retain AI colors. */
+.content-area[data-template-ready="true"] :is(.point-legend, .weather-legend) { padding: var(--template-spacing); font-size: var(--template-legend-size); }
+.content-area[data-template-ready="true"] :is(.point-legend-heading strong, .weather-legend-heading strong) { color: var(--template-text); font-size: var(--template-legend-size); font-weight: var(--template-bold-weight); }
+.content-area[data-template-ready="true"] :is(.point-legend-row, .arc-flow-legend-row, .categorical-legend-row) { font-size: var(--template-legend-size); }
+.content-area[data-template-ready="true"] :is(.point-legend-heading > span, .point-legend-row > b, .point-legend > small, .weather-legend small, .line-legend-labels, .weather-legend-labels, .categorical-legend-row > b, [data-control-id="weather-legend-mode"], #weather-legend-mode) {
+  color: var(--template-secondary);
+  font-size: var(--template-label-size);
+  border-color: var(--template-border);
+}
+.content-area[data-template-ready="true"] :is(.point-legend-row > b, .categorical-legend-row > b) { font-weight: var(--template-normal-weight); }
+.content-area[data-template-ready="true"] .weather-legend-labels.categorical { font-size: var(--template-legend-size); color: var(--template-text); }
+.content-area[data-template-ready="true"] :is(.line-legend-tick, .polygon-legend-tick) { background: var(--template-secondary); }
+.content-area[data-template-ready="true"] :is(.categorical-legend-mixed, .scope-legend) { border-color: var(--template-border); }
+.content-area[data-template-ready="true"] .layer-overlay-title {
+  color: var(--template-text);
+  background: var(--template-surface);
+  font-size: var(--template-label-size);
+  font-weight: var(--template-semibold-weight);
+  border-radius: var(--template-radius);
+  padding: 2px 6px;
+  text-shadow: none;
+}
+
+/* Search uses the same server typography and supports dynamically created results. */
+.content-area[data-template-ready="true"] :is(.map-search-form, .map-region-navigation) { min-height: var(--template-control-height); }
+.content-area[data-template-ready="true"] .map-region-navigation { color-scheme: light; }
+.content-area[data-template-ready="true"][data-template-theme="dark"] .map-region-navigation { color-scheme: dark; }
+.content-area[data-template-ready="true"] :is(.map-search-form input, .map-region-navigation, .map-search-result, .map-search-result b, .map-search-clear, .map-search-submit, .map-search-chip button, .map-search-clear-all) {
+  color: var(--template-text);
+  font-family: var(--template-font);
+  font-size: var(--template-label-size);
+}
+.content-area[data-template-ready="true"] .map-search-form input::placeholder { color: var(--template-secondary); }
+.content-area[data-template-ready="true"] .map-search-result b { font-weight: var(--template-semibold-weight); }
+.content-area[data-template-ready="true"] :is(.map-search-result, .map-search-result-icon, .map-search-location, .map-search-chip) { background: var(--template-surface); color: var(--template-text); border-color: var(--template-border); }
+.content-area[data-template-ready="true"] :is(.map-search-result small, .map-search-message) { font-size: var(--template-label-size); color: var(--template-secondary); }
+.content-area[data-template-ready="true"] .map-search-message.error { background: var(--template-surface); }
+.content-area[data-template-ready="true"] .map-search-chip { font-size: var(--template-label-size); }
+.content-area[data-template-ready="true"] :is(.map-search-spinner, .map-search-chip.loading::before) { border-color: var(--template-accent); border-top-color: transparent; }
+.content-area[data-template-ready="true"] :is(.map-search-result:hover, .map-search-result.active, .map-search-clear:hover, .map-search-submit:hover, .map-search-chip button:hover, .maplibregl-popup-close-button:hover, .info-image-navigation button:hover, .info-image-directions:hover, .map-metric-button:hover) { background: var(--template-hover); color: var(--template-text); border-color: var(--template-border); }
+.content-area[data-template-ready="true"] :is(.map-search-result.selected, .map-search-result.selected .map-search-result-icon, .map-metric-button.active) { background: var(--template-active); color: var(--template-text); border-color: var(--template-accent); }
+.content-area[data-template-ready="true"] :is(.map-search-form:focus-within, .map-region-navigation:focus-visible) { border-color: var(--template-accent); box-shadow: var(--template-shadow); }
+.content-area[data-template-ready="true"] :is(.map-metric-button, .map-metric-toggle, .map-search-result, .map-controls button, .info-image-navigation button, .info-image-directions):focus-visible { outline: 2px solid var(--template-accent); outline-offset: 2px; }
+
+/* Metric icon text and --metric-color remain exactly as recommended by AI. */
+.content-area[data-template-ready="true"] .workspace-metrics {
+  top: var(--template-metrics-top);
+  max-height: calc(100% - var(--template-metrics-top) - 28px);
+}
+.content-area[data-template-ready="true"] .map-panel > .map-metric-control {
+  top: var(--template-metrics-top);
+  max-height: calc(100% - var(--template-metrics-top) - 80px);
+}
+.content-area[data-template-ready="true"] :is(.map-metric-button, .map-metric-toggle, .map-controls button, .chart-zoom-controls button) { font-family: var(--template-font); font-size: var(--template-label-size); min-height: var(--template-control-height); }
+.content-area[data-template-ready="true"] .map-metric-button { box-shadow: var(--template-shadow); }
+.content-area[data-template-ready="true"] .map-metric-label { line-height: var(--template-line-height); font-weight: var(--template-normal-weight); }
+.content-area[data-template-ready="true"] :is(.map-metric-label > span, #map-metric-caption, [data-control-id="map-metric-caption"]) { line-height: var(--template-line-height); font-weight: var(--template-semibold-weight); }
+.content-area[data-template-ready="true"] :is(.map-metric-label small, .map-metric-count) { color: var(--template-secondary); font-size: var(--template-label-size); }
+.content-area[data-template-ready="true"] .map-metric-count { background: var(--template-surface); }
+.content-area[data-template-ready="true"] .map-metric-label small { background: transparent; font-weight: var(--template-normal-weight); }
+.content-area[data-template-ready="true"] .map-metric-preview { width: var(--template-control-height); height: var(--template-control-height); font-size: var(--template-heading-size); border-color: var(--template-border); }
+.content-area[data-template-ready="true"] .map-controls button { background: var(--template-surface); color: var(--template-text); }
+
+/* React chart SVG presentation properties also consume CSS variables, so an
+   open chart updates without remounting or losing brush/hover state. */
+.content-area[data-template-ready="true"] .bar-chart-card { background: var(--template-surface); color: var(--template-text); border-color: var(--template-border); border-radius: var(--template-radius); font-family: var(--template-font); font-size: var(--template-popup-size); line-height: var(--template-line-height); }
+.content-area[data-template-ready="true"] .bar-chart-heading h2 { color: var(--template-text); font-size: var(--template-legend-size); font-weight: var(--template-bold-weight); }
+.content-area[data-template-ready="true"] .bar-chart-heading p { color: var(--template-secondary); font-size: var(--template-label-size); }
+.content-area[data-template-ready="true"] .chart-zoom-controls button { background: var(--template-surface); color: var(--template-text); border-color: var(--template-border); border-radius: var(--template-radius); }

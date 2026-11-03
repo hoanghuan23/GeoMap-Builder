@@ -45,6 +45,36 @@ Luồng ghép lớp dùng chung cho mọi lĩnh vực, tên file và tổ hợp 
 
 Trạng thái được giữ trong phiên hiện tại, chưa lưu sau reload.
 
+## Template giao diện bản đồ
+
+Mục **Mẫu templates** tải cấu hình dựng sẵn từ `GET /api/map-templates`, mặc định VnExpress Light. Middleware proxy tới `GET /templates` của server có URL `/analyze` đang cấu hình; API key chỉ nằm phía server. Mỗi phần tử giữ `id`, `theme`, `name`, `description`, đồng thời phải có `styles` và `typography` đọc từ file template trên server. Danh sách chỉ có metadata được báo lỗi, không đánh dấu template là đã áp dụng.
+
+Contract cấu hình tương ứng các file hiện có của server:
+
+```json
+{
+  "styles": {
+    "colors": {
+      "background": "#FFFFFF", "surface": "#FFFFFF", "text": "#222222",
+      "textSecondary": "#666666", "border": "#DDDDDD", "accent": "#D77A99"
+    },
+    "layout": { "borderRadius": "10px", "spacing": "12px" }
+  },
+  "typography": {
+    "fontFamily": "Arial, Helvetica, sans-serif",
+    "sizes": { "body": "16px", "popup": "14px", "legend": "13px", "label": "12px", "heading": "20px", "title": "24px" },
+    "weights": { "normal": 400, "semibold": 600, "bold": 700 },
+    "lineHeight": 1.55
+  }
+}
+```
+
+Frontend kiểm tra và chuyển các giá trị thành biến `--template-*` trên workspace. CSS dùng chung áp dụng cho popup thông tin/ảnh/biểu đồ, chú giải, tìm kiếm và điều khiển trên bản đồ. `background` là nền khung, `surface` là nền thành phần bên trong; trạng thái hover/active phối từ `surface` và `accent`. Bóng mặc định được suy ra từ màu chữ; template có thể đặt `layout.shadow` bằng `none` hoặc 2–4 độ dài cùng màu hex. Không tải font ngoài hoặc thực thi CSS/HTML/JS tùy ý từ phản hồi API.
+
+Đổi template áp dụng ngay, kể cả popup/biểu đồ đang mở và lớp được thêm sau đó, không gọi lại AI hoặc dựng lại biểu đồ. Các contract AI (`legend`, `popupSuggestions`, `popupContent`, `search_bar`, `search_fields`, `metricButtons`) giữ nguyên: AI vẫn đề xuất thang màu/ngưỡng, kiểu và nội dung popup, tìm kiếm, nhãn/icon/màu icon chỉ số. Template không đổi màu dữ liệu, basemap, bộ lọc hay lựa chọn người dùng. Nếu tải cấu hình lỗi, giao diện hợp lệ gần nhất được giữ và có nút thử lại; lựa chọn chỉ được giữ trong phiên hiện tại.
+
+Kiểm thử: `node --test tests/map-template*.test.js` và `npm run test:templates:browser` (Chrome/Chromium); thêm `-- --mobile` để kiểm tra viewport 390 × 844. Kiểm tra trình duyệt bao phủ các kiểu popup, typography, tooltip biểu đồ, chuyển Light/Dark, màu dữ liệu/icon, lớp tạo mới, màn hình nhỏ và lỗi tải cấu hình. Khi cập nhật API Python ở dự án `codex_server`, cần khởi động lại tiến trình uvicorn nếu không dùng `--reload`.
+
 ## Chạy dự án
 
 ```bash

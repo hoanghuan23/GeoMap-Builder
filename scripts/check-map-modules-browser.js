@@ -9,6 +9,8 @@ const browser = process.env.CHROME_PATH || ['/usr/bin/google-chrome', '/usr/bin/
 if (!browser) throw new Error('Set CHROME_PATH to a Chrome/Chromium executable.');
 const profile = mkdtempSync(join(tmpdir(), 'map-modules-browser-'));
 const webgl = process.argv.includes('--webgl');
+const templates = process.argv.includes('--templates');
+const mobile = process.argv.includes('--mobile');
 const screenshots = webgl && process.argv.includes('--screenshots');
 const server = await createServer({ server: { host: '127.0.0.1', port: 0, open: false }, plugins: [{
   name:'map-test-glyphs',configureServer(server){server.middlewares.use((request,response,next)=>{
@@ -18,7 +20,7 @@ const server = await createServer({ server: { host: '127.0.0.1', port: 0, open: 
 }] });
 try {
   await server.listen(); const address = server.httpServer.address();
-  const url = `http://127.0.0.1:${address.port}/tests/fixtures/map-modules-browser.html${webgl ? '?webgl=1' : ''}${screenshots ? '&screenshots=1' : ''}`;
+  const url = `http://127.0.0.1:${address.port}/tests/fixtures/${templates ? 'map-template-browser' : 'map-modules-browser'}.html${webgl ? '?webgl=1' : ''}${screenshots ? '&screenshots=1' : ''}`;
   const child = spawn(browser, ['--headless', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run',
     '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
     ...(webgl ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : ['--disable-gpu']),
@@ -53,7 +55,9 @@ try {
       pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params }));
     });
     await send('Page.enable');
-    await send('Emulation.setDeviceMetricsOverride',{width:1000,height:760,deviceScaleFactor:1,mobile:false});
+    await send('Emulation.setDeviceMetricsOverride', mobile
+      ? {width:390,height:844,deviceScaleFactor:1,mobile:true}
+      : {width:1000,height:760,deviceScaleFactor:1,mobile:false});
     await send('Page.navigate', { url });
     const deadline = Date.now() + 45000;
     while (Date.now() < deadline) {
