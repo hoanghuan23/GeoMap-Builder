@@ -340,6 +340,7 @@ test("malformed analysis JSON returns an error after one upstream request", asyn
       profile: { rowCount: 2, columns: [{ name: "temperature", inferredType: "number" }] }
     });
     assert.equal(response.status, 502); assert.equal(calls, 1);
+    assert.match(response.body.error, /Server AI trả về JSON không hợp lệ/);
   } finally { globalThis.fetch = originalFetch; }
 });
 
