@@ -1,4 +1,4 @@
-import { ANALYSIS_RESPONSE_SCHEMA } from "../src/ai-chart-contract.js";
+import { ANALYSIS_RESPONSE_SCHEMA } from "../src/shared/import/ai-chart-contract.js";
 
 export const TEXT_ANALYSIS_RESPONSE_SCHEMA = {
   type: "object",

@@ -1,10 +1,10 @@
-import { AI_MAP_REGISTRY, ANALYSIS_RESPONSE_SCHEMA, supportedChartsForPrompt, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { AI_MAP_REGISTRY, ANALYSIS_RESPONSE_SCHEMA, supportedChartsForPrompt, validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
 import { analyzeMapComposition } from "./map-composition.js";
 import { normalizeCompositionInput } from "../src/map-composition-contract.js";
 import { MAP_ANALYSIS_INSTRUCTIONS } from "./map-analysis-instructions.js";
 import { TEXT_ANALYSIS_RESPONSE_SCHEMA, TEXT_EXTRACTION_INSTRUCTIONS } from "./text-analysis-contract.js";
-import { recordsFromTextTable, validateDocumentText } from "../src/text-data.js";
-import { profileTabularData } from "../src/tabular-data.js";
+import { recordsFromTextTable, validateDocumentText } from "../src/shared/import/text-data.js";
+import { profileTabularData } from "../src/shared/import/tabular-data.js";
 import { requestAiJson } from "./ai-provider.js";
 
 const LAYER_ORDER_SCHEMA = {

@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chartTimeValue, compareTimeValues, filterTimeRange, formatTimeValue, normalizeTimeValue, timeValueInfo, uniqueTimeValues } from "../src/time-values.js";
-import { normalizeTabularRecords, profileTabularData } from "../src/tabular-data.js";
-import { fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
-import { buildBarChartOption, buildLineChartOption, defaultTimeFilter, prepareSuggestions } from "../src/ai-chart-pipeline.js";
+import { chartTimeValue, compareTimeValues, filterTimeRange, formatTimeValue, normalizeTimeValue, timeValueInfo, uniqueTimeValues } from "../src/shared/data/time-values.js";
+import { normalizeTabularRecords, profileTabularData } from "../src/shared/import/tabular-data.js";
+import { fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
+import { buildBarChartOption, buildLineChartOption, defaultTimeFilter, prepareSuggestions } from "../src/shared/import/ai-chart-pipeline.js";
 
 const recurring = [
   ["month", ["T10", "T2", "T1"], ["T1", "T2", "T10"]],

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
-import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { loadAdministrativeBoundaries } from "../src/shared/geography/administrative-boundaries.js";
+import { joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
 
 const polygon = { type: "MultiPolygon", coordinates: [[[[100, 1], [101, 1], [101, 2], [100, 1]]]] };
 const response = features => ({ ok: true, json: async () => ({ type: "FeatureCollection", features }) });

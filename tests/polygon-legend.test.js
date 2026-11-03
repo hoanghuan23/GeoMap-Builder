@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { polygonLegendLabels, POLYGON_NO_DATA_COLOR, resolvePolygonLegendConfig, samplePolygonLegendColor, summarizePolygonLegendValues } from "../src/polygon-legend.js";
-import { polygonFillExpression, polygonLegendScale } from "../src/renderers/polygon-style.js";
-import { withSuggestionMetric } from "../src/ai-chart-pipeline.js";
+import { polygonLegendLabels, POLYGON_NO_DATA_COLOR, resolvePolygonLegendConfig, samplePolygonLegendColor, summarizePolygonLegendValues } from "../src/shared/data/polygon-legend.js";
+import { polygonFillExpression, polygonLegendScale } from "../src/maps/polygon/style.js";
+import { withSuggestionMetric } from "../src/shared/import/ai-chart-pipeline.js";
 import { legendFixture, legendColumn, legendSuggestion, legendData } from "./fixtures/polygon-legend-fixture.js";
 
 const resolve = (values, legend = legendFixture(), options = {}) => resolvePolygonLegendConfig({

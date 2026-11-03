@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { WebMercatorViewport } from '@deck.gl/core';
-import { createArcFlowModel, buildArcFlowView, classifyArcFlows, arcFlowPath } from '../src/arc-flow-data.js';
-import { parseSpreadsheetBuffer } from '../src/tabular-parser.js';
-import { normalizeTabularRecords, profileTabularData } from '../src/tabular-data.js';
-import { validateAndNormalizeAnalysis, ANALYSIS_RESPONSE_SCHEMA, supportedChartsForPrompt } from '../src/ai-chart-contract.js';
-import { prepareSuggestions } from '../src/ai-chart-pipeline.js';
-import { describeWorkspaceLayer, layerData, tableRecords, csvForRecords } from '../src/map-layer-data.js';
+import { createArcFlowModel, buildArcFlowView, classifyArcFlows, arcFlowPath } from '../src/maps/arc-flow/data.js';
+import { parseSpreadsheetBuffer } from '../src/shared/import/tabular-parser.js';
+import { normalizeTabularRecords, profileTabularData } from '../src/shared/import/tabular-data.js';
+import { validateAndNormalizeAnalysis, ANALYSIS_RESPONSE_SCHEMA, supportedChartsForPrompt } from '../src/shared/import/ai-chart-contract.js';
+import { prepareSuggestions } from '../src/shared/import/ai-chart-pipeline.js';
+import { describeWorkspaceLayer, layerData, tableRecords, csvForRecords } from '../src/shared/view/map-layer-data.js';
 import { normalizeCompositionInput } from '../src/map-composition-contract.js';
-import { nativeMapDataset } from '../src/native-map-data.js';
+import { nativeMapDataset } from '../src/shared/data/native-map-data.js';
 import { analysis, bindings, columns, row, suggestion } from './fixtures/arc-flow-fixture.js';
 import { airportArcFlowFixture } from './fixtures/airport-arc-flow-fixture.js';
 
@@ -162,7 +162,7 @@ test('city and national routes rise visibly above the map at their fitted zoom l
 test('workspace descriptors, table and CSV share all filtered ODs independently of Top N', () => {
   const records = Array.from({ length: 120 }, (_, i) => row({ destination: `B${i}`, passengers: i }));
   const model = createArcFlowModel(records, columns, suggestion); const view = buildArcFlowView(model);
-  const state = { mapType: 'arc_flow', arcFlowView: view, aiDataset: { records, analysis, suggestions: [{ ...suggestion, available: true }], selectedSuggestionId: suggestion.id } };
+  const state = { getView:()=>({data:view.data,tableRecords:view.tableRecords}), mapType: 'arc_flow', arcFlowView: view, aiDataset: { records, analysis, suggestions: [{ ...suggestion, available: true }], selectedSuggestionId: suggestion.id } };
   assert.equal(tableRecords(state).length, 120); assert.equal(layerData(state).features.length, 120);
   assert.equal(csvForRecords(tableRecords(state)).split('\n').length, 121);
   const descriptor = describeWorkspaceLayer('a', state, 'Flows');

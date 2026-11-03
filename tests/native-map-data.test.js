@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nativeMapDataset, nativeMapView } from '../src/native-map-data.js';
-import { buildPopupChart, createPopupChartSelection } from '../src/ai-popup-chart.js';
-import { geometryExtent, describeWorkspaceLayer, csvForRecords } from '../src/map-layer-data.js';
+import { nativeMapDataset, nativeMapView } from '../src/shared/data/native-map-data.js';
+import { buildPopupChart, createPopupChartSelection } from '../src/shared/popup/ai-popup-chart.js';
+import { geometryExtent, describeWorkspaceLayer, csvForRecords } from '../src/shared/view/map-layer-data.js';
 
 const geometry = { type: 'Polygon', coordinates: [[[105, 21], [106, 21], [106, 22], [105, 21]]] };
 const features = [1, 2].flatMap(id => [1, 2].map(day => ({ type: 'Feature', id, geometry, properties: { name: 'Tên trùng', date: new Date(`2026-09-0${day}`), temperature: id * 10 + day } })));

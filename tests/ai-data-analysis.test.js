@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { displayFilterValue, fallbackMapRecommendation, requestAiDataAnalysis, summarizeTabularData } from "../src/ai-data-analysis.js";
+import { displayFilterValue, fallbackMapRecommendation, requestAiDataAnalysis, summarizeTabularData } from "../src/shared/import/ai-data-analysis.js";
 
 const records = [
   { "Tỉnh/thành phố": "Hà Nội", "Ngày": new Date("2026-09-01T00:00:00Z"), "Nhiệt độ trung bình": 29.4, "Độ ẩm": 70 },

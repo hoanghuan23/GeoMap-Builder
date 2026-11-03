@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { aiMapRecommendationPlugin } from "../server/ai-map-recommendation.js";
 import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
-import { profileTabularData } from "../src/tabular-data.js";
+import { profileTabularData } from "../src/shared/import/tabular-data.js";
 import { accessField, accessLegend, categoricalCountryFixture } from "./fixtures/categorical-countries-fixture.js";
 import { analysis as arcAnalysis, bindings as arcBindings, row as arcRow } from './fixtures/arc-flow-fixture.js';
 import { airportArcFlowFixture } from './fixtures/airport-arc-flow-fixture.js';

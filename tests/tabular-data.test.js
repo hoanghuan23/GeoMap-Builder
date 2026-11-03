@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeTabularRecords, parseTimeValue, profileTabularData } from "../src/tabular-data.js";
+import { normalizeTabularRecords, parseTimeValue, profileTabularData } from "../src/shared/import/tabular-data.js";
 
 test("profile mặc định có mẫu và cho phép tắt samples/head", () => {
   const records = Array.from({ length: 20 }, (_, index) => ({ place: `P${index}`, value: index }));

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMapLayerManager, orderWorkspaceMapLayers } from '../src/map-layer-manager.js';
-import { filterCountryRegionData } from '../src/country-regions.js';
+import { filterCountryRegionData } from '../src/shared/geography/country-regions.js';
 
 function fakeMap() {
   const sources = new Map(); const layers = new Map(); const listeners = new Map();

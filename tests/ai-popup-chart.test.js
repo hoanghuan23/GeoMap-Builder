@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupDisplayOptions } from "../src/ai-popup-chart.js";
+import { buildPopupChart, createPopupChartSelection, mapDisplaySuggestions, popupDisplayOptions } from "../src/shared/popup/ai-popup-chart.js";
 import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 import { normalizeLineChartConfig } from "../src/charts/line-chart.js";
-import { buildRegionHexGrid } from "../src/region-hex-grid.js";
+import { buildRegionHexGrid } from "../src/maps/polygon/region-grid.js";
 import { storeColumns, storeRecords, storeBindings } from "./fixtures/store-points-fixture.js";
 
 const columns = [

@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInfoImagePopup, popupImageUrls, pointDirectionsUrl } from '../src/info-image-popup.js';
-import { normalizePopupContent, popupUrls } from '../src/popup-content-contract.js';
-import { popupDisplayOptions } from '../src/ai-popup-chart.js';
-import { validateAndNormalizeAnalysis, ANALYSIS_RESPONSE_SCHEMA } from '../src/ai-chart-contract.js';
+import { createInfoImagePopup, popupImageUrls, pointDirectionsUrl } from '../src/shared/popup/info-image-popup.js';
+import { normalizePopupContent, popupUrls } from '../src/shared/popup/popup-content-contract.js';
+import { popupDisplayOptions } from '../src/shared/popup/ai-popup-chart.js';
+import { validateAndNormalizeAnalysis, ANALYSIS_RESPONSE_SCHEMA } from '../src/shared/import/ai-chart-contract.js';
 import { popupAttributeRecords, imagePopupContent, popupPointGeoJSON } from './fixtures/popup-attributes.js';
 
 class Element {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { recordsToPointGeoJSON } from "../src/h3-utils.js";
+import { recordsToPointGeoJSON } from "../src/shared/geography/h3-utils.js";
 
 test("Point GeoJSON dùng binding tọa độ và giữ đủ thuộc tính cho popup", () => {
   const data = recordsToPointGeoJSON([{

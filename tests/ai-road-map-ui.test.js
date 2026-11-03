@@ -1,16 +1,17 @@
-import { createArcFlowController } from "../src/arc-flow-controller.js";
+import { installRuntime } from "./fixtures/runtime-driver.js";
+import { createArcFlowController } from "../src/maps/arc-flow/controller.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import * as pipeline from "../src/ai-chart-pipeline.js";
-import * as popupChart from "../src/ai-popup-chart.js";
-import * as coordinates from "../src/coordinate-data.js";
-import * as roadMap from "../src/road-map-data.js";
-import * as timeValues from "../src/time-values.js";
-import { AI_CHART_REGISTRY } from "../src/ai-chart-contract.js";
-import { displayFilterValue, comparableFilterValue } from "../src/ai-data-analysis.js";
-import { polygonLegendLabels } from "../src/polygon-legend.js";
+import * as pipeline from "../src/shared/import/ai-chart-pipeline.js";
+import * as popupChart from "../src/shared/popup/ai-popup-chart.js";
+import * as coordinates from "../src/maps/line/coordinates.js";
+import * as roadMap from "../src/maps/line/data.js";
+import * as timeValues from "../src/shared/data/time-values.js";
+import { AI_CHART_REGISTRY } from "../src/shared/import/ai-chart-contract.js";
+import { displayFilterValue, comparableFilterValue } from "../src/shared/import/ai-data-analysis.js";
+import { polygonLegendLabels } from "../src/shared/data/polygon-legend.js";
 
 const roads = { type: "FeatureCollection", features: [{ type: "Feature", properties: { name: "Đường A" },
   geometry: { type: "LineString", coordinates: [[105.8, 21], [105.81, 21.01]] } }] };
@@ -28,7 +29,7 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => roads })
   });
   const get = id => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
   const descendants = node => [node, ...node.children.flatMap(descendants)];
-  const map = {
+  const map = { on() {},
     getSource: id => sources.get(id), getLayer: id => layers.get(id), resize() {}, fitBounds() {},
     setPaintProperty(id, field, value) { layers.get(id).paint[field] = value; },
     setLayoutProperty(id, field, value) { layers.get(id).layout[field] = value; }
@@ -50,10 +51,7 @@ function harness(fetchImpl = async () => ({ ok: true, json: async () => roads })
         ? descendants(get("ai-filter-controls")).filter(node => node.className === "ai-generated-filter") : [] },
     maplibregl: { LngLatBounds: class { extend() { return this; } } }
   });
-  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
-    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = {};\n")
-    .replace(/\/\/ Runtime public API[\s\S]*$/, "");
-  vm.runInContext(source, context);
+  installRuntime(context);
   context.testMap = map; context.testColumns = columns;
   vm.runInContext(`map = testMap; state.aiDataset = {
     records: [
@@ -88,7 +86,7 @@ test("AI map_line dùng bộ lọc chung, đổi giờ, ẩn/hiện và dọn d�
   assert.equal(areaFilters[0].checked, false);
   assert.equal(get("line-toggle-label").textContent, "Hiển thị tuyến đường");
   filters().find(control => control.dataset.field === "Thời điểm").value = "2026-10-13T01:00:00.000Z";
-  await vm.runInContext("filteredAiBoundary()", context);
+  await vm.runInContext("runtimeApi.context.modules.active().update()", context);
   assert.equal(sources.get("line-data").data.features[0].properties["Tốc độ"], 20);
   get("show-map-lines").checked = false;
   vm.runInContext("applyMapLayerVisibility()", context);
@@ -165,12 +163,12 @@ test("nhiều Khu vực có bộ lọc mặc định tất cả và cập nhật
   assert.equal(sources.get("line-data").data.features.length, 2);
   const daNang = areas.find(control => control.value === "Đà Nẵng");
   daNang.checked = true;
-  await vm.runInContext("filteredAiBoundary()", context);
+  await vm.runInContext("runtimeApi.context.modules.active().update()", context);
   assert.equal(sources.get("line-data").data.features.length, 1);
   assert.equal(sources.get("line-data").data.features[0].properties["Khu vực"], "Đà Nẵng");
   assert.equal(sources.get("line-data").data.features[0].properties["Tốc độ"], 50);
   daNang.checked = false;
-  await vm.runInContext("filteredAiBoundary()", context);
+  await vm.runInContext("runtimeApi.context.modules.active().update()", context);
   assert.equal(sources.get("line-data").data.features.length, 2);
 });
 

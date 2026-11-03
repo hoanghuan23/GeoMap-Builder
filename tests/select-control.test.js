@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { keepSelectOpenAfterMouseClick } from "../src/select-control.js";
+import { keepSelectOpenAfterMouseClick } from "../src/shared/ui/select-control.js";
 
 function fakeSelect({ supportsPicker = true } = {}) {
   const listeners = new Map();

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
 
 const boundary = (name, x) => ({
   type: "Feature",

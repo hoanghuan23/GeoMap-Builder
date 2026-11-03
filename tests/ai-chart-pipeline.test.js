@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildBarChartOption, buildLineChartOption, defaultBarMetrics, defaultTimeFilter, evaluateSuggestion, prepareSuggestions, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
-import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
-import { normalizeTabularRecords } from "../src/tabular-data.js";
-import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
-import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { buildBarChartOption, buildLineChartOption, defaultBarMetrics, defaultTimeFilter, evaluateSuggestion, prepareSuggestions, withSuggestionMetric } from "../src/shared/import/ai-chart-pipeline.js";
+import { validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
+import { normalizeTabularRecords } from "../src/shared/import/tabular-data.js";
+import { parseSpreadsheetBuffer } from "../src/shared/import/tabular-parser.js";
+import { joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
 import { createWeather34Workbook, WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
 
 const columns = [

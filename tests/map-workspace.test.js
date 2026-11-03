@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMapWorkspace, addWorkspaceLayer, createWorkspaceGroup, applyWorkspaceComposition, removeWorkspaceLayer, activeMapGroup } from '../src/map-workspace.js';
 import { normalizeCompositionInput, normalizeCompositionResult, fallbackComposition } from '../src/map-composition-contract.js';
-import { buildGroupDataSearchIndex } from '../src/map-search.js';
+import { buildGroupDataSearchIndex } from '../src/shared/search/map-search.js';
 
 const layer = (workspace, title) => addWorkspaceLayer(workspace, { dataset: { title }, title, fileKey: title, descriptor: {} });
 test('group membership, sidebar focus and per-layer data remain independent', () => {

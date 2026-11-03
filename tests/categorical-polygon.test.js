@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { profileTabularData } from "../src/tabular-data.js";
-import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
-import { resolveAggregation, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
-import { normalizePolygonLegendRecommendation, polygonLegendTarget } from "../src/polygon-legend-contract.js";
-import { resolvePolygonLegendConfig } from "../src/polygon-legend.js";
-import { polygonFillExpression } from "../src/renderers/polygon-style.js";
-import { categoryColorProperties, featureCategoryValues } from "../src/categorical-color.js";
-import { loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
-import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
-import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
-import { popupRegionRecords } from "../src/ai-popup-chart.js";
+import { profileTabularData } from "../src/shared/import/tabular-data.js";
+import { validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
+import { resolveAggregation, withSuggestionMetric } from "../src/shared/import/ai-chart-pipeline.js";
+import { normalizePolygonLegendRecommendation, polygonLegendTarget } from "../src/shared/data/polygon-legend-contract.js";
+import { resolvePolygonLegendConfig } from "../src/shared/data/polygon-legend.js";
+import { polygonFillExpression } from "../src/maps/polygon/style.js";
+import { categoryColorProperties, featureCategoryValues } from "../src/shared/data/categorical-color.js";
+import { loadAdministrativeBoundaries } from "../src/shared/geography/administrative-boundaries.js";
+import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/shared/search/map-search.js";
+import { popupRegionRecords } from "../src/shared/popup/ai-popup-chart.js";
 import { descriptiveCountryFetch } from "./fixtures/descriptive-countries-fixture.js";
 import { accessField, accessLegend, categoricalCountryFixture } from "./fixtures/categorical-countries-fixture.js";
 

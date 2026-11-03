@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSpreadsheetBuffer } from '../src/tabular-parser.js';
-import { pointGeoJSONToRecords } from '../src/geojson-layers.js';
-import { describeWorkspaceLayer, tableRecords } from '../src/map-layer-data.js';
+import { parseSpreadsheetBuffer } from '../src/shared/import/tabular-parser.js';
+import { pointGeoJSONToRecords } from '../src/shared/geography/geojson-layers.js';
+import { describeWorkspaceLayer, tableRecords } from '../src/shared/view/map-layer-data.js';
 import { createMapWorkspace, addWorkspaceLayer, createWorkspaceGroup, applyWorkspaceComposition, removeWorkspaceLayer } from '../src/map-workspace.js';
 import { normalizeCompositionInput, normalizeCompositionResult } from '../src/map-composition-contract.js';
 import { normalizeJoinValue, joinedPopupSources } from '../src/attribute-joins.js';
-import { popupImageUrls } from '../src/info-image-popup.js';
+import { popupImageUrls } from '../src/shared/popup/info-image-popup.js';
 import { analyzeMapComposition } from '../server/map-composition.js';
 import { popupAttributeRecords, imagePopupContent, popupPointGeoJSON, createPopupAttributesWorkbook } from './fixtures/popup-attributes.js';
 

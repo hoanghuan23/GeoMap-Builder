@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import * as XLSX from 'xlsx';
 import { createHarness } from './fixtures/map-runtime-harness.js';
-import { requestAiDataAnalysis } from '../src/ai-data-analysis.js';
-import { fallbackAnalysis, validateAndNormalizeAnalysis } from '../src/ai-chart-contract.js';
-import { prepareSuggestions } from '../src/ai-chart-pipeline.js';
-import { expandJsonUpload, jsonDatasets } from '../src/json-datasets.js';
-import { tableRecords } from '../src/map-layer-data.js';
-import { nativeMapDataset } from '../src/native-map-data.js';
+import { requestAiDataAnalysis } from '../src/shared/import/ai-data-analysis.js';
+import { fallbackAnalysis, validateAndNormalizeAnalysis } from '../src/shared/import/ai-chart-contract.js';
+import { prepareSuggestions } from '../src/shared/import/ai-chart-pipeline.js';
+import { expandJsonUpload, jsonDatasets } from '../src/shared/import/json-datasets.js';
+import { tableRecords } from '../src/shared/view/map-layer-data.js';
+import { nativeMapDataset } from '../src/shared/data/native-map-data.js';
 import { layerRank } from '../src/layer-order.js';
 
 const noMap = { datasetTitle: 'Kết quả phân tích', grain: 'Một bản ghi', columns: [], suggestions: [], search_bar: false, search_fields: [], source: 'ai' };

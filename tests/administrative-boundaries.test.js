@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
-import { landOnlyBoundary } from "../src/map-search.js";
-import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "../src/shared/geography/administrative-boundaries.js";
+import { landOnlyBoundary } from "../src/shared/search/map-search.js";
+import { joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
 import { WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
 
 const polygon = { type: "Polygon", coordinates: [[[105, 20], [106, 20], [106, 21], [105, 20]]] };

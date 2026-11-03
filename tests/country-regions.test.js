@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import countries from "../administrative_division/COUNTRY_REGIONS/country_regions.json" with { type: "json" };
-import { buildCountryRegionNavigation, normalizeRegionNavigation, resolveCountryRegion } from "../src/country-regions.js";
-import { profileTabularData } from "../src/tabular-data.js";
-import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { buildCountryRegionNavigation, normalizeRegionNavigation, resolveCountryRegion } from "../src/shared/geography/country-regions.js";
+import { profileTabularData } from "../src/shared/import/tabular-data.js";
+import { validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
 
 const sea = "subregion:South-eastern Asia";
 const asia = "region:Asia";

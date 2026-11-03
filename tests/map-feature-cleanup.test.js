@@ -1,12 +1,8 @@
+import { createMapLayerRuntime } from "../src/shared/runtime/index.js";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import vm from "node:vm";
-import { createArcFlowController } from "../src/arc-flow-controller.js";
-import { CONFIG } from "../src/config.js";
-import { DEFAULT_POINT_STYLE } from "../src/renderers/point-style.js";
-import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
-import { evaluateSuggestion, prepareSuggestions } from "../src/ai-chart-pipeline.js";
+import { validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
+import { evaluateSuggestion, prepareSuggestions } from "../src/shared/import/ai-chart-pipeline.js";
 
 test("retired visualizations cannot enter map validation or preparation", () => {
   const columns = [
@@ -28,20 +24,13 @@ test("retired visualizations cannot enter map validation or preparation", () => 
 });
 
 test("disposing a map runtime releases its overlay without accessing retired chart controls", () => {
-  // Evaluate the runtime without Vite-only asset imports or the workspace bootstrap.
-  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
-    .replace(/^import[^\n]*\n/gm, "")
-    .replace("export function createMapLayerRuntime", "function createMapLayerRuntime")
-    .replace(/^if \(typeof document[^\n]*$/m, "");
-  const createMapLayerRuntime = vm.runInNewContext(`${source}\ncreateMapLayerRuntime`, {
-    createArcFlowController, CONFIG, DEFAULT_POINT_STYLE, clearTimeout
-  });
   const removed = [];
   const runtime = createMapLayerRuntime({
     id: "cleanup-layer",
     document: { getElementById(name) { assert.fail(`Unexpected control access during disposal: ${name}`); } },
     arcFlowOverlay: { removeLayer(id) { removed.push(id); } }
   });
+  runtime.state.mapType="arc_flow";runtime.getView();
   runtime.dispose();
   assert.deepEqual(removed, ["cleanup-layer"]);
 });

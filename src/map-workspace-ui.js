@@ -3,14 +3,14 @@ import { createCompositionClient } from './map-composition.js';
 import { fallbackComposition } from './map-composition-contract.js';
 import { createMapLayerManager, orderWorkspaceMapLayers } from './map-layer-manager.js';
 import { createLayerDocument } from './map-layer-document.js';
-import { describeWorkspaceLayer, geometryExtent, layerData, tableRecords, csvForRecords } from './map-layer-data.js';
+import { describeWorkspaceLayer, geometryExtent, layerData, tableRecords, csvForRecords } from './shared/view/map-layer-data.js';
 import { joinedPopupSources } from './attribute-joins.js';
-import { createMapSearch } from './map-search.js';
-import { countryRegionMatches, filterCountryRegionData } from './country-regions.js';
-import { CONFIG } from './config.js';
-import { expandJsonUpload } from './json-datasets.js';
-import { keepSelectOpenAfterMouseClick } from './select-control.js';
-import { createArcFlowOverlayManager } from './arc-flow-overlay.js';
+import { createMapSearch } from './shared/search/map-search.js';
+import { countryRegionMatches, filterCountryRegionData } from './shared/geography/country-regions.js';
+import { CONFIG } from './shared/config.js';
+import { expandJsonUpload } from './shared/import/json-datasets.js';
+import { keepSelectOpenAfterMouseClick } from './shared/ui/select-control.js';
+import { createArcFlowOverlayManager } from './shared/view/arc-overlay.js';
 
 const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
@@ -153,13 +153,13 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   function fitGroup(group) {
     const extents = group.layerIds.map(id => {
       const item = runtimes.get(id);
-      return geometryExtent(filterCountryRegionData(layerData(item.api.state), item.api.searchData(), group.regionId));
+      return geometryExtent(filterCountryRegionData(layerData(item.api), item.api.searchData(), group.regionId));
     }).filter(Boolean);
     if (!extents.length) return;
     const bbox = [Math.min(...extents.map(box => box[0])), Math.min(...extents.map(box => box[1])), Math.max(...extents.map(box => box[2])), Math.max(...extents.map(box => box[3]))];
-    const hasArc = group.layerIds.some(id => runtimes.get(id)?.api.state.mapType === 'arc_flow');
+    const camera = group.layerIds.map(id => runtimes.get(id)?.api.getView().camera).find(Boolean);
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 75, maxZoom: 12, duration: 0,
-      pitch: hasArc ? 55 : 0, bearing: 0 });
+      pitch: camera?.pitch || 0, bearing: camera?.bearing || 0 });
   }
 
   function sync() {
@@ -221,10 +221,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       item.metricHeading.textContent = workspace.layersById[id]?.title || '';
       item.legendHeading.textContent = workspace.layersById[id]?.title || '';
       const otherLegend = [...item.legends.children].some(node => node !== item.genericLegend && node.tagName === 'DIV' && !node.hidden);
-      const count = filterCountryRegionData(layerData(item.api.state), config, regionId)?.features?.length || 0;
-      const legendEnabled = item.api.state.mapType === 'point' ? item.api.state.pointStyle.showLegend
-        : item.api.state.mapType === 'line' ? item.api.state.roadDisplayStyle.showLegend
-          : item.api.state.mapType === 'arc_flow' ? item.api.state.arcFlowStyle.showLegend : true;
+      const count = filterCountryRegionData(layerData(item.api), config, regionId)?.features?.length || 0;
+      const legendEnabled = item.api.getView().legendVisible;
       item.genericLegend.hidden = !legendEnabled || otherLegend || !count;
       if (!item.genericLegend.hidden) item.genericLegend.textContent = `${workspace.layersById[id]?.title} · ${count.toLocaleString('vi-VN')} đối tượng`;
       item.table.hidden = !active || !tableShown;
@@ -255,10 +253,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     item.tabs.dataset.signature = key;
     item.layerCount.textContent = `${group.layerIds.length} lớp`;
     item.tabs.replaceChildren(...group.layerIds.map(id => {
-      const member = workspace.layersById[id]; const type = runtimes.get(id).api.state.mapType;
+      const member = workspace.layersById[id]; const definition = runtimes.get(id).api.getView().definition;
       const duplicateTitle = group.layerIds.some(key => key !== id && workspace.layersById[key].title === member.title);
       const label = `${member.title}${duplicateTitle ? ` · ${runtimes.get(id).api.state.fileName || id}` : ''}`;
-      const button = textNode('button', `${type === 'arc_flow' ? '⌒' : type === 'point' ? '●' : type === 'line' ? '╱' : '▧'} ${label}`, 'map-layer-tab');
+      const button = textNode('button', `${definition?.tabIcon || '▧'} ${label}`, 'map-layer-tab');
       button.title = label;
       button.type = 'button'; button.id = `${item.id}-tab-${id}`; button.dataset.layerId = id;
       button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(group.activeLayerId === id));
@@ -278,18 +276,18 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   }
 
   function renderTable(item, title) {
-    const state = item.api.state; const data = layerData(state);
+    const state = item.api.state; const data = layerData(item.api);
     const regionId = workspace.layersById[item.id]?.sourceKind === 'attribute' ? '' : activeMapGroup(workspace)?.regionId || '';
     const signature = [data, state.page, state.pageSize, state.query, regionId];
     if (item.tableSnapshot && item.tableSnapshot.every((value, index) => signature[index] === value)) return;
     const config = item.api.searchData();
-    const all = tableRecords(state).filter(record => countryRegionMatches(record, config, regionId)); const query = state.query.trim().toLocaleLowerCase('vi');
+    const all = tableRecords(item.api).filter(record => countryRegionMatches(record, config, regionId)); const query = state.query.trim().toLocaleLowerCase('vi');
     const filtered = query ? all.filter(record => Object.values(record).some(value => String(value ?? '').toLocaleLowerCase('vi').includes(query))) : all;
     const columns = [...new Set(all.flatMap(record => Object.keys(record).filter(key => !key.startsWith('__'))))];
     const el = name => item.dom.elements.get(name);
     state.page = Math.max(1, Math.min(state.page, Math.ceil(filtered.length / state.pageSize) || 1));
     const start = (state.page - 1) * state.pageSize;
-    el('table-title').textContent = title + (state.mapType === 'arc_flow' ? ' · Luồng đang lọc' : ''); el('table-search').placeholder = 'Tìm trong dữ liệu lớp...';
+    el('table-title').textContent = title + (item.api.getView().tableTitleSuffix || ''); el('table-search').placeholder = 'Tìm trong dữ liệu lớp...';
     const head = document.createElement('tr'); head.append(textNode('th', '#'), ...columns.map(column => textNode('th', column)));
     el('data-head').replaceChildren(head);
     el('data-body').replaceChildren(...filtered.slice(start, start + state.pageSize).map((record, index) => {
@@ -304,7 +302,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
 
   function downloadRecords(state, title, config) {
     const regionId = activeMapGroup(workspace)?.regionId || '';
-    const records = tableRecords(state).filter(record => countryRegionMatches(record, config, regionId)); const query = state.query.trim().toLocaleLowerCase('vi');
+    const records = tableRecords(item.api).filter(record => countryRegionMatches(record, config, regionId)); const query = state.query.trim().toLocaleLowerCase('vi');
     const filtered = query ? records.filter(record => Object.values(record).some(value => String(value ?? '').toLocaleLowerCase('vi').includes(query))) : records;
     const url = URL.createObjectURL(new Blob([csvForRecords(filtered)], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a'); link.href = url; link.download = `${title.replace(/[<>:"/\\|?*]/g, '_')}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -422,7 +420,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         const analysis = state.aiDataset?.analysis || result.spatialAnalysis;
         const title = analysis?.source === 'ai' && analysis.datasetTitle ? analysis.datasetTitle : upload.file.name.replace(/\.[^.]+$/, '');
         const layer = addWorkspaceLayer(workspace, { dataset: state.aiDataset || result, runtime: item.api, title, fileKey: upload.key,
-          descriptor: describeWorkspaceLayer(runtimeId, state, title) });
+          descriptor: describeWorkspaceLayer(runtimeId, item.api, title) });
         runtimes.set(layer.id, item);
         sidebars.append(item.panel); metrics.append(item.metric); legendOriginal.append(item.legends); tables.append(item.table);
         upload.processing = false; upload.sheets = null;
@@ -440,7 +438,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     }
     const pendingIds = newIds.filter(id => workspace.layersById[id]);
     for (const id of pendingIds) {
-      const layer = workspace.layersById[id]; layer.descriptor = describeWorkspaceLayer(id, runtimes.get(id).api.state, layer.title);
+      const layer = workspace.layersById[id]; layer.descriptor = describeWorkspaceLayer(id, runtimes.get(id).api, layer.title);
     }
     if (pendingIds.length) await compose(pendingIds);
     sync();
@@ -461,7 +459,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       const revision = workspace.revision;
       const input = { workspaceRevision: revision, activeGroupId: workspace.activeGroupId, newLayerIds: newIds,
         layers: Object.values(workspace.layersById).map(layer => {
-          layer.descriptor = describeWorkspaceLayer(layer.id, runtimes.get(layer.id).api.state, layer.title);
+          layer.descriptor = describeWorkspaceLayer(layer.id, runtimes.get(layer.id).api, layer.title);
           return layer.descriptor;
         }),
         groups: workspace.groupOrder.map(id => ({ id, title: workspace.groupsById[id].title, layerIds: workspace.groupsById[id].layerIds })) };

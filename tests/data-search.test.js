@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildDataSearchIndex, buildGroupDataSearchIndex, createMapSearch, searchDataIndex } from "../src/map-search.js";
+import { buildDataSearchIndex, buildGroupDataSearchIndex, createMapSearch, searchDataIndex } from "../src/shared/search/map-search.js";
 import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
 import { mockMapRecommendation } from "./fixtures/mock-ai-analysis.js";
-import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
-import { normalizeTabularRecords } from "../src/tabular-data.js";
-import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { parseSpreadsheetBuffer } from "../src/shared/import/tabular-parser.js";
+import { normalizeTabularRecords } from "../src/shared/import/tabular-data.js";
+import { joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
 import { normalizeCompositionInput, normalizeCompositionResult } from "../src/map-composition-contract.js";
 import { createMapWorkspace, addWorkspaceLayer, createWorkspaceGroup, applyWorkspaceComposition } from "../src/map-workspace.js";
 import { countryFeature, createCountryWeatherWorkbook, WEATHER_COUNTRIES } from "./fixtures/country-weather-fixture.js";
-import { filterCountryRegionData } from "../src/country-regions.js";
+import { filterCountryRegionData } from "../src/shared/geography/country-regions.js";
 import { createMapLayerManager } from "../src/map-layer-manager.js";
 
 function countryData() {

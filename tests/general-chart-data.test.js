@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fallbackAnalysis } from "../src/ai-chart-contract.js";
-import { buildBarChartOption, buildLineChartOption, prepareSuggestions } from "../src/ai-chart-pipeline.js";
+import { fallbackAnalysis } from "../src/shared/import/ai-chart-contract.js";
+import { buildBarChartOption, buildLineChartOption, prepareSuggestions } from "../src/shared/import/ai-chart-pipeline.js";
 
 const time = { name: "period", role: "time", granularity: "month" };
 const line = { id: "line", chartType: "line", title: "L", bindings: { x: "period", y: ["score"] }, confidence: .9 };

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "../src/polygon-legend-contract.js";
+import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "../src/shared/data/polygon-legend-contract.js";
 import { legendFixture, legendColumn } from "./fixtures/polygon-legend-fixture.js";
 
 const target = polygonLegendTarget(legendColumn);

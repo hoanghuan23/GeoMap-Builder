@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clipGeoJSONToPolygon, geometryKinds, pointGeoJSONToRecords } from "../src/geojson-layers.js";
+import { clipGeoJSONToPolygon, geometryKinds, pointGeoJSONToRecords } from "../src/shared/geography/geojson-layers.js";
 import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
-import { profileTabularData } from "../src/tabular-data.js";
+import { profileTabularData } from "../src/shared/import/tabular-data.js";
 
 const cells = {
   type: "FeatureCollection",

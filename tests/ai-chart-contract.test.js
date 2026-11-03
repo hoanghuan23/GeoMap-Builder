@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ANALYSIS_RESPONSE_SCHEMA, fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { ANALYSIS_RESPONSE_SCHEMA, fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
 import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
 import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 

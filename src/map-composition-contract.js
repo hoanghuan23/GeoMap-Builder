@@ -1,5 +1,5 @@
-import { POPUP_CONTENT_SCHEMA, normalizePopupContent } from "./popup-content-contract.js";
-import { normalizePopupSuggestions } from "./ai-chart-contract.js";
+import { POPUP_CONTENT_SCHEMA, normalizePopupContent } from "./shared/popup/popup-content-contract.js";
+import { normalizePopupSuggestions } from "./shared/import/ai-chart-contract.js";
 
 const nullableString = { anyOf: [{ type: 'string', maxLength: 160 }, { type: 'null' }] };
 export const MAP_COMPOSITION_SCHEMA = {

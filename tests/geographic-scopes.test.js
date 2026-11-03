@@ -1,16 +1,17 @@
+import { MAP_ANALYSIS_INSTRUCTIONS } from "../server/map-analysis-instructions.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { ANALYSIS_RESPONSE_SCHEMA, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
-import { profileTabularData } from "../src/tabular-data.js";
-import { loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
-import { largestBoundaryPart } from "../src/geographic-scopes.js";
-import { renderGeographicScopeMarkers } from "../src/renderers/geographic-scope-renderer.js";
+import { ANALYSIS_RESPONSE_SCHEMA, validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
+import { profileTabularData } from "../src/shared/import/tabular-data.js";
+import { loadAdministrativeBoundaries } from "../src/shared/geography/administrative-boundaries.js";
+import { largestBoundaryPart } from "../src/maps/polygon/scopes.js";
+import { renderGeographicScopeMarkers } from "../src/maps/polygon/scope-renderer.js";
 import { createHarness } from "./fixtures/map-runtime-harness.js";
 import vm from "node:vm";
 import { descriptiveColumns, descriptiveCountryFetch, descriptiveRecords, descriptiveSuggestion } from "./fixtures/descriptive-countries-fixture.js";
-import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
-import { featureCategoryValues } from "../src/categorical-color.js";
+import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
+import { featureCategoryValues } from "../src/shared/data/categorical-color.js";
 
 const polygon = x => ({ type: "Polygon", coordinates: [[[x, 0], [x + 1, 0], [x + 1, 1], [x, 0]]] });
 const response = features => ({ ok: true, json: async () => ({ features }) });
@@ -133,6 +134,7 @@ test("categorical scopes keep the source classification without a parent-country
 
 test("scope overlay uses only marker features and follows visibility, independent of polygon fill", () => {
   const { context, layers, get } = createHarness();
+  context.runtimeApi.context.modules.get("choropleth").restore();
   const marker = layers.get("scope-marker");
   assert.equal(marker.type, "circle");
   assert.equal(marker.source, "scope-marker-data");
@@ -149,7 +151,7 @@ test("scope overlay uses only marker features and follows visibility, independen
 });
 
 test("AI instructions describe scope choices from data rather than a fixed country exception", async () => {
-  const instructions = await readFile(new URL("../server/map-analysis-instructions.js", import.meta.url), "utf8");
+  const instructions = MAP_ANALYSIS_INSTRUCTIONS;
   for (const text of ["PHẠM VI THỰC SỰ", "profile.scopeRows", "render marker", "render unresolved", "bất kỳ nước nào"]) assert.ok(instructions.includes(text));
 });
 

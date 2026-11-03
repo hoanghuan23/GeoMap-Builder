@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
-import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { loadAdministrativeBoundaries } from "../src/shared/geography/administrative-boundaries.js";
+import { validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
 import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
-import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
+import { prepareSuggestions } from "../src/shared/import/ai-chart-pipeline.js";
 import { mockMapRecommendation } from "./fixtures/mock-ai-analysis.js";
-import { buildAdministrativeGeocodingUrl, countryCandidateScore, getMapTilerAdministrativeBoundary, landOnlyBoundary } from "../src/map-search.js";
-import { normalizeTabularRecords } from "../src/tabular-data.js";
-import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
-import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
+import { buildAdministrativeGeocodingUrl, countryCandidateScore, getMapTilerAdministrativeBoundary, landOnlyBoundary } from "../src/shared/search/map-search.js";
+import { normalizeTabularRecords } from "../src/shared/import/tabular-data.js";
+import { parseSpreadsheetBuffer } from "../src/shared/import/tabular-parser.js";
+import { joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
 import { countryFeature, createCountryWeatherWorkbook, WEATHER_COUNTRIES } from "./fixtures/country-weather-fixture.js";
 
 const response = features => ({ ok: true, json: async () => ({ type: "FeatureCollection", features }) });

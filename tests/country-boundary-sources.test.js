@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { countryBoundaryUrl, loadCountryBoundaryData, resolveBoundaryCountry } from "../src/country-boundary-sources.js";
-import { loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
+import { countryBoundaryUrl, loadCountryBoundaryData, resolveBoundaryCountry } from "../src/shared/geography/country-boundary-sources.js";
+import { loadAdministrativeBoundaries } from "../src/shared/geography/administrative-boundaries.js";
 
 const vietnam = { type: "FeatureCollection", features: [{ type: "Feature",
   properties: { GID_0: "VNM", COUNTRY: "Vietnam" },

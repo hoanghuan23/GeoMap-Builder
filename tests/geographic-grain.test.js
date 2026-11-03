@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { administrativeContextFields, geographicLocationName, preferredAdministrativeColumn } from "../src/geographic-grain.js";
-import { profileTabularData } from "../src/tabular-data.js";
-import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
-import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
+import { administrativeContextFields, geographicLocationName, preferredAdministrativeColumn } from "../src/shared/geography/geographic-grain.js";
+import { profileTabularData } from "../src/shared/import/tabular-data.js";
+import { validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
+import { prepareSuggestions } from "../src/shared/import/ai-chart-pipeline.js";
 import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
-import { loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
-import { buildAdministrativeGeocodingUrl, getMapTilerAdministrativeBoundary } from "../src/map-search.js";
-import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
-import { popupFeaturesMatch, popupRegionRecords } from "../src/ai-popup-chart.js";
+import { loadAdministrativeBoundaries } from "../src/shared/geography/administrative-boundaries.js";
+import { buildAdministrativeGeocodingUrl, getMapTilerAdministrativeBoundary } from "../src/shared/search/map-search.js";
+import { joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
+import { popupFeaturesMatch, popupRegionRecords } from "../src/shared/popup/ai-popup-chart.js";
 
 const rows = [1, 2].flatMap(day => [
   { "Quốc gia": "Việt Nam", "Khu vực": "Hà Nội", date: `2026-09-0${day}`, value: 20 + day },

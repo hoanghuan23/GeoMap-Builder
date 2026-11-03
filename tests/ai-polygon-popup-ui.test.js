@@ -1,30 +1,31 @@
-import { createArcFlowController } from "../src/arc-flow-controller.js";
+import { installRuntime } from "./fixtures/runtime-driver.js";
+import { createArcFlowController } from "../src/maps/arc-flow/controller.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import * as popupChart from "../src/ai-popup-chart.js";
-import * as pipeline from "../src/ai-chart-pipeline.js";
-import * as times from "../src/time-values.js";
-import { AI_CHART_REGISTRY, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
-import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "../src/ai-data-analysis.js";
-import { createAiPopupContent } from "../src/ai-popup.js";
-import { createInfoImagePopup } from "../src/info-image-popup.js";
-import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
-import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
-import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
-import { analyzeSpatialData } from "../src/data-capabilities.js";
-import * as roadMap from "../src/road-map-data.js";
-import * as coordinates from "../src/coordinate-data.js";
-import * as h3Utils from "../src/h3-utils.js";
-import * as pointStyle from "../src/renderers/point-style.js";
-import * as polygonStyle from "../src/renderers/polygon-style.js";
-import * as polygonLegend from "../src/polygon-legend.js";
-import * as legendContract from "../src/polygon-legend-contract.js";
-import * as categoricalColor from "../src/categorical-color.js";
+import * as popupChart from "../src/shared/popup/ai-popup-chart.js";
+import * as pipeline from "../src/shared/import/ai-chart-pipeline.js";
+import * as times from "../src/shared/data/time-values.js";
+import { AI_CHART_REGISTRY, validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
+import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "../src/shared/import/ai-data-analysis.js";
+import { createAiPopupContent } from "../src/shared/popup/ai-popup.js";
+import { createInfoImagePopup } from "../src/shared/popup/info-image-popup.js";
+import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/shared/search/map-search.js";
+import { administrativeBoundaryLabel, loadAdministrativeBoundaries } from "../src/shared/geography/administrative-boundaries.js";
+import { analyzeSpatialData } from "../src/shared/data/data-capabilities.js";
+import * as roadMap from "../src/maps/line/data.js";
+import * as coordinates from "../src/maps/line/coordinates.js";
+import * as h3Utils from "../src/shared/geography/h3-utils.js";
+import * as pointStyle from "../src/maps/point/style.js";
+import * as polygonStyle from "../src/maps/polygon/style.js";
+import * as polygonLegend from "../src/shared/data/polygon-legend.js";
+import * as legendContract from "../src/shared/data/polygon-legend-contract.js";
+import * as categoricalColor from "../src/shared/data/categorical-color.js";
 import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 import { storeColumns, storeRecords, storeSuggestions } from "./fixtures/store-points-fixture.js";
-import { normalizeTabularRecords, profileTabularData } from "../src/tabular-data.js";
+import { normalizeTabularRecords, profileTabularData } from "../src/shared/import/tabular-data.js";
 import { trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED } from "./fixtures/road-traffic-fixture.js";
 import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 import { descriptiveColumns, descriptiveCountryFetch, descriptiveRecords, descriptiveSuggestion } from "./fixtures/descriptive-countries-fixture.js";
@@ -145,12 +146,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
         : selector.startsWith(".geo-") ? get("ai-filter-controls").querySelectorAll(selector) : [] },
     maplibregl: { Popup }, AbortController, Date, console, setTimeout() {}, clearTimeout() {}, dataset, testMap: map, testFeatures: features
   });
-  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
-    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = testRuntimeOptions;\n")
-    .replace(/\/\/ Runtime public API[\s\S]*$/, api => api
-      .slice(0, api.lastIndexOf('\n}\n\nif (typeof document'))
-      .replace('return {', 'globalThis.runtimeApi = {'));
-  vm.runInContext(source, context);
+  installRuntime(context);
   const run = code => vm.runInContext(code, context);
   run("map = testMap; state.aiDataset = dataset; state.mapType = 'polygon'; state.boundary = {features: testFeatures}; bindUI(); populateAiFilters(dataset);");
   if (road) run("state.mapType = 'line'; state.boundary = null; dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]); populateAiFilters(dataset); refreshAiRoadMap();");

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createArcFlowOverlayManager } from '../src/arc-flow-overlay.js';
+import { createArcFlowOverlayManager } from '../src/shared/view/arc-overlay.js';
 
 function harness(options = {}) {
   let loads = 0; let created = 0; let disposed = 0; let sequence = 0;
@@ -49,4 +49,17 @@ test('unsupported WebGL2 and late loading after deletion/disposal release owners
   const h = harness({ loadRenderer: () => new Promise(resolve => { finish = () => resolve({ createArcFlowRenderer() { creations++; } }); }) });
   const pending = h.manager.updateLayer('a', h.payload); h.manager.dispose(); finish();
   assert.equal(await pending, false); assert.equal(creations, 0); assert.equal(h.frames.size, 0);
+});
+
+test('replacing an owner while the renderer loads invalidates the earlier activation', async () => {
+  let finish;
+  const h=harness({loadRenderer:()=>new Promise(resolve=>{finish=()=>resolve({createArcFlowRenderer:()=>({draw(){},removeLayer(){},dispose(){}})});})});
+  const previous=h.manager.updateLayer('a',h.payload);
+  h.manager.removeLayer('a');
+  const next=h.manager.updateLayer('a',{...h.payload,style:{animated:false,opacity:.4}});
+  finish();
+  assert.equal(await previous,false);
+  assert.equal(await next,true);
+  assert.equal(h.manager.ownerCount,1);
+  h.manager.dispose();
 });

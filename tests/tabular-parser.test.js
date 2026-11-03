@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import * as XLSX from "xlsx";
-import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
+import { parseSpreadsheetBuffer } from "../src/shared/import/tabular-parser.js";
 import { createWeather34Workbook, WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
 
 test("CSV UTF-8 không BOM giữ đúng header và tên địa danh tiếng Việt", () => {

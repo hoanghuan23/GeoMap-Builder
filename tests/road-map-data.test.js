@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { aiRoadMapStyle, joinRoadRecords, joinRoadRecordsByArea, roadAreaField, roadMapStyle, roadNetworkForArea, roadNetworksFromRecords, roadValueColumns } from "../src/road-map-data.js";
-import { defaultTimeFilter, applyPipelineFilters, prepareSuggestions, withSuggestionMetric } from "../src/ai-chart-pipeline.js";
-import { fallbackAnalysis, validateAndNormalizeAnalysis, AI_CHART_REGISTRY } from "../src/ai-chart-contract.js";
-import { normalizeTabularRecords, profileTabularData } from "../src/tabular-data.js";
+import { aiRoadMapStyle, joinRoadRecords, joinRoadRecordsByArea, roadAreaField, roadMapStyle, roadNetworkForArea, roadNetworksFromRecords, roadValueColumns } from "../src/maps/line/data.js";
+import { defaultTimeFilter, applyPipelineFilters, prepareSuggestions, withSuggestionMetric } from "../src/shared/import/ai-chart-pipeline.js";
+import { fallbackAnalysis, validateAndNormalizeAnalysis, AI_CHART_REGISTRY } from "../src/shared/import/ai-chart-contract.js";
+import { normalizeTabularRecords, profileTabularData } from "../src/shared/import/tabular-data.js";
 import { trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED } from "./fixtures/road-traffic-fixture.js";
-import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
-import { MAP_NO_DATA_COLOR } from "../src/map-value.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/shared/search/map-search.js";
+import { MAP_NO_DATA_COLOR } from "../src/shared/data/map-value.js";
 import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
 
 const roads = { type: "FeatureCollection", features: [

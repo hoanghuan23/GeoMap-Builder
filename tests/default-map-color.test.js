@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
-import { prepareSuggestions, resolveAggregation } from "../src/ai-chart-pipeline.js";
-import { loadAdministrativeBoundaries } from "../src/administrative-boundaries.js";
-import { countryLookupName } from "../src/country-boundary-sources.js";
-import { buildAdministrativeGeocodingUrl, buildDataSearchIndex, countryCandidateScore, getMapTilerAdministrativeBoundary, searchDataIndex } from "../src/map-search.js";
-import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
-import { popupRegionRecords } from "../src/ai-popup-chart.js";
+import { validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
+import { prepareSuggestions, resolveAggregation } from "../src/shared/import/ai-chart-pipeline.js";
+import { loadAdministrativeBoundaries } from "../src/shared/geography/administrative-boundaries.js";
+import { countryLookupName } from "../src/shared/geography/country-boundary-sources.js";
+import { buildAdministrativeGeocodingUrl, buildDataSearchIndex, countryCandidateScore, getMapTilerAdministrativeBoundary, searchDataIndex } from "../src/shared/search/map-search.js";
+import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
+import { popupRegionRecords } from "../src/shared/popup/ai-popup-chart.js";
 import { descriptiveColumns, descriptiveCountries, descriptiveCountryFetch, descriptiveRecords, descriptiveSuggestion } from "./fixtures/descriptive-countries-fixture.js";
 import { countryFeature } from "./fixtures/country-weather-fixture.js";
 

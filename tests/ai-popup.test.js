@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { aiPopupRows, createAiPopupContent } from "../src/ai-popup.js";
-import { summarizeFeatureProperties } from "../src/feature-properties.js";
+import { aiPopupRows, createAiPopupContent } from "../src/shared/popup/ai-popup.js";
+import { summarizeFeatureProperties } from "../src/shared/geography/feature-properties.js";
 
 const columns = [
   { name: "province", role: "geo", labelVi: "Tỉnh/thành phố" },

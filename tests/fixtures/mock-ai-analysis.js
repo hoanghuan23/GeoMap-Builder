@@ -1,7 +1,7 @@
 // Synthetic AI responses for existing rendering fixtures, never used by the application.
-import { inferTimeGranularity } from '../../src/time-values.js';
-import { administrativeContextFields, preferredAdministrativeColumn } from '../../src/geographic-grain.js';
-import { profileTabularData } from '../../src/tabular-data.js';
+import { inferTimeGranularity } from '../../src/shared/data/time-values.js';
+import { administrativeContextFields, preferredAdministrativeColumn } from '../../src/shared/geography/geographic-grain.js';
+import { profileTabularData } from '../../src/shared/import/tabular-data.js';
 const TIME_HINT_MAP = /(ngày|date|time|tháng|month|năm|year)/i;
 export function inferMeasureAggregation(column) {
   const text = `${column?.name || ""} ${column?.labelVi || ""} ${column?.unit || ""}`

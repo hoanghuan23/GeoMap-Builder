@@ -1,4 +1,4 @@
-import { normalizePopupContent } from './popup-content-contract.js';
+import { normalizePopupContent } from './shared/popup/popup-content-contract.js';
 
 export function normalizeJoinValue(value) {
   if (!['string', 'number', 'boolean'].includes(typeof value) || typeof value === 'number' && !Number.isFinite(value)) return '';

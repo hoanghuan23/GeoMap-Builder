@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createArcFlowController } from '../src/arc-flow-controller.js';
-import { tableRecords } from '../src/map-layer-data.js';
+import { createArcFlowController } from '../src/maps/arc-flow/controller.js';
+import { tableRecords } from '../src/shared/view/map-layer-data.js';
 import { analysis, row, suggestion } from './fixtures/arc-flow-fixture.js';
 
-function harness({ overlayAvailable = true, records = Array.from({ length: 120 }, (_, i) => row({ destination: `B${i}`, passengers: i })) } = {}) {
+function harness({ overlayAvailable = true, overlayUpdate, records = Array.from({ length: 120 }, (_, i) => row({ destination: `B${i}`, passengers: i })) } = {}) {
   const elements = new Map(); const sources = new Map(); const layers = new Map(); const published = []; const popups = []; const removed = [];
   const node = tag => ({ tag, children: [], events: {}, style: {}, value: '', checked: true, hidden: false, textContent: '',
     append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children = children; },
@@ -21,7 +21,7 @@ function harness({ overlayAvailable = true, records = Array.from({ length: 120 }
       constructor(options) { this.options = options; popups.push(this); }
       setLngLat(position) { this.position = position; return this; } setDOMContent(content) { this.content = content; return this; }
       addTo() { return this; } remove() { this.removed = true; }
-    } }, overlay: { async updateLayer(_id, payload) { published.push(payload); return overlayAvailable; }, removeLayer(id) { removed.push(id); } },
+    } }, overlay: { async updateLayer(_id, payload) { published.push(payload); return overlayUpdate ? overlayUpdate(payload) : overlayAvailable; }, removeLayer(id) { removed.push(id); } },
     id: 'a' });
   const control = caption => descendants(get('ai-filter-controls')).find(item => item.tag === 'label' && item.children[0]?.textContent === caption)?.children[1];
   return { controller, state, get, control, sources, layers, popups, published, removed };
@@ -32,14 +32,14 @@ const popupRow = (popup, label) => descendants(popup.content).find(node => node.
 test('layer controls, Top N, attribute filters and CSV/table state share the same view', async () => {
   const h = harness(); assert.equal(await h.controller.activate({ ...suggestion }), true);
   assert.equal(h.state.mapType, 'arc_flow'); assert.equal(h.state.arcFlowView.visibleFlows.length, 100);
-  assert.equal(tableRecords(h.state).length, 120);
+  assert.equal(tableRecords(h.controller).length, 120);
   const limit = h.control('Số cung hiển thị'); limit.value = 'all'; limit.events.change();
   assert.equal(h.state.arcFlowView.visibleFlows.length, 120);
   const target = h.control('Điểm đến'); target.value = h.state.arcFlowView.flows.find(flow => flow.target.name === 'B110').target.id; target.events.change();
-  assert.equal(h.state.arcFlowView.flows.length, 1); assert.equal(tableRecords(h.state).length, 1);
+  assert.equal(h.state.arcFlowView.flows.length, 1); assert.equal(tableRecords(h.controller).length, 1);
   assert.equal(h.sources.get('arc-node-data').data.features.length, 2);
   assert.equal(h.controller.reset(), true); assert.equal(h.state.arcFlowView.flows.length, 120);
-  assert.equal(h.state.arcFlowView.visibleFlows.length, 100); assert.equal(tableRecords(h.state).length, 120);
+  assert.equal(h.state.arcFlowView.visibleFlows.length, 100); assert.equal(tableRecords(h.controller).length, 120);
   h.controller.setActive(false); assert.equal(h.layers.get('arc-nodes').layout.visibility, 'none');
   h.controller.setActive(true); assert.equal(h.layers.get('arc-nodes').layout.visibility, 'visible');
 });
@@ -72,7 +72,7 @@ test('one time selector filters exactly one of three dates and All restores ever
     assert.equal(h.state.arcFlowView.flows.length, count);
     assert.equal(h.state.arcFlowView.total, total);
     assert.equal(h.state.arcFlowView.filteredRows, count);
-    assert.equal(tableRecords(h.state).length, count);
+    assert.equal(tableRecords(h.controller).length, count);
     assert.equal(h.published.at(-1).view, h.state.arcFlowView);
     h.published.at(-1).onClick(h.state.arcFlowView.flows[0]);
     assert.ok(popupRow(h.popups.at(-1), 'Bộ lọc').children[1].textContent.includes(`${15 + index}/09/2026`));
@@ -86,7 +86,7 @@ test('one time selector filters exactly one of three dates and All restores ever
 
   change('Số cung hiển thị', '50');
   assert.equal(h.state.arcFlowView.visibleFlows.length, 50);
-  assert.equal(tableRecords(h.state).length, 66);
+  assert.equal(tableRecords(h.controller).length, 66);
   await h.controller.activate({ ...suggestion });
   assert.equal(h.state.arcFlowView.total, allTotal);
   assert.equal(h.control('Số cung hiển thị').value, '50');
@@ -125,4 +125,37 @@ test('unavailable graphics do not activate an empty Arc map, and reduced motion 
     assert.equal(h.state.arcFlowStyle.animated, false);
     h.controller.dispose(); assert.equal(h.removed.at(-1), 'a');
   } finally { if (previous) globalThis.matchMedia = previous; else delete globalThis.matchMedia; }
+});
+
+test('restoring Arc Flow after a style reload recreates endpoints with the current view and style', async () => {
+  const h = harness(); await h.controller.activate({ ...suggestion });
+  h.controller.update({ style: { showLabels: false, opacity: .4 }, selection: { topN: 50 } });
+  const data = h.state.arcFlowView;
+  h.sources.clear(); h.layers.clear();
+  h.controller.restore(); h.controller.restore();
+  assert.equal(h.sources.size, 1); assert.equal(h.layers.size, 2);
+  assert.equal(h.sources.get('arc-node-data').data, data.nodes);
+  assert.equal(h.layers.get('arc-labels').layout.visibility, 'none');
+  assert.equal(h.published.at(-1).view, data);
+  assert.equal(h.published.at(-1).style.opacity, .4);
+  h.controller.dispose();
+});
+
+test('late Arc Flow activation cannot change a replacement dataset, a switched type or a deleted instance', async () => {
+  for (const action of ['replace', 'switch', 'clear', 'dispose']) {
+    const pending = [];
+    const h = harness({ overlayUpdate: () => new Promise(resolve => pending.push(resolve)) });
+    const item = { ...suggestion, available: true };
+    const activation = h.controller.activate(item);
+    if (action === 'replace') h.state.aiDataset = { ...h.state.aiDataset };
+    if (action === 'switch') h.state.mapType = 'point';
+    if (action === 'clear') h.controller.clear();
+    if (action === 'dispose') h.controller.dispose();
+    const before = h.state.mapType;
+    pending.forEach(resolve => resolve(false));
+    assert.equal(await activation, null, action);
+    assert.equal(h.state.mapType, before, action);
+    assert.equal(item.available, true, 'stale failures cannot disable a suggestion');
+    h.controller.dispose();
+  }
 });

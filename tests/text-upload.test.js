@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { createHarness } from "./fixtures/map-runtime-harness.js";
 import { weatherDocumentFile, weatherRecords, textWeatherAnalysis } from "./fixtures/text-weather-fixture.js";
-import { joinRecordsToMapTilerBoundaries } from "../src/vietnam-admin-data.js";
-import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
-import { aiPopupRows } from "../src/ai-popup.js";
-import { csvForRecords } from "../src/map-layer-data.js";
+import { joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/shared/search/map-search.js";
+import { aiPopupRows } from "../src/shared/popup/ai-popup.js";
+import { csvForRecords } from "../src/shared/view/map-layer-data.js";
 
 test("TXT and DOCX use the existing Polygon, legend, metrics, search, popup, and CSV flows", async t => {
   const originalFetch = globalThis.fetch; t.after(() => { globalThis.fetch = originalFetch; });

@@ -13,7 +13,7 @@ import {
   YAxis
 } from "recharts";
 import { getBarAutoWindowSize, mergeBarConfig, prepareBarData } from "./configs/bar-config.js";
-import { formatTimeValue } from "../time-values.js";
+import { formatTimeValue } from "../shared/data/time-values.js";
 
 const roots = new WeakMap();
 const DEFAULT_COLORS = ["#5470C6", "#91CC75", "#FAC858", "#EE6666", "#73C0DE", "#9A60B4"];

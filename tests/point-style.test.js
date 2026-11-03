@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPointView, createPointModel, DEFAULT_POINT_STYLE, mergePointStyle, normalizePointSelection, pointPaint, POINT_COLOR, POINT_COLORS } from "../src/renderers/point-style.js";
+import { buildPointView, createPointModel, DEFAULT_POINT_STYLE, mergePointStyle, normalizePointSelection, pointPaint, POINT_COLOR, POINT_COLORS } from "../src/maps/point/style.js";
 import { storeColumns, storeRecords, storeBindings } from "./fixtures/store-points-fixture.js";
-import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
-import { MAP_NO_DATA_COLOR } from "../src/map-value.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/shared/search/map-search.js";
+import { MAP_NO_DATA_COLOR } from "../src/shared/data/map-value.js";
 
 const columns = [
   { name: "code", role: "id" },

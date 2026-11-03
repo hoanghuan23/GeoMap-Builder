@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCoordinateLines } from "../src/coordinate-data.js";
-import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
-import { validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
+import { buildCoordinateLines } from "../src/maps/line/coordinates.js";
+import { prepareSuggestions } from "../src/shared/import/ai-chart-pipeline.js";
+import { validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
 import { storeColumns, storeRecords, storeSuggestions } from "./fixtures/store-points-fixture.js";
-import { roadMapStyle } from "../src/road-map-data.js";
-import { buildDataSearchIndex, searchDataIndex } from "../src/map-search.js";
+import { roadMapStyle } from "../src/maps/line/data.js";
+import { buildDataSearchIndex, searchDataIndex } from "../src/shared/search/map-search.js";
 
 const columns = [{ name: "vi_do", role: "measure" }, { name: "kinh_do", role: "measure" }, { name: "speed", role: "measure", aggDefault: "mean" }];
 const bindings = { lat: "vi_do", lng: "kinh_do" };

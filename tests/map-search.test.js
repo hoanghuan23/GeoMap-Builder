@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, administrativeLevelForFeature, getMapTilerAdministrativeBoundary, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, localBoundaryNameAliases, loadMapTilerAdministrativeBoundaries, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchLocalBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/map-search.js";
+import { buildAdministrativeGeocodingUrl, buildGeocodingUrl, buildProvinceGeocodingUrl, clipBoundaryToLand, featureCenter, featureLabel, featuresBounds, focusMapOnFeature, focusMapOnFeatures, administrativeLevelForFeature, getMapTilerAdministrativeBoundary, getMapTilerFeature, getMapTilerProvinceBoundary, isBoundaryFeature, isVietnamFeature, landOnlyBoundary, localBoundaryNameAliases, loadMapTilerAdministrativeBoundaries, loadMapTilerProvinceBoundaries, renderSearchBoundary, searchLocalBoundaries, searchMapTiler, searchMapTilerBoundaries } from "../src/shared/search/map-search.js";
 import { WEATHER_PROVINCES } from "./fixtures/weather-34-fixture.js";
 
 test("tolerant administrative loading trả match rate và giữ tên dữ liệu khi dùng alias", async () => {

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseTextDocumentBuffer } from "../src/text-document-parser.js";
-import { parseTextDocumentFile } from "../src/text-document-worker-client.js";
-import { MAX_DOCUMENT_TEXT_LENGTH, recordsFromTextTable, validateDocumentText } from "../src/text-data.js";
+import { parseTextDocumentBuffer } from "../src/shared/import/text-document-parser.js";
+import { parseTextDocumentFile } from "../src/shared/import/text-document-worker-client.js";
+import { MAX_DOCUMENT_TEXT_LENGTH, recordsFromTextTable, validateDocumentText } from "../src/shared/import/text-data.js";
 import { weatherDocumentFile, weatherRecords, weatherText, textWeatherOutput } from "./fixtures/text-weather-fixture.js";
 
 test("TXT UTF-8 with or without BOM and actual DOCX preserve Vietnamese text", async () => {

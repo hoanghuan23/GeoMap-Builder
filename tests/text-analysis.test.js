@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { aiMapRecommendationPlugin } from "../server/ai-map-recommendation.js";
 import { MAP_ANALYSIS_INSTRUCTIONS } from "../server/map-analysis-instructions.js";
-import { requestAiTextAnalysis } from "../src/ai-data-analysis.js";
-import { aiPopupRows } from "../src/ai-popup.js";
+import { requestAiTextAnalysis } from "../src/shared/import/ai-data-analysis.js";
+import { aiPopupRows } from "../src/shared/popup/ai-popup.js";
 import { metricExtractionCases } from "./fixtures/text-metric-fixture.js";
 import { weatherText, weatherRecords, textWeatherAnalysis, textWeatherOutput,
   comparativeWeatherText, comparativeWeatherRecords, comparativeWeatherOutput } from "./fixtures/text-weather-fixture.js";

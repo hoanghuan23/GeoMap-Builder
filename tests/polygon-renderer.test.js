@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PolygonRenderer } from "../src/renderers/polygon-renderer.js";
+import { PolygonRenderer } from "../src/maps/polygon/renderer.js";
 
 const polygon = {
   type: "Feature",

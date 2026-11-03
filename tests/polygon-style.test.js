@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { polygonColorField, polygonFillExpression, polygonLegendScale } from "../src/renderers/polygon-style.js";
-import { MAP_NO_DATA_COLOR } from "../src/map-value.js";
+import { polygonColorField, polygonFillExpression, polygonLegendScale } from "../src/maps/polygon/style.js";
+import { MAP_NO_DATA_COLOR } from "../src/shared/data/map-value.js";
 
 const numericData = {
   type: "FeatureCollection",

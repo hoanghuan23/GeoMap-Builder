@@ -1,33 +1,34 @@
+import { installRuntime } from "./runtime-driver.js";
 import { readFileSync } from "node:fs";
-import { createArcFlowController } from '../../src/arc-flow-controller.js';
+import { createArcFlowController } from '../../src/maps/arc-flow/controller.js';
 import vm from "node:vm";
-import * as capabilities from "../../src/data-capabilities.js";
-import * as polygonStyle from "../../src/renderers/polygon-style.js";
-import * as pointStyle from "../../src/renderers/point-style.js";
-import * as geojsonLayers from "../../src/geojson-layers.js";
-import { PointRenderer } from "../../src/renderers/point-renderer.js";
-import { PolygonRenderer } from "../../src/renderers/polygon-renderer.js";
-import { renderGeographicScopeMarkers } from "../../src/renderers/geographic-scope-renderer.js";
+import * as capabilities from "../../src/shared/data/data-capabilities.js";
+import * as polygonStyle from "../../src/maps/polygon/style.js";
+import * as pointStyle from "../../src/maps/point/style.js";
+import * as geojsonLayers from "../../src/shared/geography/geojson-layers.js";
+import { PointRenderer } from "../../src/maps/point/renderer.js";
+import { PolygonRenderer } from "../../src/maps/polygon/renderer.js";
+import { renderGeographicScopeMarkers } from "../../src/maps/polygon/scope-renderer.js";
 import * as layerOrder from "../../src/layer-order.js";
-import { nativeMapDataset, nativeMapView } from "../../src/native-map-data.js";
-import * as pipeline from "../../src/ai-chart-pipeline.js";
-import * as popupChart from "../../src/ai-popup-chart.js";
-import * as coordinates from "../../src/coordinate-data.js";
-import * as roadMap from "../../src/road-map-data.js";
-import * as timeValues from "../../src/time-values.js";
-import { AI_CHART_REGISTRY } from "../../src/ai-chart-contract.js";
-import { displayFilterValue, comparableFilterValue, requestAiTextAnalysis } from "../../src/ai-data-analysis.js";
-import { parseTextDocumentFile } from "../../src/text-document-worker-client.js";
-import { parseSpreadsheetFile, profileRecordsInWorker } from "../../src/tabular-worker-client.js";
+import { nativeMapDataset, nativeMapView } from "../../src/shared/data/native-map-data.js";
+import * as pipeline from "../../src/shared/import/ai-chart-pipeline.js";
+import * as popupChart from "../../src/shared/popup/ai-popup-chart.js";
+import * as coordinates from "../../src/maps/line/coordinates.js";
+import * as roadMap from "../../src/maps/line/data.js";
+import * as timeValues from "../../src/shared/data/time-values.js";
+import { AI_CHART_REGISTRY } from "../../src/shared/import/ai-chart-contract.js";
+import { displayFilterValue, comparableFilterValue, requestAiTextAnalysis } from "../../src/shared/import/ai-data-analysis.js";
+import { parseTextDocumentFile } from "../../src/shared/import/text-document-worker-client.js";
+import { parseSpreadsheetFile, profileRecordsInWorker } from "../../src/shared/import/tabular-worker-client.js";
 import { trafficAiAnalysis } from "./road-traffic-fixture.js";
-import { jsonDatasets } from "../../src/json-datasets.js";
-import * as polygonLegend from "../../src/polygon-legend.js";
-import * as legendContract from "../../src/polygon-legend-contract.js";
-import * as boundaryData from "../../src/vietnam-admin-data.js";
-import * as categoricalColor from "../../src/categorical-color.js";
+import { jsonDatasets } from "../../src/shared/import/json-datasets.js";
+import * as polygonLegend from "../../src/shared/data/polygon-legend.js";
+import * as legendContract from "../../src/shared/data/polygon-legend-contract.js";
+import * as boundaryData from "../../src/shared/geography/vietnam-admin-data.js";
+import * as categoricalColor from "../../src/shared/data/categorical-color.js";
 
 // Exercise the actual upload and UI handlers with a MapLibre/DOM adapter.
-export function createHarness() {
+export function createHarness(runtimeOptions = {}) {
   const elements = new Map();
   const element = () => ({
     checked: true, hidden: false, value: "", textContent: "", style: { setProperty() {} }, dataset: {}, children: [], events: {},
@@ -54,6 +55,7 @@ export function createHarness() {
     moveLayer() {}, on() {}, resize() {}, fitBounds() {}
   };
   const context = vm.createContext({
+    testRuntimeOptions: runtimeOptions,
     createArcFlowController,
     ...capabilities, ...polygonStyle, ...pointStyle, ...geojsonLayers, ...layerOrder, PointRenderer, PolygonRenderer, renderGeographicScopeMarkers,
     ...pipeline, ...popupChart, ...coordinates, ...roadMap, ...timeValues, ...polygonLegend, ...legendContract, ...boundaryData, ...categoricalColor,
@@ -84,11 +86,7 @@ export function createHarness() {
     },
     console, setTimeout: callback => { callback(); return 0; }, clearTimeout() {}
   });
-  const source = readFileSync(new URL("../../src/app.js", import.meta.url), "utf8")
-    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "")
-    .replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = {};\n")
-    .replace(/\/\/ Runtime public API[\s\S]*$/, "");
-  vm.runInContext(source, context);
+  installRuntime(context);
   context.testMap = map;
   vm.runInContext("map = testMap; addMapLayers();", context);
   return { context, get, sources, layers };

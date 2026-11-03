@@ -86,10 +86,15 @@ export function createMapLayerManager(nativeMap, id, { onChange = () => {}, onIn
       };
       // MapLibre's delegated enter/leave need a layer. Mousemove is safe when detached.
       const eventType = type === 'mouseenter' || type === 'mouseleave' ? 'mousemove' : type;
-      nativeMap.on(eventType, wrapped); listeners.push([eventType, wrapped]); return proxy;
+      nativeMap.on(eventType, wrapped); listeners.push([eventType, wrapped, callback, layerName, type]); return proxy;
     },
-    off(type, handler) {
-      nativeMap.off(type, handler); return proxy;
+    off(type, target, handler) {
+      const callback=typeof target==='function'?target:handler;
+      const layerName=typeof target==='string'?target:null;
+      for(let index=listeners.length-1;index>=0;index--){const entry=listeners[index];
+        if(entry[4]===type&&entry[2]===callback&&entry[3]===layerName){nativeMap.off(entry[0],entry[1]);listeners.splice(index,1);}
+      }
+      return proxy;
     },
     fitBounds(...args) { if (interactive && attached) nativeMap.fitBounds(...args); return proxy; },
     flyTo(...args) { if (interactive && attached) nativeMap.flyTo(...args); return proxy; },

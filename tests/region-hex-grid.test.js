@@ -1,14 +1,15 @@
-import { createArcFlowController } from "../src/arc-flow-controller.js";
+import { installRuntime } from "./fixtures/runtime-driver.js";
+import { createArcFlowController } from "../src/maps/arc-flow/controller.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { getResolution, latLngToCell } from "h3-js";
-import { buildRegionHexGrid } from "../src/region-hex-grid.js";
-import { polygonFillExpression } from "../src/renderers/polygon-style.js";
-import { resolvePolygonLegendConfig } from "../src/polygon-legend.js";
-import { polygonLegendKey, polygonLegendTarget } from "../src/polygon-legend-contract.js";
-import { resolveAggregation } from "../src/ai-chart-pipeline.js";
+import { buildRegionHexGrid } from "../src/maps/polygon/region-grid.js";
+import { polygonFillExpression } from "../src/maps/polygon/style.js";
+import { resolvePolygonLegendConfig } from "../src/shared/data/polygon-legend.js";
+import { polygonLegendKey, polygonLegendTarget } from "../src/shared/data/polygon-legend-contract.js";
+import { resolveAggregation } from "../src/shared/import/ai-chart-pipeline.js";
 
 const polygon = (west, south, east, north, properties = {}) => ({
   type: "Feature", properties,
@@ -58,12 +59,15 @@ test("MultiPolygon and polygon holes retain H3 center containment", () => {
 function harness() {
   const elements = new Map();
   const get = id => {
-    if (!elements.has(id)) elements.set(id, { checked: true, value: "", textContent: "", hidden: false, replaceChildren() {} });
+    if (!elements.has(id)) elements.set(id, { checked: true, value: "", textContent: "", hidden: false, style: {setProperty(){}}, classList:{toggle(){}}, replaceChildren() {} });
     return elements.get(id);
   };
   const sources = new Map(["h3-grid", "polygon-data", "vietnam-boundary"].map(id => [id, { setData(data) { this.data = data; } }]));
   const layers = new Map(["h3-fill", "h3-border", "polygon-fill", "polygon-border", "vietnam-border"].map(id => [id, { layout: {}, paint: {} }]));
   const map = {
+    addSource(id,spec){sources.set(id,{data:spec.data,setData(data){this.data=data;}});},
+    addLayer(layer){layers.set(layer.id,{...layer,paint:{...layer.paint},layout:{...layer.layout}});},
+    on(){},moveLayer(){},
     getSource: id => sources.get(id), getLayer: id => layers.get(id),
     setLayoutProperty(id, key, value) { layers.get(id).layout[key] = value; },
     setPaintProperty(id, key, value) { layers.get(id).paint[key] = value; }
@@ -80,10 +84,7 @@ function harness() {
     })) }),
     analyzeSpatialData: () => ({ numericFields: ["value"], textFields: ["region"] })
   });
-  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
-    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "").replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = {};\n")
-    .replace(/\/\/ Runtime public API[\s\S]*$/, "");
-  vm.runInContext(source, context);
+  installRuntime(context);
   vm.runInContext(`map = testMap;
     setStatus = () => {}; updateDashboard = () => {}; syncPolygonPaletteControls = () => {};
     renderMetroLegend = () => {}; renderWeatherLegend = () => {}; renderTransportLegend = () => {};

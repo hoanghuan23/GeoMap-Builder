@@ -1,3 +1,4 @@
+import { controls, updateRegionHexControls } from "../src/maps/polygon/controls.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -16,11 +17,12 @@ test("focusing and toggling the hex switch never scrolls the whole page", { skip
   try {
     const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
     const css = read("../src/styles.css").replace(/@import[^;]+;/g, "") + read("../src/reference-tweaks.css");
-    const syncControls = read("../src/app.js").match(/function syncRegionHexControls\(\) \{[\s\S]*?\n\}/)[0];
+    const syncControls = `${updateRegionHexControls.toString()}; function syncRegionHexControls(){updateRegionHexControls(document,state);}`;
     const probe = `<script>
       const $ = id => document.getElementById(id);
       const state = { regionHexEnabled: false, regionHexResolution: 6 };
       ${syncControls}
+      for(const[slot,html]of Object.entries(${JSON.stringify(controls)}))$(slot).innerHTML=html;
       const sidebar = document.querySelector('.sidebar');
       for (const id of ['feature-section','region-hex-controls','style-section']) $(id).hidden = false;
       const spacer = document.createElement('div'); spacer.style.height = '1000px'; sidebar.prepend(spacer);

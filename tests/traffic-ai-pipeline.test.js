@@ -1,17 +1,18 @@
-import { createArcFlowController } from "../src/arc-flow-controller.js";
+import { installRuntime } from "./fixtures/runtime-driver.js";
+import { createArcFlowController } from "../src/maps/arc-flow/controller.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/ai-chart-contract.js";
-import { displayFilterValue, requestAiDataAnalysis } from "../src/ai-data-analysis.js";
-import { prepareSuggestions } from "../src/ai-chart-pipeline.js";
-import { buildPopupChart, createPopupChartSelection } from "../src/ai-popup-chart.js";
+import { fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
+import { displayFilterValue, requestAiDataAnalysis } from "../src/shared/import/ai-data-analysis.js";
+import { prepareSuggestions } from "../src/shared/import/ai-chart-pipeline.js";
+import { buildPopupChart, createPopupChartSelection } from "../src/shared/popup/ai-popup-chart.js";
 import { formatLineX } from "../src/charts/line-chart.js";
-import { jsonDatasets } from "../src/json-datasets.js";
-import { parseSpreadsheetBuffer } from "../src/tabular-parser.js";
-import { profileTabularData } from "../src/tabular-data.js";
-import { parseSpreadsheetFile, profileRecordsInWorker } from "../src/tabular-worker-client.js";
+import { jsonDatasets } from "../src/shared/import/json-datasets.js";
+import { parseSpreadsheetBuffer } from "../src/shared/import/tabular-parser.js";
+import { profileTabularData } from "../src/shared/import/tabular-data.js";
+import { parseSpreadsheetFile, profileRecordsInWorker } from "../src/shared/import/tabular-worker-client.js";
 import { createRoadTrafficWorkbook, trafficAiAnalysis, trafficRecords, TRAFFIC_SPEED, TRAFFIC_TIMES } from "./fixtures/road-traffic-fixture.js";
 
 function uploadHarness() {
@@ -22,11 +23,7 @@ function uploadHarness() {
     parseSpreadsheetFile, profileRecordsInWorker, requestAiDataAnalysis, jsonDatasets,
     recordsToPointGeoJSON() { throw new Error("No coordinates"); }
   });
-  const source = readFileSync(new URL("../src/app.js", import.meta.url), "utf8")
-    .replace(/^import[\s\S]*?from "[^"\n]+";\r?\n/gm, "")
-    .replace(/export function createMapLayerRuntime\(options\) \{\nconst document = options.document;\nconst maplibregl = options.maplibregl \|\| globalThis.maplibregl;\n/, "const options = {};\n")
-    .replace(/\/\/ Runtime public API[\s\S]*$/, "");
-  vm.runInContext(source, context);
+  installRuntime(context);
   return context;
 }
 

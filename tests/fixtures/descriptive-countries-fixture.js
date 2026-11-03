@@ -1,5 +1,5 @@
 import { countryFeature } from "./country-weather-fixture.js";
-import { countryLookupName } from "../../src/country-boundary-sources.js";
+import { countryLookupName } from "../../src/shared/geography/country-boundary-sources.js";
 
 const displayNames = new Intl.DisplayNames(["en"], { type: "region" });
 const codes = "VN TH LA KH MM MY SG ID PH JP KR IN LK NP BD PK AE QA OM TR FR DE ES PT IT GB IE NL BE CH AT PL CZ HU GR SE NO DK FI IS CA US MX BR AR CL PE CO AU NZ".split(" ");
