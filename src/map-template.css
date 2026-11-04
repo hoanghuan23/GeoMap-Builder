@@ -20,7 +20,7 @@
 .content-area[data-template-ready="true"] :is(.maplibregl-popup-content, .map-search, .map-metric-control, .map-legends, .map-controls) :is(p, figcaption, label, button, input, select, textarea) {
   font-family: var(--template-font);
 }
-.content-area[data-template-ready="true"] :is(h1, h2, h3, h4, h5, h6, .weather-popup > strong, .popup-info-heading > strong, .data-feature-popup > strong, .point-legend-heading strong, .weather-legend-heading strong, .layer-overlay-title) {
+.content-area[data-template-ready="true"] :is(h1, h2, h3, h4, h5, h6, .weather-popup > strong, .popup-info-heading > strong, .data-feature-popup > strong, .point-legend-heading strong, .weather-legend-heading strong) {
   font-family: var(--template-heading-font, var(--template-font));
 }
 
@@ -95,15 +95,6 @@
 .content-area[data-template-ready="true"] .weather-legend-labels.categorical { font-size: var(--template-legend-size); color: var(--template-text); }
 .content-area[data-template-ready="true"] :is(.line-legend-tick, .polygon-legend-tick) { background: var(--template-secondary); }
 .content-area[data-template-ready="true"] :is(.categorical-legend-mixed, .scope-legend) { border-color: var(--template-border); }
-.content-area[data-template-ready="true"] .layer-overlay-title {
-  color: var(--template-text);
-  background: var(--template-surface);
-  font-size: var(--template-label-size);
-  font-weight: var(--template-semibold-weight);
-  border-radius: var(--template-radius);
-  padding: 2px 6px;
-  text-shadow: none;
-}
 
 /* Search uses the same server typography and supports dynamically created results. */
 .content-area[data-template-ready="true"] :is(.map-search-form, .map-region-navigation) { min-height: var(--template-control-height); }

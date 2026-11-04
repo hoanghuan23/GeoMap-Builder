@@ -2859,10 +2859,7 @@ th:last-child {
 .map-layer-count { display: inline-block; background: #edf2f8; border-radius: 12px; color: #4c607b; padding: 2px 8px; margin-bottom: 8px; font-size: 11px; }
 .workspace-metrics { position: absolute; top: 62px; right: 16px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; max-height: calc(100% - 90px); max-width: min(290px, 45%); overflow-y: auto; scrollbar-width: thin; pointer-events: none; }
 .workspace-metrics .map-metric-control { position: static; top: auto; right: auto; transform: none; max-width: 100%; flex-shrink: 0; pointer-events: auto; }
-.layer-overlay-title { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 11px; line-height: 1.5; margin: 0 0 6px; padding: 0 6px; }
-.workspace-metrics .layer-overlay-title { color: #263a52; text-shadow: 0 1px 4px #fff; text-align: right; }
 .layer-legends { display: flex; flex-direction: column; gap: 8px; }
-.layer-legends > .layer-overlay-title { color: #263a52; margin: 0; text-shadow: 0 1px 4px #fff; }
 .layer-legends:not(:has(> div:not([hidden]))) { display: none; }
 .map-legends { max-height: min(48%, 420px); overflow-y: auto; scrollbar-width: thin; }
 .uploaded-layer-list .upload-sheet-choice { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 100%; min-width: 0; margin-top: 8px; }

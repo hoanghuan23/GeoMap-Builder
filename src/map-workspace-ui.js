@@ -94,8 +94,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     const hint = textNode('p', 'Các lớp cùng hiển thị trên bản đồ; chọn tab để chỉnh cấu hình từng lớp.', 'map-layer-hint');
     const section = dom.elements.get('ai-data-filters'); section.insertBefore(heading, dom.elements.get('ai-filter-controls'));
     heading.append(layerCount, tabs, hint); heading.hidden = true;
-    const metricHeading = textNode('b', '', 'layer-overlay-title'); metric.prepend(metricHeading);
-    const legendHeading = textNode('b', '', 'layer-overlay-title'); legends.prepend(legendHeading); legends.className = 'layer-legends';
+    legends.className = 'layer-legends';
     const genericLegend = textNode('div', '', 'point-legend'); genericLegend.hidden = true; legends.append(genericLegend);
     const manager = createMapLayerManager(map, id, { onChange: schedule, onInteract: selectLayer, onPopup: owner => closePopups(owner) });
     metric.dataset.layerId = id;
@@ -121,7 +120,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       exportData(state) { downloadRecords(state, workspace.layersById[id]?.title || 'Dữ liệu', api.searchData()); return true; }
     });
     api.initialize();
-    const item = { id, api, manager, dom, panel, metric, legends, table, heading, tabs, layerCount, metricHeading, legendHeading, genericLegend, tableSnapshot: null, preparsedResults };
+    const item = { id, api, manager, dom, panel, metric, legends, table, heading, tabs, layerCount, genericLegend, tableSnapshot: null, preparsedResults };
     for (const node of [panel, metric, legends, table]) node.hidden = true;
     return item;
   }
@@ -218,10 +217,6 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         if ((suggestion?.metricButtons?.length || 0) < 2) item.metric.hidden = true;
       }
       item.legends.hidden = !groupVisible;
-      item.metricHeading.hidden = (group?.layerIds.length || 0) < 2;
-      item.legendHeading.hidden = (group?.layerIds.length || 0) < 2;
-      item.metricHeading.textContent = workspace.layersById[id]?.title || '';
-      item.legendHeading.textContent = workspace.layersById[id]?.title || '';
       const otherLegend = [...item.legends.children].some(node => node !== item.genericLegend && node.tagName === 'DIV' && !node.hidden);
       const count = filterCountryRegionData(layerData(item.api), config, regionId)?.features?.length || 0;
       const legendEnabled = item.api.getView().legendVisible;
