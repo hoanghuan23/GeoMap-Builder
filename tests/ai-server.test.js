@@ -23,7 +23,8 @@ test('Codex endpoint handles table, text and layer-order requests through the ex
       calls++;
       assert.equal(url, env.OPENAI_BASE_URL);
       const body = JSON.parse(init.body);
-      assert.deepEqual(Object.keys(body), ['prompt']);
+      assert.deepEqual(Object.keys(body), ['prompt', 'model']);
+      assert.equal(body.model, 'gpt-5.6-luna');
       assert.equal(body.input, undefined);
       assert.equal(init.headers['x-api-key'], 'test');
       assert.ok(body.prompt.includes('schema'));

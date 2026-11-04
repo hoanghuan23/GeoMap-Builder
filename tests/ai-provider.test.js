@@ -6,7 +6,7 @@ const env = { OPENAI_API_KEY: 'local-test-key', OPENAI_BASE_URL: 'http://127.0.0
 const request = { instructions: 'Return JSON according to the schema.', input: { text: 'Untrusted document' },
   schema: { type: 'object' }, name: 'test', mode: 'text_analysis' };
 
-test('Codex uses its exact endpoint, header, prompt-only request and wrapped result', async () => {
+test('Codex uses its exact endpoint, header, prompt and model request and wrapped result', async () => {
   const controller = new AbortController();
   const output = await requestAiJson(env, { ...request, signal: controller.signal }, async (url, init) => {
     assert.equal(url, 'http://127.0.0.1:8000/analyze');
@@ -14,7 +14,8 @@ test('Codex uses its exact endpoint, header, prompt-only request and wrapped res
     assert.equal(init.headers.Authorization, undefined);
     assert.equal(init.signal, controller.signal);
     const body = JSON.parse(init.body);
-    assert.deepEqual(Object.keys(body), ['prompt']);
+    assert.deepEqual(Object.keys(body), ['prompt', 'model']);
+    assert.equal(body.model, 'gpt-5.6-luna');
     assert.equal(typeof body.prompt, 'string');
     assert.ok(body.prompt.includes(JSON.stringify(request.schema)));
     assert.ok(body.prompt.startsWith(request.instructions));
@@ -22,6 +23,18 @@ test('Codex uses its exact endpoint, header, prompt-only request and wrapped res
     return { ok: true, json: async () => ({ success: true, result: '{"fields":["A"],"rows":[[1]]}' }) };
   });
   assert.deepEqual(output, { fields: ['A'], rows: [[1]] });
+});
+
+test('both transports send OPENAI_MODEL or default to gpt-5.6-luna when missing or empty', async () => {
+  for (const isCodex of [true, false]) {
+    for (const configuredModel of [undefined, '', 'custom-model']) {
+      const providerEnv = { ...(isCodex ? env : { OPENAI_API_KEY: 'test' }), OPENAI_MODEL: configuredModel };
+      await requestAiJson(providerEnv, request, async (_url, init) => {
+        assert.equal(JSON.parse(init.body).model, configuredModel || 'gpt-5.6-luna');
+        return { ok: true, json: async () => isCodex ? { success: true, result: {} } : { output_text: '{}' } };
+      });
+    }
+  }
 });
 
 test('Codex errors and malformed output fail without treating them as analysis', async () => {

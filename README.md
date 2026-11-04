@@ -10,7 +10,7 @@ Prompt cho phép AI tìm trên mạng để bổ sung **tọa độ** hoặc **k
 
 Kết quả trả `geographicEnrichment` gồm `field`, `geoLevel`, `matches: [{field, value}]`, `value`, `sourceUrl`; cột bổ sung phải được khai báo trong `columns` với role `geo`. Ứng dụng kiểm tra khóa ghép thuộc dữ liệu đã chia sẻ, URL HTTP(S), kiểu/cấp địa lý và giới hạn tọa độ; chỉ điền ô thiếu, giữ giá trị gốc và số dòng, giữ URL nguồn trong kết quả phân tích. Kết quả mâu thuẫn không được điền. Khi không xác minh được thì giữ dữ liệu thiếu; bản đồ vẫn phải vượt các kiểm tra khả dụng như trước. Các phản hồi AI cũ không có trường này vẫn dùng được.
 
-Responses API bật `tools: [{type: "web_search"}]` với `tool_choice: "auto"` cho phân tích dữ liệu có gửi mẫu và văn bản. Cấu hình theo [tài liệu Web search của OpenAI](https://developers.openai.com/api/docs/guides/tools-web-search). Gateway/model phải hỗ trợ công cụ này; chương trình không tự retry bỏ công cụ khi gateway từ chối. Với máy chủ Codex `/analyze`, body vẫn chỉ có `{prompt}`; prompt cho phép sử dụng công cụ tra cứu do máy chủ cung cấp. Nếu máy chủ không có quyền mạng/công cụ tìm kiếm thì sửa prompt không tự cấp được quyền đó. Sắp xếp và tổ hợp lớp không bật web search.
+Responses API bật `tools: [{type: "web_search"}]` với `tool_choice: "auto"` cho phân tích dữ liệu có gửi mẫu và văn bản. Cấu hình theo [tài liệu Web search của OpenAI](https://developers.openai.com/api/docs/guides/tools-web-search). Gateway/model phải hỗ trợ công cụ này; chương trình không tự retry bỏ công cụ khi gateway từ chối. Với máy chủ Codex `/analyze`, body gồm `{ prompt, model }`; prompt cho phép sử dụng công cụ tra cứu do máy chủ cung cấp. Nếu máy chủ không có quyền mạng/công cụ tìm kiếm thì sửa prompt không tự cấp được quyền đó. Sắp xếp và tổ hợp lớp không bật web search.
 
 Tắt **gửi mẫu** sẽ đặt `geographicLookupAllowed: false`, không bật công cụ web search, không gửi thêm tên địa điểm và không nhận dữ liệu địa lý bổ sung. Bật gửi mẫu chỉ chia sẻ profile hiện có (gồm `distinctValues` tối đa 300 giá trị/cột); chương trình không tự gửi toàn bộ workbook để tra các địa điểm chưa có trong profile. Nên bật gửi mẫu và phân tích lại file để dùng tính năng mới.
 
@@ -119,10 +119,11 @@ Nếu dùng server Codex có endpoint `POST /analyze`, đặt URL đầy đủ:
 
 ```env
 OPENAI_API_KEY=your_codex_server_api_key
+OPENAI_MODEL=gpt-5.6-luna
 OPENAI_BASE_URL=http://127.0.0.1:8000/analyze
 ```
 
-Ứng dụng nhận diện URL kết thúc bằng `/analyze`, gửi key qua `x-api-key` và body chỉ gồm `{ prompt }`; đọc kết quả từ `{ success: true, result }`. Prompt chứa instructions, schema riêng của từng tác vụ và dữ liệu đầu vào cho phân tích bảng, văn bản, tổ hợp hoặc sắp xếp lớp. Server chỉ chấp nhận `prompt`, không gửi `mode`, `output_format` hay `input` ở cấp body vì sẽ bị từ chối với HTTP 422 (`Extra inputs are not permitted`). Model do server Codex cấu hình, `OPENAI_MODEL` không được gửi trong chế độ này. Những base URL khác vẫn gọi OpenAI Responses API tại `${OPENAI_BASE_URL}/responses`. Khởi động lại `npm run dev` sau khi đổi `.env`.
+Ứng dụng nhận diện URL kết thúc bằng `/analyze`, gửi key qua `x-api-key` và body gồm `{ prompt, model }`; đọc kết quả từ `{ success: true, result }`. Prompt chứa instructions, schema riêng của từng tác vụ và dữ liệu đầu vào cho phân tích bảng, văn bản, tổ hợp hoặc sắp xếp lớp. Trường `model` lấy từ `OPENAI_MODEL` trong `.env`; nếu biến không có hoặc rỗng thì dùng `gpt-5.6-luna` cho cả `/analyze` và Responses API. Không gửi `mode`, `output_format` hay `input` ở cấp body của `/analyze`. Server `/analyze` cần hỗ trợ trường `model`. Những base URL khác vẫn gọi OpenAI Responses API tại `${OPENAI_BASE_URL}/responses`. Khởi động lại `npm run dev` sau khi đổi `.env`.
 
 Phản hồi JSON được chấp nhận khi trả trực tiếp hoặc bọc toàn bộ trong một khối Markdown JSON. JSON sai cú pháp bị từ chối sau một request, không tự sửa nội dung hoặc gọi lại AI. Thông báo lỗi cho biết server trả kết quả lỗi và vị trí lỗi nếu có. Khi bật `AI_DEBUG=true`, phản hồi sai được ghi ở mục `AI invalid JSON debug` trên console server để kiểm tra; mặc định không ghi nội dung này.
 

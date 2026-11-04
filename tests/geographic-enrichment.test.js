@@ -46,7 +46,10 @@ function connect(t, result, { codex = false } = {}) {
     const instructions = codex ? payload.prompt : payload.instructions;
     assert.match(instructions, /ĐƯỢC PHÉP tìm kiếm dữ liệu trên mạng/);
     assert.doesNotMatch(instructions, /Không tìm\/bịa tọa độ/);
-    if (codex) assert.deepEqual(Object.keys(payload), ['prompt']);
+    if (codex) {
+      assert.deepEqual(Object.keys(payload), ['prompt', 'model']);
+      assert.equal(payload.model, 'gpt-5.6-luna');
+    }
     else assert.deepEqual(payload.tools, input.geographicLookupAllowed ? [{ type: 'web_search' }] : undefined);
     return { ok: true, json: async () => codex ? { success: true, result } : { output_text: JSON.stringify(result) } };
   });
