@@ -25,7 +25,7 @@ export const definition = Object.freeze({
   instructions: [
   {
     "order": 23,
-    "text": "Point dùng tọa độ cho các đối tượng riêng như cửa hàng, trường học, trạm. bindings.lat và lng là hai cột tọa độ; nếu có mã đối tượng ổn định (ví dụ ma_cua_hang), gán role id và dùng bindings.region để xác định đúng đối tượng qua nhiều tháng. Tên cửa hàng là category hoặc text; thành phố là geo. Các cửa hàng cố định có nhiều quan sát theo tháng vẫn là Point, không nối chúng thành tuyến theo tháng."
+    "text": "Point dùng tọa độ cho các đối tượng riêng như cửa hàng, trường học, trạm. bindings.lat và lng là hai cột tọa độ có sẵn hoặc đã bổ sung bằng tra cứu xác minh qua geographicEnrichment; nếu có mã đối tượng ổn định (ví dụ ma_cua_hang), gán role id và dùng bindings.region để xác định đúng đối tượng qua nhiều tháng. Tên cửa hàng là category hoặc text; thành phố là geo. Các cửa hàng cố định có nhiều quan sát theo tháng vẫn là Point, không nối chúng thành tuyến theo tháng."
   }
 ],
   bindingPlan() { return { required: ['lat', 'lng'], optional: ['region'] }; },

@@ -1,6 +1,7 @@
 import { AI_MAP_REGISTRY, fallbackAnalysis, validateAndNormalizeAnalysis } from "./ai-chart-contract.js";
 import { normalizeTabularRecords, profileTabularData } from "./tabular-data.js";
 import { validateDocumentText } from "./text-data.js";
+import { applyGeographicEnrichment } from './geographic-enrichment.js';
 
 
 function isDate(value) {
@@ -37,7 +38,7 @@ export async function requestAiTextAnalysis(text, { signal, source = null } = {}
   }
   // The entire document has already been analyzed. Do not send another profile request.
   const profile = profileTabularData(records, { includeSamples: false });
-  const analysis = validateAndNormalizeAnalysis(result.analysis, profile);
+  const analysis = validateAndNormalizeAnalysis(result.analysis, profileTabularData(records));
   analysis.suggestions = analysis.suggestions.filter(item => Object.hasOwn(AI_MAP_REGISTRY, item.chartType));
   const normalized = normalizeTabularRecords(records, analysis.columns);
   return { analysis, profile, ...normalized, rawRecords: records,
@@ -47,6 +48,8 @@ export async function requestAiTextAnalysis(text, { signal, source = null } = {}
 export async function requestAiDataAnalysis(records, { signal, includeSamples = true, profile: suppliedProfile = null, source = null } = {}) {
   const profile = suppliedProfile || profileTabularData(records, { includeSamples });
   let analysis;
+  let enrichedRecords = records;
+  let enrichedProfile = profile;
   let fallbackReason = "";
   try {
     const response = await fetch("/api/ai/analyze-map-data", {
@@ -57,6 +60,10 @@ export async function requestAiDataAnalysis(records, { signal, includeSamples = 
     });
     if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || `AI HTTP ${response.status}`);
     analysis = validateAndNormalizeAnalysis(await response.json(), profile);
+    if (analysis.geographicEnrichment?.length) {
+      enrichedRecords = applyGeographicEnrichment(records, analysis.geographicEnrichment);
+      enrichedProfile = { ...profile, ...profileTabularData(enrichedRecords, { includeSamples: profile.samplesIncluded === true }) };
+    }
     if (analysis.source !== "ai") fallbackReason = analysis.validationErrors?.join("; ") || "AI không có đề xuất hợp lệ.";
   } catch (error) {
     if (error?.name === "AbortError") throw error;
@@ -65,8 +72,8 @@ export async function requestAiDataAnalysis(records, { signal, includeSamples = 
     analysis = fallbackAnalysis(profile);
   }
   analysis.suggestions = analysis.suggestions.filter(item => Object.hasOwn(AI_MAP_REGISTRY, item.chartType));
-  const normalized = normalizeTabularRecords(records, analysis.columns);
-  return { analysis, profile, records: normalized.records, validRowRate: normalized.validRowRate, fallbackReason };
+  const normalized = normalizeTabularRecords(enrichedRecords, analysis.columns);
+  return { analysis, profile: enrichedProfile, records: normalized.records, validRowRate: normalized.validRowRate, fallbackReason };
 }
 
 export function displayFilterValue(value, control = "") {

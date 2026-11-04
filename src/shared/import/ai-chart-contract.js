@@ -7,6 +7,7 @@ import { COUNTRY_REGION_CATALOG, normalizeRegionNavigation } from "../geography/
 import { GEOGRAPHIC_SCOPES_SCHEMA } from "../../maps/polygon/scopes.js";
 
 import { POPUP_CONTENT_SCHEMA, normalizePopupContent } from "../popup/popup-content-contract.js";
+import { GEOGRAPHIC_ENRICHMENT_SCHEMA, normalizeGeographicEnrichment, profileWithGeographicEnrichment } from './geographic-enrichment.js';
 
 const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "text", "ignore"]);
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
@@ -63,8 +64,9 @@ const LEGEND_SCHEMA = { anyOf: [...POLYGON_LEGEND_SCHEMA.anyOf, { type: "null" }
 export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["datasetTitle", "grain", "columns", "suggestions", "search_bar", "search_fields", "regionNavigation", "popupContent"],
+  required: ["datasetTitle", "grain", "columns", "suggestions", "search_bar", "search_fields", "regionNavigation", "popupContent", "geographicEnrichment"],
   properties: {
+    geographicEnrichment: GEOGRAPHIC_ENRICHMENT_SCHEMA,
     popupContent: POPUP_CONTENT_SCHEMA,
     datasetTitle: { type: "string" },
     grain: { type: "string" },
@@ -257,6 +259,8 @@ export function fallbackAnalysis(profile, { datasetTitle = "Dữ liệu tải l�
 }
 
 export function validateAndNormalizeAnalysis(raw, profile) {
+  const geographicEnrichment = normalizeGeographicEnrichment(raw, profile);
+  profile = profileWithGeographicEnrichment(profile, geographicEnrichment);
   const fallback = fallbackAnalysis(profile, { datasetTitle: raw?.datasetTitle || "Dữ liệu tải lên" });
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...fallback, validationErrors: ["AI không trả về object hợp lệ."] };
   const actualColumns = profile?.columns || [];
@@ -312,6 +316,7 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     datasetTitle: typeof raw.datasetTitle === "string" && raw.datasetTitle.trim() ? raw.datasetTitle.trim() : fallback.datasetTitle,
     grain: typeof raw.grain === "string" && raw.grain.trim() ? raw.grain.trim() : fallback.grain,
     columns,
+    ...(geographicEnrichment.length ? { geographicEnrichment } : {}),
     ...(raw.popupContent ? { popupContent: normalizePopupContent(raw.popupContent, columns) } : {}),
     suggestions: suggestions.map(suggestion => ({ ...suggestion, source })),
     ...normalizeDataSearchConfig(raw, columns),

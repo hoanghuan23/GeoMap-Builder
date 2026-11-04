@@ -4,6 +4,16 @@ Bốn loại bản đồ đã được tách thành module riêng; phần nhập
 
 Luồng nhập dữ liệu hiện hỗ trợ Polygon, Line, Point và Arc Flow 3D. Lưới H3 là chế độ hiển thị của Polygon; biểu đồ cột/đường chỉ dùng trong popup. Đã gỡ Heatmap, H3 độc lập, biểu đồ toàn màn hình (cột/đường/tròn), OpenWeather và các renderer không được gọi. Cấu hình và bộ điều chỉnh của các chế độ này không còn được giữ trong ứng dụng.
 
+## Tra cứu địa lý khi dữ liệu thiếu
+
+Prompt cho phép AI tìm trên mạng để bổ sung **tọa độ** hoặc **khu vực hành chính** (quốc gia, tỉnh/bang/thành phố, quận/huyện) cần cho bản đồ. Áp dụng cho bảng tính và TXT/DOCX, gồm cả tọa độ hai đầu của luồng OD. AI ưu tiên dữ liệu gốc và nguồn đáng tin cậy, dùng ngữ cảnh quốc gia/vùng cha để phân biệt địa danh trùng tên; không dùng tâm thành phố thay cho sân bay, không điền chỉ số đo, ngày hay lưu lượng từ web.
+
+Kết quả trả `geographicEnrichment` gồm `field`, `geoLevel`, `matches: [{field, value}]`, `value`, `sourceUrl`; cột bổ sung phải được khai báo trong `columns` với role `geo`. Ứng dụng kiểm tra khóa ghép thuộc dữ liệu đã chia sẻ, URL HTTP(S), kiểu/cấp địa lý và giới hạn tọa độ; chỉ điền ô thiếu, giữ giá trị gốc và số dòng, giữ URL nguồn trong kết quả phân tích. Kết quả mâu thuẫn không được điền. Khi không xác minh được thì giữ dữ liệu thiếu; bản đồ vẫn phải vượt các kiểm tra khả dụng như trước. Các phản hồi AI cũ không có trường này vẫn dùng được.
+
+Responses API bật `tools: [{type: "web_search"}]` với `tool_choice: "auto"` cho phân tích dữ liệu có gửi mẫu và văn bản. Cấu hình theo [tài liệu Web search của OpenAI](https://developers.openai.com/api/docs/guides/tools-web-search). Gateway/model phải hỗ trợ công cụ này; chương trình không tự retry bỏ công cụ khi gateway từ chối. Với máy chủ Codex `/analyze`, body vẫn chỉ có `{prompt}`; prompt cho phép sử dụng công cụ tra cứu do máy chủ cung cấp. Nếu máy chủ không có quyền mạng/công cụ tìm kiếm thì sửa prompt không tự cấp được quyền đó. Sắp xếp và tổ hợp lớp không bật web search.
+
+Tắt **gửi mẫu** sẽ đặt `geographicLookupAllowed: false`, không bật công cụ web search, không gửi thêm tên địa điểm và không nhận dữ liệu địa lý bổ sung. Bật gửi mẫu chỉ chia sẻ profile hiện có (gồm `distinctValues` tối đa 300 giá trị/cột); chương trình không tự gửi toàn bộ workbook để tra các địa điểm chưa có trong profile. Nên bật gửi mẫu và phân tích lại file để dùng tính năng mới.
+
 ## Arc Flow 3D
 
 AI có thể đề xuất `arc_flow` khi mỗi dòng có quan hệ điểm đi → điểm đến, định danh hai đầu, hai cặp tọa độ và lưu lượng. Contract dùng `bindings.source/target/sourceLat/sourceLng/targetLat/targetLng/value`, thêm `time/group` khi có. Các binding phải tham chiếu cột thật; dữ liệu được kiểm tra tại client, không nhận dạng theo tên file hoặc lĩnh vực. Giữ nguyên endpoint phân tích và tùy chọn gửi mẫu; lọc, style và popup không gọi AI lại.
@@ -16,7 +26,7 @@ Mỗi nhóm Arc Flow mới được fit ở pitch 55° và bearing 0°, giữ ba
 
 Chiều cao cung mặc định bằng 30% khoảng cách hai đầu (tối thiểu 30 m), nhân hệ số **Chiều cao cung**. Độ lệch ngang của hai chiều đi–về cũng tỷ lệ theo chiều dài tuyến để vẫn phân biệt được ở phạm vi thành phố hoặc toàn quốc. Chiều cao là hiệu ứng trực quan; màu và độ dày tiếp tục thể hiện lưu lượng.
 
-Overlay dùng một đồng hồ chung, dừng khi không còn luồng chuyển động đang hiển thị hoặc tab bị ẩn; phục hồi khi chuyển nhóm/đổi nền. Arc Flow cần WebGL2; nếu không có, giao diện báo chưa khả dụng và các loại bản đồ khác vẫn hoạt động. V1 chưa ghép sheet tọa độ, geocoding, xuất PNG hoặc suy ra geometry tuyến thực tế từ OD.
+Overlay dùng một đồng hồ chung, dừng khi không còn luồng chuyển động đang hiển thị hoặc tab bị ẩn; phục hồi khi chuyển nhóm/đổi nền. Arc Flow cần WebGL2; nếu không có, giao diện báo chưa khả dụng và các loại bản đồ khác vẫn hoạt động. Chưa ghép sheet tọa độ, xuất PNG hoặc suy ra geometry tuyến thực tế từ OD. Tọa độ thiếu được phép bổ sung qua tra cứu địa lý có nguồn trong lần phân tích AI.
 
 Kiểm thử Arc Flow: `node --test tests/arc-flow-*.test.js`. Bài kiểm thử workbook mẫu chạy khi file Excel đính kèm có trong thư mục gốc; các kiểm thử dữ liệu/contract/UI/vòng đời còn lại dùng fixture độc lập. Toàn bộ kiểm thử: `npm test`; build: `npm run build`.
 

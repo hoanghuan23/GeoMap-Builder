@@ -173,7 +173,7 @@ test("middleware forwards per-column temperature semantics and legends without c
   globalThis.fetch = async (_url, options) => {
     calls += 1;
     const payload = JSON.parse(options.body);
-    assert.deepEqual(Object.keys(JSON.parse(payload.input)), ["profile", "supportedCharts"]);
+    assert.deepEqual(Object.keys(JSON.parse(payload.input)), ["profile", "geographicLookupAllowed", "supportedCharts"]);
     assert.match(payload.instructions, /Nhiệt độ cơ thể\/máy móc/);
     assert.match(payload.instructions, /TỪNG cột measure/);
     assert.match(payload.instructions, /domain \[0, 1\]/);

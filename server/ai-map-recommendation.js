@@ -6,6 +6,7 @@ import { TEXT_ANALYSIS_RESPONSE_SCHEMA, TEXT_EXTRACTION_INSTRUCTIONS } from "./t
 import { recordsFromTextTable, validateDocumentText } from "../src/shared/import/text-data.js";
 import { profileTabularData } from "../src/shared/import/tabular-data.js";
 import { requestAiJson } from "./ai-provider.js";
+import { applyGeographicEnrichment } from '../src/shared/import/geographic-enrichment.js';
 
 const LAYER_ORDER_SCHEMA = {
   type: "object",
@@ -71,22 +72,24 @@ export function aiMapRecommendationPlugin(env) {
         ? baseInstructions
         : `${isText ? `${TEXT_EXTRACTION_INSTRUCTIONS}\n\n` : ""}${baseInstructions}\n\nChỉ trả về một JSON object đúng schema sau, không bọc trong Markdown. Dùng chính xác tên field, kiểu dữ liệu và giá trị enum trong schema:\n${JSON.stringify(schema)}`;
       const aiInput = isLayerOrder ? body.layers : isText
-        ? { text: documentText, supportedCharts: supportedChartsForPrompt() }
-        : { profile: body.profile, supportedCharts: supportedChartsForPrompt(),
-        ...(body.profile.spatial?.nativeGeometry === true ? { spatialContext: "Geometry có sẵn trong file; phân tích properties để đặt datasetTitle/grain/metadata và cấu hình popup/tìm kiếm. Không bịa tên cột tọa độ/địa danh; AI vẫn phải đề xuất kiểu bản đồ phù hợp với profile.spatial.geometryKinds: area dùng choropleth, line dùng map_line, point dùng point với bindings.lat/lng là coordinateBindings đã trích từ geometry. Có thể đề xuất thêm arc_flow khi chính các properties chứa đầy đủ định danh hai đầu, hai cặp tọa độ độc lập và lưu lượng OD có hướng; không suy ra OD từ geometry tuyến hoặc chỉ một cặp tọa độ. Chỉ với Polygon/Line/Point dùng geometry gốc, bindings.region và value được phép null nếu không có trường phù hợp; không bắt buộc cột địa danh hay chỉ số để vẽ geometry gốc. Arc Flow luôn cần đủ bảy binding bắt buộc; value là tên cột lưu lượng có role measure, không được null dù có geometry gốc. Giá trị dùng để tô màu phải là cột có thật. Nếu suggestions rỗng thì ứng dụng không tự tạo bản đồ." } : {}) };
+        ? { text: documentText, geographicLookupAllowed: true, supportedCharts: supportedChartsForPrompt() }
+        : { profile: body.profile, geographicLookupAllowed: body.profile.samplesIncluded === true, supportedCharts: supportedChartsForPrompt(),
+        ...(body.profile.spatial?.nativeGeometry === true ? { spatialContext: "Geometry có sẵn trong file; phân tích properties để đặt datasetTitle/grain/metadata và cấu hình popup/tìm kiếm. Không bịa tên cột tọa độ/địa danh; AI vẫn phải đề xuất kiểu bản đồ phù hợp với profile.spatial.geometryKinds: area dùng choropleth, line dùng map_line, point dùng point với bindings.lat/lng là coordinateBindings đã trích từ geometry. Có thể đề xuất thêm arc_flow khi các properties chứa định danh hai đầu và lưu lượng OD có hướng, cùng hai cặp tọa độ độc lập có sẵn hoặc đã tra cứu xác minh qua geographicEnrichment; không suy ra OD từ geometry tuyến hoặc chỉ một cặp tọa độ. Chỉ với Polygon/Line/Point dùng geometry gốc, bindings.region và value được phép null nếu không có trường phù hợp; không bắt buộc cột địa danh hay chỉ số để vẽ geometry gốc. Arc Flow luôn cần đủ bảy binding bắt buộc; value là tên cột lưu lượng có role measure, không được null dù có geometry gốc. Giá trị dùng để tô màu phải là cột có thật. Nếu suggestions rỗng thì ứng dụng không tự tạo bản đồ." } : {}) };
       const startedAt = Date.now();
       const parsed = await requestAiJson(env, {
         instructions, input: aiInput, schema,
-        name: isLayerOrder ? "layer_order" : isText ? "text_map_recommendation" : "map_recommendation"
+        name: isLayerOrder ? "layer_order" : isText ? "text_map_recommendation" : "map_recommendation",
+        webSearch: !isLayerOrder && aiInput.geographicLookupAllowed === true
       });
       let records;
       let profile = body.profile;
       if (isText) {
         records = recordsFromTextTable(parsed);
         if (!records.length) return sendJson(response, 422, { error: "Không tìm thấy dữ liệu bảng trong văn bản. Hãy cung cấp các quan sát và số liệu cụ thể." });
-        profile = profileTabularData(records, { includeSamples: false });
+        profile = profileTabularData(records);
       }
       const responseBody = isLayerOrder ? parsed : validateAndNormalizeAnalysis(isText ? parsed.analysis : parsed, profile);
+      if (isText) records = applyGeographicEnrichment(records, responseBody.geographicEnrichment || []);
       if (!isLayerOrder) {
         responseBody.suggestions = responseBody.suggestions.filter(item => Object.hasOwn(AI_MAP_REGISTRY, item.chartType));
         console.info(isText ? "AI text analysis" : "AI tabular analysis", {
