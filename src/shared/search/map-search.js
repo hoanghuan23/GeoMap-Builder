@@ -428,7 +428,7 @@ export async function searchLocalBoundaries(query, {
 
 export async function landOnlyBoundary(feature, { fetchImpl = fetch, signal, forceVietnam = false, country } = {}) {
   if (!isBoundaryFeature(feature)) return null;
-  if (feature.properties?.local_boundary) return feature;
+  if (feature.properties?.local_boundary || feature.properties?.web_boundary) return feature;
   const properties = feature.properties || {};
   const featureCountry = properties.__country_code || properties.GID_0 || properties.country_code || properties.short_code;
   // A country polygon determines its own mask; never clip another country to Vietnam.

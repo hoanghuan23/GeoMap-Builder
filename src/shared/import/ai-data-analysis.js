@@ -41,7 +41,7 @@ export async function requestAiTextAnalysis(text, { signal, source = null } = {}
   const analysis = validateAndNormalizeAnalysis(result.analysis, profileTabularData(records));
   analysis.suggestions = analysis.suggestions.filter(item => Object.hasOwn(AI_MAP_REGISTRY, item.chartType));
   const normalized = normalizeTabularRecords(records, analysis.columns);
-  return { analysis, profile, ...normalized, rawRecords: records,
+  return { analysis, profile, ...normalized, rawRecords: records, regionLookupAllowed: true,
     fallbackReason: analysis.source === "ai" ? "" : analysis.validationErrors?.join("; ") || "AI không có đề xuất hợp lệ." };
 }
 
@@ -73,7 +73,8 @@ export async function requestAiDataAnalysis(records, { signal, includeSamples = 
   }
   analysis.suggestions = analysis.suggestions.filter(item => Object.hasOwn(AI_MAP_REGISTRY, item.chartType));
   const normalized = normalizeTabularRecords(enrichedRecords, analysis.columns);
-  return { analysis, profile: enrichedProfile, records: normalized.records, validRowRate: normalized.validRowRate, fallbackReason };
+  return { analysis, profile: enrichedProfile, records: normalized.records, validRowRate: normalized.validRowRate, fallbackReason,
+    regionLookupAllowed: profile.samplesIncluded === true };
 }
 
 export function displayFilterValue(value, control = "") {

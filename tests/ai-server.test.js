@@ -66,6 +66,27 @@ function middlewareFor(env) {
   return middleware;
 }
 
+test('initial analysis defers region web lookup to MapTiler and internal boundary resolution', async t => {
+  const profile = profileTabularData([{ province: 'Hà Nội', value: 10 }]);
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const payload = JSON.parse(init.body);
+    const input = JSON.parse(payload.input);
+    assert.equal(input.regionLookupFallbackAllowed, false);
+    assert.match(payload.instructions, /MapTiler API và dữ liệu nội bộ trước/);
+    assert.match(payload.instructions, /không tìm web cho khu vực/);
+    return { ok: true, json: async () => ({ output_text: JSON.stringify({
+      columns: [{ name: 'province', role: 'geo', geoLevel: 'admin1' }, { name: 'value', role: 'measure' },
+        { name: 'Web region', role: 'geo', geoLevel: 'admin1' }], suggestions: [],
+      geographicEnrichment: [{ field: 'Web region', geoLevel: 'admin1', matches: [{ field: 'province', value: 'Hà Nội' }],
+        value: 'Hanoi', sourceUrl: 'https://example.org/region' }]
+    }) }) };
+  });
+  const result = await call(middlewareFor({ OPENAI_API_KEY: 'test' }), { profile });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.geographicEnrichment, undefined);
+  assert.ok(!result.body.columns.some(column => column.name === 'Web region'));
+});
+
 test('airport OD analysis retains its measure with either AI transport and samples enabled or disabled', async t => {
   const fixture = airportArcFlowFixture();
   for (const isCodex of [false, true]) {
@@ -174,7 +195,7 @@ test("middleware forwards per-column temperature semantics and legends without c
   globalThis.fetch = async (_url, options) => {
     calls += 1;
     const payload = JSON.parse(options.body);
-    assert.deepEqual(Object.keys(JSON.parse(payload.input)), ["profile", "geographicLookupAllowed", "supportedCharts"]);
+    assert.deepEqual(Object.keys(JSON.parse(payload.input)), ["profile", "geographicLookupAllowed", "regionLookupFallbackAllowed", "supportedCharts"]);
     assert.match(payload.instructions, /Nhiệt độ cơ thể\/máy móc/);
     assert.match(payload.instructions, /TỪNG cột measure/);
     assert.match(payload.instructions, /domain \[0, 1\]/);

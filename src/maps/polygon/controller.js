@@ -14,6 +14,7 @@ import { focusMapOnFeature as default_focusMapOnFeature } from "../../shared/sea
 import { landOnlyBoundary as default_landOnlyBoundary } from "../../shared/search/map-search.js";
 import { administrativeBoundaryLabel as default_administrativeBoundaryLabel } from "../../shared/geography/administrative-boundaries.js";
 import { loadAdministrativeBoundaries as default_loadAdministrativeBoundaries } from "../../shared/geography/administrative-boundaries.js";
+import { requestRegionBoundary } from '../../shared/geography/region-boundary-lookup.js';
 import { comparableFilterValue as default_comparableFilterValue } from "../../shared/import/ai-data-analysis.js";
 import { geographicLocationName as default_geographicLocationName } from "../../shared/import/ai-chart-pipeline.js";
 import { applyPipelineFilters as default_applyPipelineFilters } from "../../shared/import/ai-chart-pipeline.js";
@@ -490,6 +491,8 @@ export function createController(context) {
         country: recommendation.geometry.country,
         contexts,
         geographicScopes: recommendation.geographicScopes,
+        resolveMissingBoundary: dataset.regionLookupAllowed === true || dataset.profile?.samplesIncluded === true
+          ? (region, options) => (context.dependencies?.requestRegionBoundary ?? requestRegionBoundary)(region, options) : undefined,
         strict: false,
         aliases: dataset.geoAliases || {},
         selections: dataset.geoSelections || {},
@@ -510,6 +513,10 @@ export function createController(context) {
         ))
       };
       if (revision !== context.tasks.aiBoundaryRevision || dataset !== state.aiDataset || dataset.selectedSuggestionId !== suggestion.id) return null;
+      if (boundaries.features.some(feature => feature.properties?.web_boundary)) {
+        const attribution = $('geoboundaries-attribution');
+        if (attribution) attribution.hidden = false;
+      }
     } catch (error) {
       if (error?.name === "AbortError") return null;
       throw error;

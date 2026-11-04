@@ -167,13 +167,14 @@ async function resolveCandidates(name, { apiKey, placeType, country, signal, fet
 
 export async function loadAdministrativeBoundaries(names, {
   apiKey, placeType = "region", country, signal, fetchImpl = fetch, concurrency = 4,
-  onProgress, strict = true, aliases = {}, selections = {}, contexts = {}, geographicScopes = []
+  onProgress, strict = true, aliases = {}, selections = {}, contexts = {}, geographicScopes = [], resolveMissingBoundary
 } = {}) {
   const uniqueNames = [...new Set((names || []).map(name => String(name ?? "").trim()).filter(Boolean))];
   const results = new Array(uniqueNames.length);
   const candidates = {};
   const scopeIssues = {};
   const countryLookups = new Map();
+  const webLookups = new Map();
   // Share local file loads across workers, including when a custom fetch implementation is used.
   const localFiles = new Map();
   const sharedFetch = (url, options) => {
@@ -203,7 +204,13 @@ export async function loadAdministrativeBoundaries(names, {
         }
         const selected = selections[sourceName];
         const lookupKey = effectivePlaceType === "country" ? resolveBoundaryCountry(queryName) || normalizePlaceName(queryName) : null;
-        const resolve = () => resolveCandidates(queryName, { apiKey, placeType: effectivePlaceType, country: locationCountry, signal, fetchImpl: fetchImpl === fetch ? fetch : sharedFetch });
+        const resolve = async () => {
+          try { return await resolveCandidates(queryName, { apiKey, placeType: effectivePlaceType, country: locationCountry, signal, fetchImpl: fetchImpl === fetch ? fetch : sharedFetch }); }
+          catch (error) {
+            if (typeof resolveMissingBoundary !== 'function' || error?.name === 'AbortError' || signal?.aborted) throw error;
+            return [];
+          }
+        };
         if (!isBoundaryFeature(selected) && lookupKey && !countryLookups.has(lookupKey)) countryLookups.set(lookupKey, resolve());
         let matches = isBoundaryFeature(selected) ? [selected]
           : lookupKey ? await countryLookups.get(lookupKey) : await resolve();
@@ -212,6 +219,20 @@ export async function loadAdministrativeBoundaries(names, {
         if (signal?.aborted) throw new DOMException("Boundary loading aborted", "AbortError");
         if (scope) matches = matches.filter(feature => boundaryMatchesCountry(feature, locationCountry)
           && mapTilerScore(feature, administrativeQuery(queryName, effectivePlaceType, locationCountry)) === 0);
+        // Web lookup is the last resort: never replace a MapTiler/local match or
+        // silently resolve an ambiguous list of candidates with another source.
+        if (!matches.length && typeof resolveMissingBoundary === 'function') {
+          const key = JSON.stringify([queryName, locationCountry, effectivePlaceType]);
+          if (!webLookups.has(key)) webLookups.set(key, resolveMissingBoundary(queryName, { country: locationCountry, placeType: effectivePlaceType, signal }));
+          const feature = await webLookups.get(key);
+          if (signal?.aborted) throw new DOMException('Boundary loading aborted', 'AbortError');
+          const expectedCountry = resolveBoundaryCountry(locationCountry);
+          const featureCountry = resolveBoundaryCountry(feature?.properties?.__country_code || feature?.properties?.GID_0 || feature?.properties?.country_code);
+          if (isBoundaryFeature(feature) && feature.place_type?.includes(effectivePlaceType)
+            && (!expectedCountry || featureCountry === expectedCountry)
+            && boundaryMatchesCountry(feature, locationCountry)
+            && mapTilerScore(feature, administrativeQuery(queryName, effectivePlaceType, locationCountry)) === 0) matches = [feature];
+        }
         if (matches.length === 1) results[index] = applyGeographicScope({ ...matches[0], properties: {
           ...(matches[0].properties || {}), ...resolvedCountryProperties(matches[0]), __data_location: sourceName, __data_query: queryName,
           ...(locationCountry ? { __data_country: locationCountry } : {})
