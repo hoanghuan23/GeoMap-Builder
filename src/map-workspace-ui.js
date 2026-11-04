@@ -11,11 +11,12 @@ import { CONFIG } from './shared/config.js';
 import { expandJsonUpload } from './shared/import/json-datasets.js';
 import { keepSelectOpenAfterMouseClick } from './shared/ui/select-control.js';
 import { createArcFlowOverlayManager } from './shared/view/arc-overlay.js';
+import { createMapTemplateRenderer } from './map-template-renderer.js';
 
 const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
 
-export async function startMapWorkspace(createRuntime, { styles, styleLabels, renderCatalog }) {
+export async function startMapWorkspace(createRuntime, { styles, styleLabels, renderCatalog, templatePicker }) {
   const workspace = createMapWorkspace();
   const uploads = new Map(); const keys = new Set(); const runtimes = new Map();
   const requestComposition = createCompositionClient();
@@ -48,6 +49,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   $('sheet-selector-field').hidden = true;
   document.querySelector('.drop-zone small').textContent = 'CSV, Excel, JSON, GeoJSON, TXT, DOCX · AI đánh giá hiển thị nhiều lớp';
   const map = new globalThis.maplibregl.Map({ container: 'map', style: styles.liberty, center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
+  const templateRenderer = createMapTemplateRenderer({ document, map, picker: templatePicker });
   let readyResolve; const ready = new Promise(resolve => { readyResolve = resolve; });
   let uploadSequence = 0; let scheduled = false; let queue = Promise.resolve();
   let selectedSignature = ''; let compositionController; let currentStyle = 'liberty'; let statusTimer; let styleReady = false;
@@ -98,6 +100,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       managedWorkspace: true, onStatus: status,
       arcFlowOverlay, onArcInteract: () => selectLayer(id),
       popupSources: feature => joinedPopupSources(workspace, id, feature),
+      onPopupChart: options => templateRenderer.renderChart(options),
       popupMetadata() {
         const joins = workspace.attributeJoins.filter(join => join.targetLayerId === id && join.popupContent.imageFields.length);
         return { hasJoinedImages: joins.length > 0, popupSuggestions: joins.flatMap(join => join.popupSuggestions) };
@@ -229,6 +232,16 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     const waiting = Object.values(workspace.layersById).some(layer => layer.sourceKind === 'attribute' && !workspace.attributeJoins.some(join => join.sourceId === layer.id));
     retry.hidden = !(unknown || waiting) || Object.keys(workspace.layersById).length < 2;
     compositionNote.textContent = group?.composition?.reason || (group ? `${group.layerIds.length} lớp dữ liệu trong bản đồ đang hiển thị.` : '');
+    const templateLayers = (group?.visible ? group.layerIds : []).map(id => {
+      const api = runtimes.get(id)?.api;
+      const dataset = api?.state.aiDataset;
+      const suggestion = dataset?.suggestions?.find(item => item.id === dataset.selectedSuggestionId);
+      return suggestion && api.getView().data?.features?.length ? suggestion : null;
+    }).filter(Boolean);
+    templateRenderer.update({ hasData: templateLayers.length > 0, capabilities: {
+      mapTypes: templateLayers.map(item => item.chartType),
+      popupTypes: templateLayers.flatMap(item => item.popupSuggestions?.map(popup => popup.name) || [])
+    } });
   }
 
   function renderLayerTabs(item, group) {

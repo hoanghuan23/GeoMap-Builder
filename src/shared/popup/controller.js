@@ -155,7 +155,8 @@ export function createController(context) {
 
   function clearMapPopupChart(view) {
     if (view?.chartContainer) {
-      chartRenderer(view.chartKind).clear(view.chartContainer);
+      if (view.templateChartCleanup) { view.templateChartCleanup(); view.templateChartCleanup = null; }
+      else chartRenderer(view.chartKind).clear(view.chartContainer);
       view.chartContainer = null;
     }
   }
@@ -215,7 +216,11 @@ export function createController(context) {
     popupElement.classList.toggle("has-popup-chart", chartMode);
     popupElement.classList.toggle("has-info-image", selection.mode === "info_image");
     sizeMapPopup(view);
-    if (chart?.config) chartRenderer(selection.mode).render(view.chartContainer, chart.config);
+    if (chart?.config) {
+      const fallback = () => { view.templateChartCleanup = null; chartRenderer(selection.mode).render(view.chartContainer, chart.config); };
+      view.templateChartCleanup = options.onPopupChart?.({ kind: selection.mode, container: view.chartContainer, chart: chart.config, fallback }) || null;
+      if (!view.templateChartCleanup) fallback();
+    }
   }
 
   function sizeMapPopup(view) {

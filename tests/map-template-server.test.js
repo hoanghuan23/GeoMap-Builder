@@ -29,12 +29,27 @@ test('proxy returns authored presentation config and keeps credentials/raw CSS o
   assert.doesNotMatch(JSON.stringify(response), /test-key|not forwarded/);
 });
 
-test('metadata-only, malformed and unavailable upstream fail without pretending to apply a template', async () => {
-  for (const body of [{ templates: [{ id: 'vnexpress', theme: 'dark', name: 'Dark', description: 'Incomplete' }] }, { templates: null }]) {
+test('metadata-only catalog supports source templates, while malformed and unavailable upstream fail', async () => {
+  const sourceCatalog = { templates: [{ id: 'mau_01', name: 'Bản đồ mẫu 01' }] };
+  assert.deepEqual((await middleware(env, async () => ({ ok: true, json: async () => sourceCatalog }))()).body, sourceCatalog);
+  for (const body of [{ templates: [{ id: '../unsafe', name: 'Unsafe' }] }, { templates: null }]) {
     assert.equal((await middleware(env, async () => ({ ok: true, json: async () => body }))()).status, 502);
   }
   assert.equal((await middleware(env, async () => ({ ok: false }))()).status, 502);
   assert.equal((await middleware(env, async () => { throw new Error('private diagnostic'); })()).status, 502);
+});
+
+test('detail endpoint retrieves mau_01 source without executing or rewriting it', async () => {
+  const source = { template: 'mau_01', html: '<main id="map"></main>', css: '#map { height: 100%; }', js: 'window.templateReady = true;' };
+  const call = middleware(env, async (url, options) => {
+    assert.equal(url, 'http://127.0.0.1:8000/templates/mau_01');
+    assert.equal(options.headers['X-API-Key'], 'test-key');
+    return { ok: true, json: async () => source };
+  });
+  assert.deepEqual((await call('/api/map-templates/mau_01')).body, source);
+  assert.equal((await call('/api/map-templates/mau_01', 'POST')).status, 405);
+  assert.equal((await call('/api/map-templates/../secret')).next, true);
+  assert.equal((await middleware(env, async () => ({ ok: true, json: async () => ({ ...source, template: 'other' }) }))('/api/map-templates/mau_01')).status, 502);
 });
 
 test('unconfigured server and unsupported methods fail locally; unrelated routes pass through', async () => {

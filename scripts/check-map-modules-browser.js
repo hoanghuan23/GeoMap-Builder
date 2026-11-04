@@ -10,9 +10,11 @@ if (!browser) throw new Error('Set CHROME_PATH to a Chrome/Chromium executable.'
 const profile = mkdtempSync(join(tmpdir(), 'map-modules-browser-'));
 const webgl = process.argv.includes('--webgl');
 const templates = process.argv.includes('--templates');
+const templateComposition = process.argv.includes('--template-composition');
 const mobile = process.argv.includes('--mobile');
 const screenshots = webgl && process.argv.includes('--screenshots');
-const server = await createServer({ server: { host: '127.0.0.1', port: 0, open: false }, plugins: [{
+const testPort = 20_000 + (process.pid % 30_000);
+const server = await createServer({ server: { host: '127.0.0.1', port: testPort, open: false, strictPort: true }, plugins: [{
   name:'map-test-glyphs',configureServer(server){server.middlewares.use((request,response,next)=>{
     if(!request.url.startsWith('/tests/glyphs/')){next();return;}
     response.setHeader('Content-Type','application/x-protobuf');response.end();
@@ -20,7 +22,8 @@ const server = await createServer({ server: { host: '127.0.0.1', port: 0, open: 
 }] });
 try {
   await server.listen(); const address = server.httpServer.address();
-  const url = `http://127.0.0.1:${address.port}/tests/fixtures/${templates ? 'map-template-browser' : 'map-modules-browser'}.html${webgl ? '?webgl=1' : ''}${screenshots ? '&screenshots=1' : ''}`;
+  const fixture = templateComposition ? 'map-template-composition-browser' : templates ? 'map-template-browser' : 'map-modules-browser';
+  const url = `http://127.0.0.1:${address.port}/tests/fixtures/${fixture}.html${webgl ? '?webgl=1' : ''}${screenshots ? '&screenshots=1' : ''}`;
   const child = spawn(browser, ['--headless', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run',
     '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
     ...(webgl ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : ['--disable-gpu']),

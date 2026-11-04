@@ -103,3 +103,19 @@ test('initial network failure never marks a template applied and allows retry', 
   assert.equal(document.content.dataset.templateReady, 'true');
   assert.equal(document.elements['map-template-select'].disabled, false);
 });
+
+test('picker loads mau_01 source from the detail endpoint without applying or executing it', async () => {
+  const document = pickerDocument();
+  const source = { template: 'mau_01', html: '<main id="map"></main>', css: '#map {}', js: 'throw new Error("must not execute")' };
+  const calls = [];
+  const picker = initializeMapTemplatePicker(document, async url => {
+    calls.push(url);
+    return { ok: true, json: async () => url === '/api/map-templates'
+      ? { templates: [{ id: 'mau_01', name: 'Bản đồ mẫu 01' }] } : source };
+  });
+  await picker.ready;
+  assert.deepEqual(calls, ['/api/map-templates', '/api/map-templates/mau_01']);
+  assert.deepEqual(picker.getSelectedSource(), source);
+  assert.equal(document.content.dataset.templateReady, undefined);
+  assert.match(document.elements['map-template-status'].textContent, /chưa áp dụng/);
+});

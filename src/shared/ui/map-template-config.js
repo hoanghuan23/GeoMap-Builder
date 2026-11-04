@@ -1,5 +1,6 @@
 const COLOR = /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i;
 const LENGTH = /^(?:\d+(?:\.\d+)?|\.\d+)(?:px|rem|em)$/;
+const TEMPLATE_ID = /^[a-z\d_-]{1,80}$/i;
 
 function invalid() {
   throw new Error('Mẫu giao diện thiếu cấu hình hoặc có cấu hình không hợp lệ.');
@@ -15,6 +16,24 @@ function fontFamily(value) {
   if (typeof value !== 'string' || value.length > 240
     || !/^[\p{L}\p{N}\s,'"-]+$/u.test(value) || !value.trim()) invalid();
   return value;
+}
+
+/** Catalog entries may describe a legacy theme or an HTML/CSS/JS source template. */
+export function normalizeMapTemplateEntry(raw) {
+  if (typeof raw?.id !== 'string' || !TEMPLATE_ID.test(raw.id)
+    || typeof raw.name !== 'string' || !raw.name.trim()) invalid();
+  if (raw.styles !== undefined || raw.typography !== undefined) return normalizeMapTemplate(raw);
+  return { id: raw.id, name: raw.name };
+}
+
+/** Validate source files without executing or inserting them into the current page. */
+export function normalizeMapTemplateSource(raw, expectedId) {
+  if (typeof expectedId !== 'string' || !TEMPLATE_ID.test(expectedId)
+    || raw?.template !== expectedId) invalid();
+  for (const key of ['html', 'css', 'js']) {
+    if (typeof raw[key] !== 'string' || !raw[key].trim() || raw[key].length > 1_000_000) invalid();
+  }
+  return { template: expectedId, html: raw.html, css: raw.css, js: raw.js };
 }
 
 /** Only presentation tokens cross this boundary; data colors and AI decisions never do. */

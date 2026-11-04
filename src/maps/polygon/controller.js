@@ -178,7 +178,7 @@ export function createController(context) {
     mode.title = scale.reason || "";
     if (categorical) renderCategoricalPolygonLegend(scale);
     else {
-      $("weather-legend-scale").style.background = scale.gradient;
+      $("weather-legend-scale").style.setProperty('background', scale.gradient, 'important');
       const labels = resolvedScale ? polygonLegendLabels(scale, Math.max(100, (legend.clientWidth || 330) - 40))
         : scale.values.map(value => ({ value, text: Number(value.toFixed(1)).toLocaleString("vi-VN") }));
       $("weather-legend-scale").replaceChildren(...labels.filter(item => item.position != null).map(item => {

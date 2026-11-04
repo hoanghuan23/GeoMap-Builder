@@ -57,9 +57,12 @@ Trạng thái được giữ trong phiên hiện tại, chưa lưu sau reload.
 
 ## Template giao diện bản đồ
 
-Mục **Mẫu templates** tải cấu hình dựng sẵn từ `GET /api/map-templates`, mặc định VnExpress Light. Middleware proxy tới `GET /templates` của server có URL `/analyze` đang cấu hình; API key chỉ nằm phía server. Mỗi phần tử giữ `id`, `theme`, `name`, `description`, đồng thời phải có `styles` và `typography` đọc từ file template trên server. Danh sách chỉ có metadata được báo lỗi, không đánh dấu template là đã áp dụng.
+Mục **Mẫu templates** tải danh sách từ `GET /api/map-templates`. Middleware proxy tới `GET /templates` của server có URL `/analyze` đang cấu hình; API key chỉ nằm phía server. Danh sách có thể gồm cấu hình màu/font cũ (`styles`, `typography`) hoặc mẫu nguồn chỉ có `id`, `name`. Với mẫu nguồn như `mau_01`, client gọi thêm `GET /api/map-templates/mau_01` để nhận `html`, `css`, `js` từ `GET /templates/mau_01`. Khi có `mau_01` trong danh sách, bộ chọn ưu tiên mẫu này.
 
-Contract cấu hình tương ứng các file hiện có của server:
+Khi có lớp dữ liệu đã được AI phân tích, `POST /api/ai/compose-map-template` đọc mẫu trên server và yêu cầu AI trả bố cục HTML/CSS cùng thành phần biểu đồ phù hợp. Ứng dụng kiểm tra kết quả rồi chuyển canvas MapLibre, tìm kiếm, nút chỉ số, chú giải và điều khiển hiện có vào vị trí do AI ghép; không tải lại hoặc tạo bản đồ riêng. Số nút, màu và ngưỡng chú giải, kiểu/nội dung popup vẫn theo kết quả phân tích dữ liệu. JS gốc của mẫu không chạy trên trang chính; thành phần biểu đồ do AI chuyển đổi hoặc tạo mới chạy trong iframe cô lập. Kết quả được cache theo mã nguồn mẫu và loại giao diện cần dùng; lỗi AI hoặc kết quả sai giữ nguyên bản đồ hiện tại và hiện nút thử lại. Không có dữ liệu thì không hiện bản mẫu tĩnh.
+Nếu `OPENAI_BASE_URL` trỏ đến Codex server cục bộ, CLI phải đăng nhập (`codex.cmd login` trong PowerShell) để `/analyze` có thể ghép mẫu; khởi động uvicorn riêng không đăng nhập CLI.
+
+Contract của mẫu màu/font cũ:
 
 ```json
 {
@@ -80,13 +83,13 @@ Contract cấu hình tương ứng các file hiện có của server:
 }
 ```
 
-Frontend kiểm tra và chuyển các giá trị thành biến `--template-*` trên workspace. CSS dùng chung áp dụng cho popup thông tin/ảnh/biểu đồ, chú giải, tìm kiếm và điều khiển trên bản đồ. `background` là nền khung, `surface` là nền thành phần bên trong; trạng thái hover/active phối từ `surface` và `accent`. Bóng mặc định được suy ra từ màu chữ; template có thể đặt `layout.shadow` bằng `none` hoặc 2–4 độ dài cùng màu hex. Không tải font ngoài hoặc thực thi CSS/HTML/JS tùy ý từ phản hồi API.
+Với mẫu màu/font cũ, frontend kiểm tra và chuyển các giá trị thành biến `--template-*` trên workspace. CSS dùng chung áp dụng cho popup thông tin/ảnh/biểu đồ, chú giải, tìm kiếm và điều khiển trên bản đồ. `background` là nền khung, `surface` là nền thành phần bên trong; trạng thái hover/active phối từ `surface` và `accent`. Bóng mặc định được suy ra từ màu chữ; template có thể đặt `layout.shadow` bằng `none` hoặc 2–4 độ dài cùng màu hex. Nội dung HTML/CSS/JS của mẫu nguồn chỉ được tải và kiểm tra cấu trúc, chưa được đưa vào trang hay thực thi.
 
 `typography.fontFamily` dùng cho nội dung, thẻ `p`, nhãn, nút và ô nhập liệu. `typography.headingFontFamily` dùng cho `h1`–`h6`, tiêu đề popup, biểu đồ và chú giải; nếu thiếu thì dùng lại `fontFamily` để tương thích template cũ. Hai giá trị lần lượt được chuyển thành `--template-font` và `--template-heading-font`.
 
-Đổi template áp dụng ngay, kể cả popup/biểu đồ đang mở và lớp được thêm sau đó, không gọi lại AI hoặc dựng lại biểu đồ. Các contract AI (`legend`, `popupSuggestions`, `popupContent`, `search_bar`, `search_fields`, `metricButtons`) giữ nguyên: AI vẫn đề xuất thang màu/ngưỡng, kiểu và nội dung popup, tìm kiếm, nhãn/icon/màu icon chỉ số. Template không đổi màu dữ liệu, basemap, bộ lọc hay lựa chọn người dùng. Nếu tải cấu hình lỗi, giao diện hợp lệ gần nhất được giữ và có nút thử lại; lựa chọn chỉ được giữ trong phiên hiện tại.
+Đổi mẫu màu/font áp dụng ngay, kể cả popup/biểu đồ đang mở và lớp được thêm sau đó, không gọi lại AI hoặc dựng lại biểu đồ. Các contract AI (`legend`, `popupSuggestions`, `popupContent`, `search_bar`, `search_fields`, `metricButtons`) giữ nguyên: AI vẫn đề xuất thang màu/ngưỡng, kiểu và nội dung popup, tìm kiếm, nhãn/icon/màu icon chỉ số. Template màu/font không đổi màu dữ liệu, basemap, bộ lọc hay lựa chọn người dùng. Nếu tải cấu hình lỗi, giao diện hợp lệ gần nhất được giữ và có nút thử lại; lựa chọn chỉ được giữ trong phiên hiện tại.
 
-Kiểm thử: `node --test tests/map-template*.test.js` và `npm run test:templates:browser` (Chrome/Chromium); thêm `-- --mobile` để kiểm tra viewport 390 × 844. Kiểm tra trình duyệt bao phủ các kiểu popup, typography, tooltip biểu đồ, chuyển Light/Dark, màu dữ liệu/icon, lớp tạo mới, màn hình nhỏ và lỗi tải cấu hình. Khi cập nhật API Python ở dự án `codex_server`, cần khởi động lại tiến trình uvicorn nếu không dùng `--reload`.
+Kiểm thử: `node --test tests/map-template*.test.js`, `npm run test:templates:browser` và `npm run test:template-composition:browser` (Chrome/Chromium); thêm `-- --mobile` để kiểm tra viewport 390 × 844. Kiểm tra trình duyệt bao phủ các kiểu popup, typography, tooltip biểu đồ, chuyển Light/Dark, màu dữ liệu/icon, lớp tạo mới, màn hình nhỏ và lỗi tải cấu hình. Khi cập nhật API Python ở dự án `codex_server`, cần khởi động lại tiến trình uvicorn nếu không dùng `--reload`.
 
 ## Chạy dự án
 
