@@ -15,7 +15,7 @@ export function create(parent) {
     bindControls(){},renderFilters:()=>controller.refreshControls(),renderControls:()=>controller.refreshControls(),
     metricColumns:()=>[],metricField:()=>state.aiDataset?.suggestions.find(item=>item.id===state.aiDataset.selectedSuggestionId)?.bindings.value,
     getView(){const search=controller.searchData();return {...viewSnapshot(context,definition,{data:state.arcFlowView?.data,tableRecords:state.arcFlowView?.tableRecords,
-      legendVisible:state.arcFlowStyle?.showLegend,configuration:{style:{...state.arcFlowStyle}},popupLayerId:'arc-flow',camera:{pitch:55,bearing:0}}),search,tableTitleSuffix:' · Luồng đang lọc'};},
+      legendVisible:state.arcFlowStyle?.showLegend,configuration:{style:{...state.arcFlowStyle}},popupLayerId:'arc-flow',camera:{pitch:55,bearing:0}}),search};},
     getPopupContext(feature){return {feature,open:()=>controller.openNode(feature)};},
     presentation:()=>({stylePanel:'arc-flow-style-controls',description:'Chiều cao cung, độ dày, chuyển động và chú giải',filterDescription:'Chọn cách hiển thị và chỉ số dữ liệu'}),
     closePopup:()=>controller.closePopup(),

@@ -121,15 +121,7 @@ export function createController(context) {
     context.search?.setData(data.data ? data : undefined);
   }
 
-  function renderTable() {
-    options.renderTable?.(state);
-  }
+  function updateDashboard() { options.onChange?.(); }
 
-  function updateDashboard() { renderTable(); }
-
-  function exportCSV() {
-    options.exportData?.(state);
-  }
-
-  return { applyStyle, applyMapLayerVisibility, addMapLayers, syncMapStyleControls, selectMapStyle, fitGeoJSON, fitBoundary, currentDataSearch, syncDataSearch, renderTable, updateDashboard, exportCSV };
+  return { applyStyle, applyMapLayerVisibility, addMapLayers, syncMapStyleControls, selectMapStyle, fitGeoJSON, fitBoundary, currentDataSearch, syncDataSearch, updateDashboard };
 }

@@ -49,7 +49,7 @@ try {
   markup.querySelectorAll('script').forEach(node => node.remove());
   document.body.append(...markup.body.children);
   document.querySelector('.map-panel').style.cssText = 'width:800px;height:600px;position:relative';
-  const templates = [document.querySelector('.sidebar'), document.getElementById('map-metric-control'), document.querySelector('.map-legends'), document.getElementById('data-panel')];
+  const templates = [document.querySelector('.sidebar'), document.getElementById('map-metric-control'), document.querySelector('.map-legends')];
   let canvas = new Canvas(), library = { Popup, LngLatBounds: Bounds }, overlay;
   const graphicsErrors = [];
   if (webgl) {
@@ -83,7 +83,7 @@ try {
       arcFlowOverlay: { async updateLayer(key, payload) { published.set(key, payload); if(!overlay)return true;
         const ok=await overlay.updateLayer(key,payload);overlay.setLayerState(key,{attached:true,visible:true});return ok;
       }, removeLayer(key) { published.delete(key); overlay?.removeLayer(key); } },
-      dependencies: { fetch() { throw new Error('Unexpected network request'); } }, renderTable: () => true,
+      dependencies: { fetch() { throw new Error('Unexpected network request'); } },
       assets: { roadNetworkUrl: () => null } });
     api.initialize(); entries.push({ api, manager, dom }); return entries.at(-1);
   };

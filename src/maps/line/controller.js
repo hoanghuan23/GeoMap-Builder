@@ -219,7 +219,7 @@ export function createController(context) {
     services.runtime.clearMapData();
     state.mapType = "line"; state.dataProfile = null;
     $("show-map-lines").checked = true;
-    services.ui.setDataPanelVisible(false); services.ui.renderAiSuggestionGrid();
+    services.ui.renderAiSuggestionGrid();
     context.map.resize();
     if (isCoordinateLine(suggestion)) {
     services.runtime.cancelAiBoundaryLoad(); refreshAiCoordinateLine({ fit: true }); return true;

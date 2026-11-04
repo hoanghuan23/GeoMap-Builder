@@ -40,7 +40,7 @@ export function createMapLayerRuntime(options) {
     setSamples(value) { context.document.getElementById('ai-include-samples').checked = value; },
     fit() { services.view.fitGeoJSON(state.boundary || state.sourceBoundary); },
     update() { services.ui.updateModelSections(); services.view.applyStyle(); },
-    async load(result, file) { state.fileName = file.name; await services.input.applyReadResult(result, file); services.view.renderTable(); },
+    async load(result, file) { state.fileName = file.name; await services.input.applyReadResult(result, file); services.view.updateDashboard(); },
     initialize() { context.map = options.map; context.search = { setData() { options.onChange?.(); }, refreshHighlight() {} };
       for (const definition of Object.keys(context.modules.factories || {})) context.modules.get(definition);
       services.ui.renderSupportedChartCatalog(); services.ui.bindUI(); services.view.addMapLayers(); services.view.updateDashboard(); },

@@ -3,7 +3,6 @@ export function createContext(options) {
     dependencies: options.dependencies || {}, assets: options.assets || {},
     state: {
   boundary: null, sourceBoundary: null,
-  page: 1, pageSize: 10, query: "",
   mapType: null, dataProfile: null,
   dataOrigin: null,
   uploadLayers: [], uploadedFiles: [], uploadedFileKeys: new Set(), uploadLayerSequence: 0, primaryUploadId: null,

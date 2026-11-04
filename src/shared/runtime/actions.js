@@ -35,7 +35,7 @@ export function createController(context) {
     context.tasks.tabularAbortController?.abort(); context.tasks.tabularAbortController = null; context.tasks.tabularLoadRevision++;
     cancelAiBoundaryLoad(); if (!preserveUploads) services.uploads.clearUploadLayers();
     state.primaryUploadId = null; state.boundary = null; state.sourceBoundary = null;
-    state.mapType = null; state.dataProfile = null; state.page = 1; state.dataOrigin = null; state.aiDataset = null; state.pendingSheet = null;
+    state.mapType = null; state.dataProfile = null; state.dataOrigin = null; state.aiDataset = null; state.pendingSheet = null;
     $('sheet-selector-field').hidden = true; $('sheet-selector').replaceChildren(); $('ai-data-filters').hidden = true;
     services.ui.updateModelSections(); $('map-type-grid').className = 'map-type-grid is-empty'; $('map-type-grid').textContent = 'Chưa có dữ liệu để đề xuất mô hình.';
     $('map-type-summary').textContent = ''; services.ui.showSupportedChartCatalog(true);
@@ -50,9 +50,6 @@ export function createController(context) {
 
   function deleteData() {
     clearUploadedData();
-    services.ui.setDataPanelVisible(false);
-    state.query = "";
-    $("table-search").value = "";
     $("coordinate-input").value = "";
     services.view.applyMapLayerVisibility();
     services.view.updateDashboard();
@@ -120,7 +117,7 @@ export function createController(context) {
       boundaries: null
     };
     services.uploads.showCurrentFile(name, `${pipeline.records.length.toLocaleString("vi-VN")} bản ghi · ${pipeline.analysis.source === "ai" ? "AI đã phân tích" : "AI chưa phân tích được dữ liệu"}`);
-    services.ui.setDataPanelVisible(false); services.ui.renderAiSuggestionGrid();
+    services.ui.renderAiSuggestionGrid();
     let selected = false;
     const visibleSuggestions = mapDisplaySuggestions(suggestions);
     const initialSuggestions = visibleSuggestions;

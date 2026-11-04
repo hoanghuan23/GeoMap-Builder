@@ -178,7 +178,7 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
     closePopup();
     state.arcFlowView = buildArcFlowView(modelFor(currentSuggestion), selectionFor(currentSuggestion));
     state.boundary = state.arcFlowView.data; state.sourceBoundary = state.arcFlowView.data;
-    state.page = 1; renderFilters(); renderLegend(); publish();
+    renderFilters(); renderLegend(); publish();
   }
   return {
     async activate(suggestion) {

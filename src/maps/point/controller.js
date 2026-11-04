@@ -240,7 +240,7 @@ export function createController(context) {
     const firstActivation = !dataset.pointSelections?.[suggestion.id];
     dataset.recommendation = services.ui.recommendationForSuggestion(suggestion);
 
-    services.ui.setDataPanelVisible(false); refreshPointView(suggestion, { rebuildControls: true });
+    refreshPointView(suggestion, { rebuildControls: true });
     services.ui.renderAiSuggestionGrid();
     if (firstActivation) services.view.fitGeoJSON(pointModelFor(suggestion).data);
     return true;

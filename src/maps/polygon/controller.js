@@ -267,7 +267,7 @@ export function createController(context) {
       $("region-hex-note").textContent = result.resolution !== requestedResolution
         ? `Đã dùng độ phân giải ${result.resolution} để giữ số ô trong giới hạn ${CONFIG.MAX_RENDER_CELLS.toLocaleString("vi-VN")} ô.`
         : !count ? "Chưa có ô ở độ phân giải này. Tăng độ phân giải để hiển thị vùng nhỏ." : "";
-      state.page = 1; services.view.updateDashboard();
+      services.view.updateDashboard();
       syncPolygonPaletteControls(); services.view.applyStyle();
       if (fit && count) services.view.fitBoundary();
       services.ui.setStatus(`Đã vẽ ${count.toLocaleString("vi-VN")} ô lục giác.`, true);

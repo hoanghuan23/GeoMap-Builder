@@ -70,7 +70,6 @@ export function createController(context) {
     if (hide) context.tasks.statusTimer = setTimeout(() => { el.hidden = true; }, 2200);
   }
 
-  function setDataPanelVisible(visible) { $("data-panel").hidden = !visible; document.querySelector(".content-area").classList.toggle("table-hidden", !visible); context.map?.resize(); }
 
   function fmt(value, digits = 1) { return Number.isFinite(value) ? value.toFixed(digits) : "--"; }
 
@@ -547,14 +546,10 @@ export function createController(context) {
       services.runtime.deleteData();
       setStatus("Đã xóa dữ liệu. Hãy upload dữ liệu để bắt đầu.", true);
     });
-    $("close-data-panel").addEventListener("click", () => setDataPanelVisible(false));
-    $("table-search").addEventListener("input", e => { state.query = e.target.value; state.page = 1; services.view.renderTable(); }); $("page-size").addEventListener("change", e => { state.pageSize = Number(e.target.value); state.page = 1; services.view.renderTable(); });
-    $("prev-page").addEventListener("click", () => { state.page--; services.view.renderTable(); }); $("next-page").addEventListener("click", () => { state.page++; services.view.renderTable(); }); $("page-buttons").addEventListener("click", e => { if (e.target.dataset.page) { state.page = Number(e.target.dataset.page); services.view.renderTable(); } });
     if (!options.managedWorkspace) {
       $("zoom-in").addEventListener("click", () => context.map.zoomIn()); $("zoom-out").addEventListener("click", () => context.map.zoomOut()); $("fullscreen").addEventListener("click", () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector(".map-panel").requestFullscreen());
     }
-    $("export-data").addEventListener("click", services.view.exportCSV);
   }
 
-  return { showToast, setStatus, setDataPanelVisible, fmt, renderSupportedChartCatalog, showSupportedChartCatalog, updateModelSections, renderCompatibleMapTypes, uniqueRecordValues, mapMetricColumns, mapMetricButtons, renderMapMetricControls, changeAiMapMetric, populateAiFilters, selectedAiFilters, recommendationForSuggestion, createAiSuggestionButton, renderAiSuggestionGrid, aiField, aiSelect, bindUI };
+  return { showToast, setStatus, fmt, renderSupportedChartCatalog, showSupportedChartCatalog, updateModelSections, renderCompatibleMapTypes, uniqueRecordValues, mapMetricColumns, mapMetricButtons, renderMapMetricControls, changeAiMapMetric, populateAiFilters, selectedAiFilters, recommendationForSuggestion, createAiSuggestionButton, renderAiSuggestionGrid, aiField, aiSelect, bindUI };
 }
