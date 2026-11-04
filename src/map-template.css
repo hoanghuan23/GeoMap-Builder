@@ -16,6 +16,14 @@
   color: var(--template-text);
 }
 
+/* Keep prose and form controls on the body font, including inside headings. */
+.content-area[data-template-ready="true"] :is(.maplibregl-popup-content, .map-search, .map-metric-control, .map-legends, .map-controls) :is(p, figcaption, label, button, input, select, textarea) {
+  font-family: var(--template-font);
+}
+.content-area[data-template-ready="true"] :is(h1, h2, h3, h4, h5, h6, .weather-popup > strong, .popup-info-heading > strong, .data-feature-popup > strong, .point-legend-heading strong, .weather-legend-heading strong, .layer-overlay-title) {
+  font-family: var(--template-heading-font, var(--template-font));
+}
+
 .content-area[data-template-ready="true"] :is(.maplibregl-popup-content, .point-legend, .weather-legend, .map-search-form, .map-search-results, .map-search-selection, .map-region-navigation, .map-metric-toggle, .map-metric-button, .map-controls) {
   background: var(--template-background);
   color: var(--template-text);

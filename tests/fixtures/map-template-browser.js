@@ -42,7 +42,7 @@ try {
     search_bar: true, search_fields: ['name'], metricButtons: [{ field: 'value', label: 'Số liệu', icon: '✈', color: '#26aa66' }] };
   const before = JSON.stringify(analysis);
   const columns = [{ name: 'name', role: 'geo' }, { name: 'value', role: 'measure', unit: 'mm' }, { name: 'description', role: 'text' }];
-  const feature = { properties: { name: 'Hà Nội', value: 150, description: 'Thông tin dữ liệu mẫu' } };
+  const feature = { properties: { name: 'Hà Nội', value: 150, description: 'Thông tin dữ liệu mẫu', __scope_reason: 'Ghi chú khu vực' } };
   const popups = [];
   function popup(child, extra = '') {
     const outer = node('div', `maplibregl-popup ai-weather-popup ai-map-popup ${extra}`);
@@ -61,7 +61,7 @@ try {
   for (const renderer of [BarRenderer, LineRenderer]) {
     const card = node('div', 'weather-popup ai-popup-chart-only');
     const host = node('div', 'ai-popup-chart'); card.append(host); popup(card);
-    const config = { xField: 'day', title: 'Dữ liệu theo ngày', series: [{ key: 'value', label: 'Lượng mưa', color: '#cc3366' }],
+    const config = { xField: 'day', title: 'Dữ liệu theo ngày', unit: 'mm', series: [{ key: 'value', label: 'Lượng mưa', color: '#cc3366' }],
       data: [{ day: '2026-01-01', value: 10 }, { day: '2026-01-02', value: 20 }], showDataLabels: true, animate: false };
     renderer.render(host, config); charts.push(host);
   }
@@ -102,6 +102,14 @@ try {
     }
     assert(computed(info, 'fontSize') === (dark ? '15px' : '14px'), 'Popup size not from server');
     assert(computed(info, 'fontFamily').includes(dark ? 'Georgia' : 'Arial'), 'Popup font not from server');
+    const bodyFont = dark ? 'Georgia' : 'Arial';
+    const headingFont = dark ? 'Verdana' : 'Merriweather';
+    for (const element of [info.querySelector('.popup-info-heading > strong'), image.querySelector('h2'), legend.querySelector('strong'), ...charts.map(host => host.querySelector('h2'))]) {
+      assert(computed(element, 'fontFamily').includes(headingFont), `Heading font not from server: ${element.className || element.tagName}`);
+    }
+    for (const element of [info.querySelector('dd'), info.querySelector('.popup-scope-note'), image.querySelector('p'), input, metric, searchResult, ...popups.map(outer => outer.querySelector('button')), ...charts.map(host => host.querySelector('.bar-chart-heading p'))]) {
+      assert(computed(element, 'fontFamily').includes(bodyFont), `Body/control font not from server: ${element.className || element.tagName}`);
+    }
     assert(computed(info.querySelector('dd'), 'color') === text, 'Popup field kept hardcoded color');
     assert(computed(image.querySelector('h2'), 'color') === text, 'Image heading kept hardcoded color');
     assert(computed(searchResult.querySelector('b'), 'color') === text, 'Search result text kept hardcoded color');
@@ -129,6 +137,7 @@ try {
   const newLayer = node('div', 'layer-legends'); const newLegend = legend.cloneNode(true); newLayer.append(newLegend); document.querySelector('.map-legends').append(newLayer);
   document.getElementById('map').replaceChildren(node('canvas', 'maplibregl-canvas'));
   assert(computed(newLegend, 'backgroundColor') === 'rgb(28, 28, 38)', 'New layer lost the active template');
+  assert(computed(newLegend.querySelector('strong'), 'fontFamily').includes('Verdana'), 'New legend lost the active heading font');
   fail = true; await picker.load();
   assert(content.dataset.templateTheme === 'dark' && !document.getElementById('map-template-retry').hidden, 'Failed refresh discarded active theme');
   // Narrow viewport/container: popup width remains bounded and text stays readable.

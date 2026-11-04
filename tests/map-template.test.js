@@ -20,9 +20,18 @@ test('complete authored values are retained; data colors and arbitrary propertie
   const variables = mapTemplateVariables(template);
   assert.equal(variables['--template-background'], '#1C1C26');
   assert.equal(variables['--template-font'], 'Georgia, serif');
+  assert.equal(variables['--template-heading-font'], 'Verdana, sans-serif');
   assert.equal(variables['--template-popup-size'], '15px');
   assert.ok(Object.keys(variables).every(key => key.startsWith('--template-')));
   assert.ok(!Object.keys(variables).some(key => /metric-color|legend-gradient/.test(key)));
+});
+
+test('older templates without a heading font inherit the body font', () => {
+  const legacy = structuredClone(mapTemplates[0]);
+  delete legacy.typography.headingFontFamily;
+  const template = normalizeMapTemplate(legacy);
+  assert.equal(template.typography.headingFontFamily, legacy.typography.fontFamily);
+  assert.equal(mapTemplateVariables(template)['--template-heading-font'], legacy.typography.fontFamily);
 });
 
 test('metadata-only, incomplete and unsafe templates are rejected before application', () => {
@@ -32,6 +41,10 @@ test('metadata-only, incomplete and unsafe templates are rejected before applica
     x => { delete x.typography.sizes.popup; },
     x => { x.styles.colors.text = 'url(https://example.com)'; },
     x => { x.typography.fontFamily = 'Arial; color: red'; },
+    x => { x.typography.headingFontFamily = 'Georgia; color: red'; },
+    x => { x.typography.headingFontFamily = ''; },
+    x => { x.typography.headingFontFamily = null; },
+    x => { x.typography.headingFontFamily = 'A'.repeat(241); },
     x => { x.typography.sizes.label = '-12px'; },
     x => { x.typography.weights.bold = 42; },
     x => { x.typography.lineHeight = NaN; },
@@ -58,6 +71,7 @@ test('picker defaults to Light, switches without refetching and preserves last v
   assert.equal(calls, 1);
   assert.equal(content.dataset.templateTheme, 'dark');
   assert.equal(content.styles['--template-popup-size'], '15px');
+  assert.equal(content.styles['--template-heading-font'], 'Verdana, sans-serif');
   assert.equal(content.styles['--metric-color'], '#123456');
   const previous = structuredClone(content.styles);
   payload = { templates: [{ id: 'vnexpress', theme: 'light', name: 'Metadata only', description: 'Missing config' }] };

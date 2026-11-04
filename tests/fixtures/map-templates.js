@@ -9,6 +9,7 @@ export const mapTemplates = ['light', 'dark'].map(theme => ({
   },
   typography: {
     fontFamily: theme === 'light' ? 'Arial, Helvetica, sans-serif' : 'Georgia, serif',
+    headingFontFamily: theme === 'light' ? 'Merriweather, Georgia, serif' : 'Verdana, sans-serif',
     sizes: { body: '16px', popup: theme === 'light' ? '14px' : '15px', legend: '13px', label: '12px', heading: '20px', title: '24px' },
     weights: { normal: 400, semibold: 600, bold: 700 }, lineHeight: 1.55
   }

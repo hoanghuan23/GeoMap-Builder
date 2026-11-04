@@ -11,6 +11,12 @@ function length(value, allowZero = false) {
   return value;
 }
 
+function fontFamily(value) {
+  if (typeof value !== 'string' || value.length > 240
+    || !/^[\p{L}\p{N}\s,'"-]+$/u.test(value) || !value.trim()) invalid();
+  return value;
+}
+
 /** Only presentation tokens cross this boundary; data colors and AI decisions never do. */
 export function normalizeMapTemplate(raw) {
   const template = {};
@@ -25,8 +31,8 @@ export function normalizeMapTemplate(raw) {
     colors[key] = raw.styles.colors[key];
   }
   const source = raw.typography;
-  if (typeof source?.fontFamily !== 'string' || source.fontFamily.length > 240
-    || !/^[\p{L}\p{N}\s,'"-]+$/u.test(source.fontFamily) || !source.fontFamily.trim()) invalid();
+  const bodyFont = fontFamily(source?.fontFamily);
+  const headingFont = fontFamily(source.headingFontFamily === undefined ? bodyFont : source.headingFontFamily);
   const sizes = {};
   for (const key of ['body', 'popup', 'legend', 'label', 'heading', 'title']) sizes[key] = length(source.sizes?.[key]);
   const weights = {};
@@ -44,12 +50,12 @@ export function normalizeMapTemplate(raw) {
       || !/^(?:none|(?:-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|rem|em)?\s+){2,4}#[\da-f]{3,8})$/i.test(shadow)) invalid();
     layout.shadow = shadow;
   }
-  return { ...template, styles: { colors, layout }, typography: { fontFamily: source.fontFamily, sizes, weights, lineHeight: source.lineHeight } };
+  return { ...template, styles: { colors, layout }, typography: { fontFamily: bodyFont, headingFontFamily: headingFont, sizes, weights, lineHeight: source.lineHeight } };
 }
 
 export function mapTemplateVariables(template) {
   const { colors, layout } = template.styles;
-  const { fontFamily, sizes, weights, lineHeight } = template.typography;
+  const { fontFamily, headingFontFamily = fontFamily, sizes, weights, lineHeight } = template.typography;
   return {
     '--template-background': colors.background,
     '--template-surface': colors.surface,
@@ -58,6 +64,7 @@ export function mapTemplateVariables(template) {
     '--template-border': colors.border,
     '--template-accent': colors.accent,
     '--template-font': fontFamily,
+    '--template-heading-font': headingFontFamily,
     ...Object.fromEntries(Object.entries(sizes).map(([key, value]) => [`--template-${key}-size`, value])),
     ...Object.fromEntries(Object.entries(weights).map(([key, value]) => [`--template-${key}-weight`, String(value)])),
     '--template-line-height': String(lineHeight),

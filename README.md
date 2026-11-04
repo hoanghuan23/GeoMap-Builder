@@ -72,6 +72,7 @@ Contract cấu hình tương ứng các file hiện có của server:
   },
   "typography": {
     "fontFamily": "Arial, Helvetica, sans-serif",
+    "headingFontFamily": "Merriweather, Georgia, serif",
     "sizes": { "body": "16px", "popup": "14px", "legend": "13px", "label": "12px", "heading": "20px", "title": "24px" },
     "weights": { "normal": 400, "semibold": 600, "bold": 700 },
     "lineHeight": 1.55
@@ -80,6 +81,8 @@ Contract cấu hình tương ứng các file hiện có của server:
 ```
 
 Frontend kiểm tra và chuyển các giá trị thành biến `--template-*` trên workspace. CSS dùng chung áp dụng cho popup thông tin/ảnh/biểu đồ, chú giải, tìm kiếm và điều khiển trên bản đồ. `background` là nền khung, `surface` là nền thành phần bên trong; trạng thái hover/active phối từ `surface` và `accent`. Bóng mặc định được suy ra từ màu chữ; template có thể đặt `layout.shadow` bằng `none` hoặc 2–4 độ dài cùng màu hex. Không tải font ngoài hoặc thực thi CSS/HTML/JS tùy ý từ phản hồi API.
+
+`typography.fontFamily` dùng cho nội dung, thẻ `p`, nhãn, nút và ô nhập liệu. `typography.headingFontFamily` dùng cho `h1`–`h6`, tiêu đề popup, biểu đồ và chú giải; nếu thiếu thì dùng lại `fontFamily` để tương thích template cũ. Hai giá trị lần lượt được chuyển thành `--template-font` và `--template-heading-font`.
 
 Đổi template áp dụng ngay, kể cả popup/biểu đồ đang mở và lớp được thêm sau đó, không gọi lại AI hoặc dựng lại biểu đồ. Các contract AI (`legend`, `popupSuggestions`, `popupContent`, `search_bar`, `search_fields`, `metricButtons`) giữ nguyên: AI vẫn đề xuất thang màu/ngưỡng, kiểu và nội dung popup, tìm kiếm, nhãn/icon/màu icon chỉ số. Template không đổi màu dữ liệu, basemap, bộ lọc hay lựa chọn người dùng. Nếu tải cấu hình lỗi, giao diện hợp lệ gần nhất được giữ và có nút thử lại; lựa chọn chỉ được giữ trong phiên hiện tại.
 
