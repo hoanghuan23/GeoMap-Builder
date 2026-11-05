@@ -2001,6 +2001,18 @@ input[type=range] {
     border-radius: 0
 }
 
+.map-compass {
+    --accent: #0b8076;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: #344b55
+}
+
+.map-compass:hover { background: #f1f6fd; }
+.map-compass:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.map-compass .compass-icon { display: block; transform-origin: center; }
+
 .map-metric-control {
     position: absolute;
     top: 62px;

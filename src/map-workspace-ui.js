@@ -539,6 +539,11 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   });
   $('zoom-in').addEventListener('click', () => map.zoomIn()); $('zoom-out').addEventListener('click', () => map.zoomOut());
   $('fullscreen').addEventListener('click', () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector('.map-panel').requestFullscreen());
+  const compass = $('map-compass');
+  const updateCompass = () => { compass.querySelector('.compass-icon').style.transform = `rotate(${-map.getBearing()}deg)`; };
+  compass.addEventListener('click', () => map.easeTo({ bearing: 0, duration: 300 }));
+  map.on('rotate', updateCompass);
+  updateCompass();
   map.on('style.load', () => { styleReady = true; mounted.clear(); readyResolve(); sync(); arcFlowOverlay.setStyleReady(true); search.refreshHighlight(); });
   map.on('remove', () => arcFlowOverlay.dispose());
   map.on('error', event => {

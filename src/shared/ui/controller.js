@@ -548,6 +548,13 @@ export function createController(context) {
     });
     if (!options.managedWorkspace) {
       $("zoom-in").addEventListener("click", () => context.map.zoomIn()); $("zoom-out").addEventListener("click", () => context.map.zoomOut()); $("fullscreen").addEventListener("click", () => document.fullscreenElement ? document.exitFullscreen() : document.querySelector(".map-panel").requestFullscreen());
+      const compass = $("map-compass");
+      if (compass) {
+        const updateCompass = () => { compass.querySelector(".compass-icon").style.transform = `rotate(${-context.map.getBearing()}deg)`; };
+        compass.addEventListener("click", () => context.map.easeTo({ bearing: 0, duration: 300 }));
+        context.map.on("rotate", updateCompass);
+        updateCompass();
+      }
     }
   }
 
