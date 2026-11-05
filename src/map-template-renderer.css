@@ -1,12 +1,289 @@
-.map-template-shell { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.map-template-shell { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; min-width: 0; min-height: 0; z-index: 2; pointer-events: none; }
 .map-template-shell :where([data-template-slot="map"]) { position: absolute; inset: 0; z-index: 0; pointer-events: auto; }
-.map-template-shell [data-template-slot="map"] > #map { position: absolute; inset: 0; width: 100%; height: 100%; }
+.map-template-shell [data-template-slot="map"] > #map { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; display: block !important; }
 .map-template-shell [data-template-slot="search"],
 .map-template-shell [data-template-slot="metrics"],
 .map-template-shell [data-template-slot="legend"],
 .map-template-shell [data-template-slot="controls"],
 .map-template-shell [data-template-slot="attribution"] { pointer-events: auto; }
-.content-area[data-template-rendered="true"] .map-panel { margin: 0; border: 0; border-radius: 0; }
+.map-template-shell [data-template-slot="attribution"]:has(> .map-attribution[hidden]) { display: none !important; }
+.content-area[data-template-active="true"] .map-panel { margin: 0; border: 0; border-radius: 0; }
 .content-area[data-template-rendered="true"] .map-template-shell .map-metric-preview { background: var(--metric-color) !important; }
-.map-template-fallback-notice { position: absolute; top: 12px; left: 12px; z-index: 8; max-width: min(460px, calc(100% - 24px)); padding: 10px 13px; border: 1px solid #f1c484; border-radius: 8px; background: #fff8e9; box-shadow: 0 6px 20px #1a2a3a26; color: #68451b; font: 12px/1.5 Arial, sans-serif; pointer-events: none; }
-.map-template-fallback-notice[hidden] { display: none; }
+/* Numeric ticks keep the data renderer's geometry. At left:100%, an auto-sized
+   label can shrink to zero and wrap its digits when template CSS resets nowrap
+   or the end label's translation. Categorical labels still wrap normally. */
+.map-template-shell:not(#map-template-native-styles) {
+  /* Keep the search glyph legible even when a generated button has large
+     padding or a generic SVG rule. Use spacing instead of internal dividers. */
+  .map-search-submit {
+    display: grid !important;
+    place-items: center !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+    flex: 0 0 auto !important;
+  }
+  .map-search-submit svg {
+    display: block !important;
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+    min-height: 22px !important;
+    max-width: none !important;
+    max-height: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    transform: none !important;
+    fill: none !important;
+    stroke: currentColor !important;
+    stroke-width: 2 !important;
+  }
+  .map-search-form > :is(input, .map-search-location, .map-search-clear, .map-search-submit) {
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+  .map-search-form > input {
+    outline: 0 !important;
+    background: transparent !important;
+  }
+  .map-search-form::before, .map-search-form::after,
+  .map-search-form > :is(.map-search-location, .map-search-clear, .map-search-submit)::before,
+  .map-search-form > :is(.map-search-location, .map-search-clear, .map-search-submit)::after {
+    content: none !important;
+  }
+  :is(.weather-legend-labels.positioned, .line-legend-labels) {
+    display: block !important;
+    position: relative !important;
+  }
+  :is(.weather-legend-labels:not(.categorical), .line-legend-labels) > span {
+    width: max-content !important;
+    min-width: max-content !important;
+    max-width: none !important;
+    white-space: nowrap !important;
+    overflow-wrap: normal !important;
+    word-break: normal !important;
+    flex: 0 0 auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  :is(.weather-legend-labels.positioned, .line-legend-labels) > span {
+    position: absolute !important;
+    transform: translateX(-50%) !important;
+  }
+  :is(.weather-legend-labels.positioned, .line-legend-labels) > span:first-child:not(:only-child) {
+    transform: none !important;
+  }
+  :is(.weather-legend-labels.positioned, .line-legend-labels) > span:last-child:not(:only-child) {
+    transform: translateX(-100%) !important;
+  }
+}
+/* While composing, keep the live basemap and its navigation controls. */
+.map-panel[data-template-loading] :is(.map-query-panel, .workspace-metrics, .map-legends,
+  .maplibregl-popup, .maplibregl-marker) { display: none !important; }
+/* Slots own placement and framing. Moved controls must not keep the native
+   viewport offsets or dark cards. :where keeps these defaults below the
+   composed selectors, including their mobile rules. */
+.map-template-shell:not(#map-template-native-styles) {
+  :where([data-template-slot]:not([data-template-slot="map"])) {
+    min-width: 0;
+    max-width: 100%;
+  }
+  :where([data-template-slot="search"] > .map-query-panel,
+    [data-template-slot="metrics"] > .workspace-metrics,
+    [data-template-slot="legend"] > .map-legends,
+    [data-template-slot="controls"] > .map-controls,
+    [data-template-slot="attribution"] > .map-attribution,
+    [data-template-slot="status"] > #status) {
+    position: relative;
+    inset: auto;
+    transform: none;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: inherit;
+    font: inherit;
+  }
+  :where(.workspace-metrics, .map-metric-control, .map-metric-list) {
+    align-items: stretch;
+    min-width: 0;
+    min-height: 0;
+    max-width: 100%;
+  }
+  /* Floating strips shrink to their chips. A percentage width here makes an
+     auto-sized slot expand to the map width before flex wrapping is resolved. */
+  :where([data-template-slot="metrics"], .workspace-metrics) { width: fit-content; }
+  :where(.map-metric-control) {
+    position: relative;
+    inset: auto;
+    transform: none;
+    width: auto;
+    max-height: none;
+    gap: 8px;
+  }
+  :where(.map-metric-toggle) {
+    display: flex;
+    align-self: flex-start;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-start;
+    min-width: 0;
+    width: auto;
+    height: auto;
+    text-align: start;
+  }
+  :where(.map-metric-toggle > svg, .map-metric-count, .map-metric-chevron) { flex: 0 0 auto; }
+  :where([data-control-id="map-metric-caption"], #map-metric-caption) {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  :where(.map-metric-list) {
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: auto;
+    max-height: min(38vh, 300px);
+    padding: 0;
+  }
+  :where(.map-metric-button) {
+    flex: 0 1 auto;
+    justify-content: flex-start;
+    min-width: 0;
+    width: auto;
+    height: auto;
+    text-align: start;
+  }
+  :where(.map-metric-label) {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  :where(.map-metric-preview) {
+    width: 24px;
+    height: 24px;
+    border: 0;
+    box-shadow: none;
+    font-size: 16px;
+  }
+  /* An explicit flex basis becomes a height when the template stacks controls. */
+  :where(.map-search-box) { flex: 1 1 auto; align-self: stretch; min-width: min(180px, 100%); }
+  :where(.map-region-navigation) { flex: 1 1 auto; align-self: stretch; width: auto; max-width: 100%; }
+  :where(.point-legend, .weather-legend) {
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: inherit;
+    font: inherit;
+  }
+  :where(.layer-legends) { min-width: 0; width: 100%; }
+  :where(.weather-legend small) { overflow-wrap: anywhere; }
+  :where(.map-search-form, .map-region-navigation, .map-search-results,
+    .map-search-selection, .map-metric-toggle, .map-metric-button) {
+    background: transparent;
+    color: inherit;
+    border-color: color-mix(in srgb, currentColor 25%, transparent);
+    box-shadow: none;
+    font-family: inherit;
+  }
+  :where(.map-search-form input, .map-search-clear, .map-search-submit,
+    .weather-legend strong, .weather-legend small, .weather-legend-labels,
+    .weather-legend-heading > span, .line-legend-labels, .point-legend-heading,
+    .point-legend-row > b, .point-legend > small, .categorical-legend-row > b,
+    .map-metric-label, .map-metric-label small, .map-metric-count) { color: inherit; }
+  :where(.map-search-form input)::placeholder { color: inherit; opacity: .65; }
+  :where(.map-search-form input) { text-align: start; font-family: inherit; }
+  :where(.map-search-form:focus-within) {
+    outline: 2px solid var(--template-accent, currentColor);
+    outline-offset: 2px;
+  }
+  :where(.map-search-clear, .map-search-submit, .map-metric-toggle,
+    .map-metric-button, .map-controls > button) {
+    font-family: inherit;
+    backdrop-filter: none;
+  }
+  :where(.map-search-clear:hover, .map-search-submit:hover,
+    .map-metric-button:hover, .map-metric-button.active) {
+    color: inherit;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+    border-color: currentColor;
+    box-shadow: none;
+  }
+  :where(.map-metric-count) { background: transparent; }
+  :where(.map-search-location, .map-search-result, .map-search-result-icon,
+    .map-search-chip, .map-search-result b, .map-search-result small) {
+    background: transparent;
+    color: inherit;
+  }
+  :where(.map-region-navigation) { color-scheme: normal; }
+  /* A template skins the popup frame; its real content must inherit that skin
+     instead of retaining the native dark theme's white values and close button. */
+  :where(.maplibregl-popup-content) { padding: 16px; color: inherit; font: inherit; }
+  :where(.weather-popup) { padding: 0; color: inherit; font: inherit; }
+  :where(.weather-popup > strong, .weather-popup > small,
+    .popup-info-heading > strong, .popup-info-caption,
+    .weather-popup dt, .weather-popup dd, .weather-popup-status,
+    .popup-info-note dt, .popup-info-note dd) { color: inherit; }
+  :where(.popup-country-title, .popup-info-heading, .popup-source-record,
+    .popup-info-details > div, .popup-joined-records) {
+    border-color: color-mix(in srgb, currentColor 18%, transparent);
+  }
+  :where(.weather-popup dl > div, .popup-info-chip dd, .popup-info-note) {
+    color: inherit;
+    background: transparent;
+  }
+  :where(.maplibregl-popup-close-button) {
+    color: inherit;
+    background: transparent;
+    border-color: color-mix(in srgb, currentColor 25%, transparent);
+    box-shadow: none;
+    font-family: inherit;
+  }
+  :where(.maplibregl-popup-close-button:hover) {
+    color: inherit;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+  }
+  /* Keep native chart geometry and behavior while sharing the template's skin.
+     In particular, no iframe introduces its own font, axes or scrollbar. */
+  :where(.weather-popup.ai-popup-chart-only) { padding: 32px 0 0; }
+  :where(.ai-popup-chart) {
+    height: min(320px, max(220px, calc(var(--popup-map-height, 640px) - 80px)));
+    min-width: 0;
+  }
+  :where(.ai-popup-chart .bar-chart-card) {
+    background: var(--template-surface, #fff);
+    color: var(--template-text, #1d2939);
+    border-color: var(--template-border, #e3e8ef);
+    font-family: var(--template-font, inherit);
+  }
+  :where(.ai-popup-chart .bar-chart-heading h2) {
+    color: var(--template-text, #1d2939);
+    font-family: var(--template-heading-font, var(--template-font, inherit));
+    overflow-wrap: anywhere;
+  }
+  :where(.ai-popup-chart .bar-chart-heading p) { color: var(--template-secondary, #7a8699); }
+  :where(.ai-popup-chart .chart-zoom-controls, .ai-popup-chart .chart-zoom-controls button) {
+    background: var(--template-surface, #fff);
+    color: var(--template-text, #42526a);
+    border-color: var(--template-border, #dce3ed);
+  }
+  :where(.ai-popup-chart .chart-zoom-controls button:hover) {
+    background: color-mix(in srgb, var(--template-surface, #fff) 90%, var(--template-text, #42526a));
+  }
+  :where(.ai-popup-chart .chart-zoom-controls button:disabled) {
+    color: var(--template-secondary, #7a8699);
+    opacity: .5;
+  }
+  [hidden] { display: none !important; }
+}

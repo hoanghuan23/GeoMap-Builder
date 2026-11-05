@@ -155,8 +155,7 @@ export function createController(context) {
 
   function clearMapPopupChart(view) {
     if (view?.chartContainer) {
-      if (view.templateChartCleanup) { view.templateChartCleanup(); view.templateChartCleanup = null; }
-      else chartRenderer(view.chartKind).clear(view.chartContainer);
+      chartRenderer(view.chartKind).clear(view.chartContainer);
       view.chartContainer = null;
     }
   }
@@ -217,9 +216,9 @@ export function createController(context) {
     popupElement.classList.toggle("has-info-image", selection.mode === "info_image");
     sizeMapPopup(view);
     if (chart?.config) {
-      const fallback = () => { view.templateChartCleanup = null; chartRenderer(selection.mode).render(view.chartContainer, chart.config); };
-      view.templateChartCleanup = options.onPopupChart?.({ kind: selection.mode, container: view.chartContainer, chart: chart.config, fallback }) || null;
-      if (!view.templateChartCleanup) fallback();
+      // Templates style the native chart through CSS variables. Keep the same
+      // axes, tooltips and interactions as the original map for both kinds.
+      chartRenderer(selection.mode).render(view.chartContainer, chart.config);
     }
   }
 

@@ -164,6 +164,24 @@ test("selected boundary highlight follows search selection, survives style reloa
   assert.deepEqual(highlighted(), []);
 });
 
+test("template waiting hides search boundaries without losing the selection, including across style reloads", t => {
+  const { controller, search, sources, layers, get } = harness(t);
+  const snapshot = countryData();
+  controller.setData(snapshot);
+  search('Vietnam')[0].handlers.click();
+  const saved = controller.getState();
+  controller.setVisible(false);
+  assert.deepEqual(sources.get('map-search-boundary').data.features, []);
+  assert.equal(get('map-search-results').hidden, true);
+  assert.deepEqual(controller.getState(), saved);
+  sources.clear(); layers.clear();
+  controller.refreshHighlight();
+  assert.equal(sources.has('map-search-boundary'), false);
+  controller.setVisible(true);
+  assert.deepEqual(sources.get('map-search-boundary').data.features, [snapshot.data.features[0]]);
+  assert.deepEqual(controller.getState(), saved);
+});
+
 test("country spreadsheet searches only uploaded countries, including accents, aliases and codes", () => {
   const index = buildDataSearchIndex(countryData());
   assert.equal(index.entries.length, 8);

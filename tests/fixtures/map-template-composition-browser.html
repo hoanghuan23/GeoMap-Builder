@@ -1,12 +1,30 @@
-<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/src/styles.css"><link rel="stylesheet" href="/src/reference-tweaks.css">
+<style>body{overflow:auto}.content-area{display:block;height:auto}.map-panel{margin:0}</style></head><body>
 <select id="map-template-select"></select><p id="map-template-status"></p><button id="map-template-retry" hidden>Thử lại</button>
 <div class="content-area"><div class="map-panel" style="position:relative;width:min(900px,100vw);height:650px">
-  <div id="map"></div><div id="status"></div>
-  <div class="workspace-metrics"><div class="map-metric-control"><div class="map-metric-list"></div></div></div>
-  <div class="map-legends"><div class="weather-legend-scale" style="background:linear-gradient(red,blue)"></div></div>
-  <div class="map-query-panel"><input id="search-input"></div>
+  <div id="map"></div><div id="status" class="status-pill" hidden></div>
+  <div class="workspace-metrics"><div class="map-metric-control">
+    <button class="map-metric-toggle" type="button" aria-expanded="true">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 21 8l-9 5-9-5 9-5Z"></path></svg>
+      <span data-control-id="map-metric-caption">Chỉ số bản đồ</span><span class="map-metric-count">7</span><span class="map-metric-chevron" aria-hidden="true">⌃</span>
+    </button><div class="map-metric-list"></div>
+  </div></div>
+  <div class="map-legends"><div class="layer-legends"><div class="weather-legend">
+    <div class="weather-legend-heading"><strong>Mức độ ô nhiễm</strong><span data-control-id="weather-legend-mode">Theo dữ liệu</span></div>
+    <div class="weather-legend-scale" style="background:linear-gradient(red,blue)"></div>
+    <div class="weather-legend-labels"><span>14</span><span>29</span></div><small>Dữ liệu tải lên</small>
+  </div><div class="point-legend" hidden>Ẩn</div></div></div>
+  <div class="map-query-panel"><div class="map-search"><div class="map-search-controls"><div class="map-search-box">
+    <form class="map-search-form">
+      <span class="map-search-location" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/></svg></span>
+      <input id="search-input" type="search" placeholder="Tìm trong dữ liệu">
+      <button class="map-search-clear" type="button" aria-label="Xóa tìm kiếm" hidden>×</button>
+      <button class="map-search-submit" type="button" aria-label="Tìm kiếm"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg></button>
+    </form>
+  </div><select class="map-region-navigation"><option>Toàn bộ khu vực</option></select></div></div></div>
   <div class="map-controls"><button id="zoom-in">+</button></div>
-  <div class="map-attribution">© Test</div>
+  <div class="map-attribution" hidden>© Test</div>
 </div></div><pre id="module-result">running</pre>
 <script type="module" src="./map-template-composition-browser.js"></script>
 </body></html>

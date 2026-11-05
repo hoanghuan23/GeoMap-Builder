@@ -279,6 +279,21 @@ test("information popups use the active input dataset title, with the input file
   assert.equal(caption(), 'Dữ liệu đầu vào');
 });
 
+test('bar and line popups keep native renderers even when a legacy template chart hook exists', () => {
+  const h = harness();
+  h.run("options.onPopupChart = () => { throw new Error('Legacy generated chart must not run'); };");
+  h.mode('line');
+  h.run('openMapPopup(testFeatures[0], [105,21])');
+  assert.equal(h.rendered.at(-1).kind, 'line');
+  assert.equal(h.rendered.at(-1).config.title, 'Biểu đồ đường · A');
+  h.mode('bar');
+  assert.equal(h.rendered.at(-1).kind, 'bar');
+  assert.equal(h.rendered.at(-1).config.title, 'Biểu đồ cột · A');
+  assert.equal(h.cleared.length, 1, 'Switching kinds clears the native chart');
+  h.run('closeMapPopup()');
+  assert.equal(h.cleared.length, 2, 'Closing the popup releases its native renderer');
+});
+
 test("categorical country map shows exact AI colors, a distinct combination swatch and both original popup records", async () => {
   const fixture = categoricalCountryFixture();
   const analysis = validateAndNormalizeAnalysis({ columns: fixture.columns, suggestions: [fixture.suggestion], search_bar: true, search_fields: ["Điểm đến"] }, profileTabularData(fixture.records));

@@ -624,13 +624,14 @@ export function createMapSearch({ map, onSelect = null, onRegionChange = null, m
   const clearButton = document.getElementById("map-search-clear");
   const searchBox = document.getElementById("map-search-box");
   const navigation = document.getElementById("map-region-navigation");
-  if (!root || !form || !input || !results || !clearButton) return { setData() {}, destroy() {} };
+  if (!root || !form || !input || !results || !clearButton) return { setData() {}, setVisible() {}, destroy() {} };
 
   let index = { entries: [] };
   let matches = [];
   let activeIndex = -1;
   let snapshot;
   let selectedFeature = null;
+  let visible = true;
   let regions = [];
   let regionId = "";
 
@@ -704,7 +705,7 @@ export function createMapSearch({ map, onSelect = null, onRegionChange = null, m
     clearButton.hidden = false;
     setOpen(false);
     selectedFeature = entry.feature;
-    renderSearchBoundary(map, selectedFeature);
+    renderSearchBoundary(map, visible ? selectedFeature : null);
     focusMapOnFeature(map, entry.feature);
     onSelect?.(entry.feature, featureCenter(entry.feature), entry);
   };
@@ -780,7 +781,13 @@ export function createMapSearch({ map, onSelect = null, onRegionChange = null, m
   reset();
 
   return {
-    refreshHighlight() { renderSearchBoundary(map, selectedFeature); },
+    refreshHighlight() { renderSearchBoundary(map, visible ? selectedFeature : null); },
+    setVisible(value) {
+      if (visible === value) return;
+      visible = value;
+      if (!visible) setOpen(false);
+      this.refreshHighlight();
+    },
     getState() { return { query: input.value, regionId }; },
     restoreState(state) {
       const restored = regions.some(region => region.id === state?.regionId) ? state.regionId : "";

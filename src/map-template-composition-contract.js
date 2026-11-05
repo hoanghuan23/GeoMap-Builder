@@ -25,10 +25,8 @@ export function normalizeTemplateComposition(raw, capabilities = {}) {
     seen.add(item.kind);
     return { kind: item.kind, origin: item.origin, html: item.html, css: item.css, js: item.js };
   });
-  for (const kind of ['bar', 'line']) {
-    if (allowed.has(kind) && (!seen.has(kind) || !normalized.find(item => item.kind === kind)?.js.trim()))
-      throw new Error(`Template thiếu thành phần biểu đồ ${kind}.`);
-  }
+  // Older compositions may still contain chart components. Accept that metadata
+  // for compatibility; popup charts always use the application's native renderer.
   return { html: raw.html, css: raw.css, components: normalized };
 }
 
@@ -38,4 +36,35 @@ export function normalizeTemplateCapabilities(raw) {
   if (mapTypes.some(type => !['choropleth', 'point', 'map_line', 'arc_flow'].includes(type))
     || popupTypes.some(type => !TEMPLATE_POPUP_KINDS.includes(type))) throw new Error('Khả năng template không hợp lệ.');
   return { mapTypes: mapTypes.sort(), popupTypes: popupTypes.sort() };
+}
+
+const layoutText = value => typeof value === 'string' ? value.slice(0, 240) : '';
+const dimension = value => Number.isFinite(value) ? Math.max(0, Math.min(30_000, Math.round(value))) : 0;
+const texts = value => Array.isArray(value) ? value.slice(0, 60).map(layoutText) : [];
+
+/** UI metadata only; no source records or popup values are sent for layout. */
+export function normalizeTemplateLayoutContext(raw) {
+  if (!raw) return null;
+  return {
+    viewport: { width: dimension(raw.viewport?.width), height: dimension(raw.viewport?.height) },
+    metrics: { count: dimension(raw.metrics?.count), labels: texts(raw.metrics?.labels) },
+    legends: { count: dimension(raw.legends?.count), titles: texts(raw.legends?.titles) },
+    search: { enabled: raw.search?.enabled === true, placeholder: layoutText(raw.search?.placeholder),
+      hasRegionNavigation: raw.search?.hasRegionNavigation === true }
+  };
+}
+
+export function normalizeTemplateLayoutRepair(raw) {
+  if (!raw) return null;
+  if (!validLayoutHtml(raw.layout?.html) || !validCss(raw.layout?.css)
+    || !['map-size', 'map-hidden', 'canvas-size', 'metrics-coverage'].includes(raw.feedback?.issue))
+    throw new Error('Phản hồi bố cục template không hợp lệ.');
+  const measure = item => ({ name: layoutText(item?.name), width: dimension(item?.width), height: dimension(item?.height),
+    display: layoutText(item?.display), position: layoutText(item?.position) });
+  return {
+    layout: { html: raw.layout.html, css: raw.layout.css },
+    feedback: { issue: raw.feedback.issue,
+      slots: Array.isArray(raw.feedback.slots) ? raw.feedback.slots.slice(0, TEMPLATE_SLOTS.length).map(measure) : [],
+      ancestors: Array.isArray(raw.feedback.ancestors) ? raw.feedback.ancestors.slice(0, 12).map(measure) : [] }
+  };
 }

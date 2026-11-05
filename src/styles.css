@@ -1636,7 +1636,12 @@ input[type=range] {
     border-radius: 20px;
     z-index: 4;
     box-shadow: 0 4px 18px #0004;
-    white-space: nowrap
+    width: max-content;
+    max-width: calc(100% - 24px);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+    pointer-events: none
 }
 
 .map-query-panel {
@@ -1721,6 +1726,13 @@ input[type=range] {
     stroke-linejoin: round
 }
 
+.map-search-submit svg {
+    width: 22px;
+    height: 22px;
+    flex: none;
+    stroke-width: 2
+}
+
 .map-search-form input {
     min-width: 0;
     height: 100%;
@@ -1748,10 +1760,16 @@ input[type=range] {
     display: grid;
     place-items: center;
     flex: none;
+    padding: 0;
     border: 0;
     border-radius: 7px;
     color: #8695aa;
     background: transparent
+}
+
+.map-search-submit {
+    width: 36px;
+    height: 36px
 }
 
 .map-search-clear {

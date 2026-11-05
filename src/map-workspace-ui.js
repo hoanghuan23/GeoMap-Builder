@@ -12,6 +12,7 @@ import { expandJsonUpload } from './shared/import/json-datasets.js';
 import { keepSelectOpenAfterMouseClick } from './shared/ui/select-control.js';
 import { createArcFlowOverlayManager } from './shared/view/arc-overlay.js';
 import { createMapTemplateRenderer } from './map-template-renderer.js';
+import { createMapProcessingStatus } from './shared/ui/map-processing-status.js';
 
 const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
@@ -49,10 +50,19 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   $('sheet-selector-field').hidden = true;
   document.querySelector('.drop-zone small').textContent = 'CSV, Excel, JSON, GeoJSON, TXT, DOCX · AI đánh giá hiển thị nhiều lớp';
   const map = new globalThis.maplibregl.Map({ container: 'map', style: styles.liberty, center: [108.2, 16.2], zoom: 4.7, attributionControl: false });
-  const templateRenderer = createMapTemplateRenderer({ document, map, picker: templatePicker });
+  const processingStatus = createMapProcessingStatus($('status'));
+  const status = (message, hide = false) => processingStatus.set(message, hide);
+  let templateLoading = false;
+  const templateRenderer = createMapTemplateRenderer({ document, map, picker: templatePicker, processingStatus,
+    onLoadingChange(loading) {
+      templateLoading = loading;
+      closePopups();
+      schedule();
+    }
+  });
   let readyResolve; const ready = new Promise(resolve => { readyResolve = resolve; });
   let uploadSequence = 0; let scheduled = false; let queue = Promise.resolve();
-  let selectedSignature = ''; let compositionController; let currentStyle = 'liberty'; let statusTimer; let styleReady = false;
+  let selectedSignature = ''; let compositionController; let currentStyle = 'liberty'; let styleReady = false;
   const mounted = new Set();
   const search = createMapSearch({ map, minFilteredObjects: CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS,
     onRegionChange(regionId) {
@@ -66,11 +76,11 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       selectLayer(entry.layerId);
     }
   });
-  const status = (message, hide = false) => {
-    clearTimeout(statusTimer); $('status').textContent = message; $('status').hidden = !message;
-    if (hide) statusTimer = setTimeout(() => { $('status').hidden = true; }, 3500);
-  };
   const enqueue = task => { const next = queue.then(task); queue = next.catch(error => { console.error(error); status(error.message); }); return next; };
+  const enqueueAnalysis = task => {
+    const finish = processingStatus.begin();
+    return enqueue(async () => { try { return await task(); } finally { finish(); } });
+  };
   const arcFlowOverlay = createArcFlowOverlayManager(map, { onError: error => status(error.message || 'Không thể dựng Arc Flow 3D.') });
   const schedule = () => {
     if (scheduled) return;
@@ -100,7 +110,6 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       managedWorkspace: true, onStatus: status,
       arcFlowOverlay, onArcInteract: () => selectLayer(id),
       popupSources: feature => joinedPopupSources(workspace, id, feature),
-      onPopupChart: options => templateRenderer.renderChart(options),
       popupMetadata() {
         const joins = workspace.attributeJoins.filter(join => join.targetLayerId === id && join.popupContent.imageFields.length);
         return { hasJoinedImages: joins.length > 0, popupSuggestions: joins.flatMap(join => join.popupSuggestions) };
@@ -168,6 +177,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         layerId: id, groupId: group.id, layerTitle: layer.title };
     });
     search.setData({ layers: searches, groupId: group?.id, regionId: group?.regionId || '' });
+    search.setVisible(!templateLoading);
     if (group?.visible) group.regionId = search.getState().regionId;
     empty.hidden = hasSelection;
     groupField.hidden = !group; compositionNote.hidden = !group; actions.hidden = !hasSelection;
@@ -195,21 +205,24 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         item.regionFilterKey = filterKey;
         item.manager.setDataFilter(regionId ? data => filterCountryRegionData(data, config, regionId) : null);
       }
-      item.manager.setInteractive(active);
+      item.manager.setInteractive(active && !templateLoading);
       if (isVisible && styleReady && !mounted.has(id)) { item.manager.attach(); mounted.add(id); }
       if (!isVisible && mounted.has(id)) { item.manager.detach(); mounted.delete(id); item.api.closePopup(); }
       item.panel.hidden = !active;
-      const groupVisible = isVisible && group.visible;
+      const groupShown = isVisible && group.visible;
+      const groupVisible = groupShown && !templateLoading;
       item.manager.setVisible(Boolean(groupVisible));
       arcFlowOverlay.setLayerState(id, { attached: isVisible && styleReady, visible: Boolean(groupVisible) });
-      item.metric.hidden = !groupVisible || !item.api.state.aiDataset || !item.dom.elements.get('map-metric-list').children.length;
+      // Loading CSS hides controls temporarily. Keep their dataset visibility
+      // intact so the renderer can measure the real layout before committing it.
+      item.metric.hidden = !groupShown || !item.api.state.aiDataset || !item.dom.elements.get('map-metric-list').children.length;
       // The runtime may hide its metric control when fewer than two AI buttons exist.
       if (item.api.state.aiDataset) {
         const dataset = item.api.state.aiDataset;
         const suggestion = dataset.suggestions.find(option => option.id === dataset.selectedSuggestionId);
         if ((suggestion?.metricButtons?.length || 0) < 2) item.metric.hidden = true;
       }
-      item.legends.hidden = !groupVisible;
+      item.legends.hidden = !groupShown;
       const otherLegend = [...item.legends.children].some(node => node !== item.genericLegend && node.tagName === 'DIV' && !node.hidden);
       const count = filterCountryRegionData(layerData(item.api), config, regionId)?.features?.length || 0;
       const legendEnabled = item.api.getView().legendVisible;
@@ -309,8 +322,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
           if (upload.processing || !upload.sheets.includes(sheetName)) return;
           upload.processing = true;
           upload.status = `Đang phân tích bảng ${sheetName}`; upload.message = '';
-          status('Đang phân tích...'); renderUploads();
-          enqueue(() => processUploads([{ id, upload, sheetName }]));
+          renderUploads();
+          enqueueAnalysis(() => processUploads([{ id, upload, sheetName }]));
         });
         const field = textNode('div', '', 'upload-sheet-choice'); field.append(label, select, apply); row.append(field);
       }
@@ -401,10 +414,9 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     }
     if (pendingIds.length) await compose(pendingIds);
     sync();
-    const addedCount = pendingIds.filter(id => workspace.layersById[id]).length;
     const waitingForSheet = [...uploads.values()].some(upload => upload.sheets && !upload.processing);
     status(waitingForSheet ? 'Hãy chọn bảng (sheet) cần phân tích trong từng file Excel rồi bấm Phân tích bảng đã chọn.'
-      : addedCount ? `Đã thêm ${addedCount} lớp dữ liệu. Chọn bản đồ hoặc tab để chỉnh cấu hình.` : uploads.size ? 'Đã xử lý các file. Kiểm tra trạng thái từng file trong danh sách.' : 'Đã xóa dữ liệu.');
+      : uploads.size ? '' : 'Đã xóa dữ liệu.');
   }
 
   async function compose(newIds) {
@@ -455,7 +467,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         uploads.set(id, upload); workspace.importsById[id] = upload; entries.push({ id, upload });
       }
     }
-    renderUploads(); if (entries.length) enqueue(() => processUploads(entries));
+    renderUploads(); if (entries.length) enqueueAnalysis(() => processUploads(entries));
   }
 
   async function removeUpload(id) {
