@@ -24,6 +24,7 @@ const floatingSource = { ...source, template: 'floating_chips' };
 // Like the source template, the strip has a maximum width, not a fixed width.
 // Percentage widths inherited by its children must not stretch three chips across the map.
 const floatingCss = `.map-template-shell{color:#263d39;font:13px Arial,sans-serif}
+  .map-search-result{display:block}
   .map-search-submit{width:34px;height:38px;padding:16px}
   .map-search-submit svg{width:2px;height:2px;max-width:2px}
   .map-search-form input{border-left:2px solid #b88b44;border-right:2px solid #b88b44;box-shadow:inset 2px 0 #b88b44}
@@ -325,9 +326,22 @@ async function run() {
     assert(labels.scrollWidth <= labels.clientWidth + 1, 'Numeric legend requires horizontal scrolling');
     labels.remove();
   }
+  const controls = floatingShell.querySelector('.map-search-controls');
+  const result = document.createElement('button'); result.className = 'map-search-result';
+  const resultIcon = document.createElement('span'); resultIcon.className = 'map-search-result-icon'; resultIcon.textContent = '⌖';
+  const resultCopy = document.createElement('span');
+  const resultTitle = document.createElement('b'); resultTitle.textContent = 'Soekarno-Hatta, Indonesia';
+  const resultSubtitle = document.createElement('small'); resultSubtitle.textContent = 'Sân bay đi';
+  resultCopy.append(resultTitle, resultSubtitle); result.append(resultIcon, resultCopy);
+  controls.querySelector('.map-search-box').append(result);
+  const iconBounds = resultIcon.getBoundingClientRect();
+  const titleBounds = resultTitle.getBoundingClientRect();
+  assert(getComputedStyle(result).display === 'flex' && titleBounds.left >= iconBounds.right
+    && titleBounds.top < iconBounds.bottom && titleBounds.bottom > iconBounds.top,
+  'Search result icon is on a separate line from its title');
+  result.remove();
   // Reproduce a vertically stacked search: a pixel flex-basis must not turn
   // the search box into a 180px tall blank card.
-  const controls = floatingShell.querySelector('.map-search-controls');
   const searchButton = controls.querySelector('.map-search-submit');
   const searchGlyph = searchButton.querySelector('svg').getBoundingClientRect();
   assert(searchGlyph.width === 22 && searchGlyph.height === 22, 'Template shrank the search icon');
