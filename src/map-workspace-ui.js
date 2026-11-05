@@ -153,6 +153,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     const group = activeMapGroup(workspace);
     if (group.viewport) map.jumpTo(group.viewport);
     else fitGroup(group);
+    templateRenderer.enforceNavigation();
     search.restoreState(group.searchState);
   }
 
@@ -251,7 +252,9 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       const suggestion = dataset?.suggestions?.find(item => item.id === dataset.selectedSuggestionId);
       return suggestion && api.getView().data?.features?.length ? suggestion : null;
     }).filter(Boolean);
-    templateRenderer.update({ hasData: templateLayers.length > 0, capabilities: {
+    templateRenderer.update({ hasData: templateLayers.length > 0, selectionContext: {
+      groupId: group?.id || null, layerCount: templateLayers.length
+    }, capabilities: {
       mapTypes: templateLayers.map(item => item.chartType),
       popupTypes: templateLayers.flatMap(item => item.popupSuggestions?.map(popup => popup.name) || [])
     } });

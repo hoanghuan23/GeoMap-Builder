@@ -92,7 +92,11 @@ async function run() {
   const picker = { ready: Promise.resolve(), getSelectedSource: () => source };
   const loadingStates = [];
   const processingStatus = createMapProcessingStatus(document.getElementById('status'));
-  const renderer = createMapTemplateRenderer({ document, map: { resize() { resizeCount++; realMap?.resize(); }, getCanvas: () => realMap?.getCanvas() }, picker, processingStatus,
+  const liveMap = { resize() { resizeCount++; realMap?.resize(); }, getCanvas: () => realMap?.getCanvas(),
+    getMaxPitch: () => realMap?.getMaxPitch(), setMaxPitch: value => realMap?.setMaxPitch(value),
+    jumpTo: view => realMap?.jumpTo(view), dragRotate: realMap?.dragRotate,
+    touchZoomRotate: realMap?.touchZoomRotate, keyboard: realMap?.keyboard };
+  const renderer = createMapTemplateRenderer({ document, map: liveMap, picker, processingStatus,
     onLoadingChange(loading) { loadingStates.push(loading); layerManager?.setVisible(!loading); }, fetchImpl: async (_url, options) => {
     calls++;
     const { templateId, refresh, layoutContext, repair } = JSON.parse(options.body);
@@ -114,6 +118,16 @@ async function run() {
   assert(!renderer.getShell(), 'Static template appeared without data');
   const allMaps = ['choropleth', 'point', 'map_line', 'arc_flow'];
   await picker.ready;
+  if (realMap) realMap.jumpTo({ pitch: 40, bearing: 30 });
+  document.getElementById('map-template-select').dispatchEvent(new CustomEvent('map-template-change',
+    { detail: { source, navigation: 'pan_zoom', name: 'Mẫu 01', mode: 'manual' } }));
+  if (realMap) assert(realMap.getPitch() === 0 && realMap.getBearing() === 0 && !realMap.dragRotate.isEnabled()
+    && realMap.getMaxPitch() === 0, '2D template did not disable live rotation and tilt');
+  if (realMap) {
+    realMap.jumpTo({ bearing: 25 });
+    renderer.enforceNavigation();
+    assert(Math.abs(realMap.getBearing()) < 0.01, '2D template did not restore north after a saved viewport');
+  }
   const finishAnalysis = processingStatus.begin();
   processingStatus.set('Đang phân tích...');
   assert(document.getElementById('status').textContent === 'Đang phân tích và áp dụng template',
@@ -175,7 +189,14 @@ async function run() {
   assert(calls === 1 && resizeCount > 0, 'Composition fetched repeatedly or map not resized');
   renderer.update({ hasData: false, capabilities: { mapTypes: [], popupTypes: [] } });
   assert(!renderer.getShell() && document.querySelector('.map-panel > #map'), 'Original map was not restored');
-  document.getElementById('map-template-select').dispatchEvent(new CustomEvent('map-template-change', { detail: { source: editorialSource } }));
+  document.getElementById('map-template-select').dispatchEvent(new CustomEvent('map-template-change',
+    { detail: { source: editorialSource, navigation: 'rotate_3d', name: 'Mẫu 02', mode: 'manual' } }));
+  if (realMap) {
+    assert(realMap.dragRotate.isEnabled() && realMap.getMaxPitch() > 0, '3D template did not restore live rotation and tilt');
+    realMap.jumpTo({ pitch: 55, bearing: 30 });
+    assert(Math.abs(realMap.getPitch() - 55) < 0.01 && Math.abs(realMap.getBearing() - 30) < 0.01,
+      `3D map cannot tilt or rotate: pitch=${realMap.getPitch()} bearing=${realMap.getBearing()} max=${realMap.getMaxPitch()}`);
+  }
   renderer.update({ hasData: true, capabilities: { mapTypes: allMaps, popupTypes: ['line'] } });
   for (let i = 0; i < 40 && !renderer.getShell(); i++) await wait(50);
   const editorialShell = renderer.getShell();

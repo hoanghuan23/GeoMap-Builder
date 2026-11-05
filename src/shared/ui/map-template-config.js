@@ -2,6 +2,10 @@ const COLOR = /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i;
 const LENGTH = /^(?:\d+(?:\.\d+)?|\.\d+)(?:px|rem|em)$/;
 const TEMPLATE_ID = /^[a-z\d_-]{1,80}$/i;
 
+export function preferredTemplateNavigation(mapTypes = []) {
+  return mapTypes.includes('arc_flow') ? 'rotate_3d' : 'pan_zoom';
+}
+
 function invalid() {
   throw new Error('Mẫu giao diện thiếu cấu hình hoặc có cấu hình không hợp lệ.');
 }
@@ -22,8 +26,12 @@ function fontFamily(value) {
 export function normalizeMapTemplateEntry(raw) {
   if (typeof raw?.id !== 'string' || !TEMPLATE_ID.test(raw.id)
     || typeof raw.name !== 'string' || !raw.name.trim()) invalid();
+  if (raw.navigation !== undefined && !['pan_zoom', 'rotate_3d'].includes(raw.navigation)) invalid();
+  if (raw.description !== undefined && (typeof raw.description !== 'string' || !raw.description.trim() || raw.description.length > 500)) invalid();
   if (raw.styles !== undefined || raw.typography !== undefined) return normalizeMapTemplate(raw);
-  return { id: raw.id, name: raw.name };
+  return { id: raw.id, name: raw.name,
+    ...(raw.description === undefined ? {} : { description: raw.description }),
+    ...(raw.navigation === undefined ? {} : { navigation: raw.navigation }) };
 }
 
 /** Validate source files without executing or inserting them into the current page. */
@@ -69,7 +77,8 @@ export function normalizeMapTemplate(raw) {
       || !/^(?:none|(?:-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|rem|em)?\s+){2,4}#[\da-f]{3,8})$/i.test(shadow)) invalid();
     layout.shadow = shadow;
   }
-  return { ...template, styles: { colors, layout }, typography: { fontFamily: bodyFont, headingFontFamily: headingFont, sizes, weights, lineHeight: source.lineHeight } };
+  return { ...template, ...(raw.navigation === undefined ? {} : { navigation: raw.navigation }),
+    styles: { colors, layout }, typography: { fontFamily: bodyFont, headingFontFamily: headingFont, sizes, weights, lineHeight: source.lineHeight } };
 }
 
 export function mapTemplateVariables(template) {

@@ -39,6 +39,16 @@ test('metadata-only catalog supports source templates, while malformed and unava
   assert.equal((await middleware(env, async () => { throw new Error('private diagnostic'); })()).status, 502);
 });
 
+test('proxy preserves navigation and descriptions for source templates', async () => {
+  const catalog = { templates: [
+    { id: 'mau_01', name: '2D', navigation: 'pan_zoom', description: 'Bản đồ điểm và vùng' },
+    { id: 'mau_02', name: '3D', navigation: 'rotate_3d', description: 'Bản đồ Arc Flow' }
+  ] };
+  assert.deepEqual((await middleware(env, async () => ({ ok: true, json: async () => catalog }))()).body, catalog);
+  const invalid = { templates: [{ id: 'mau_01', name: 'Bad', navigation: 'spin_forever' }] };
+  assert.equal((await middleware(env, async () => ({ ok: true, json: async () => invalid }))()).status, 502);
+});
+
 test('detail endpoint retrieves mau_01 source without executing or rewriting it', async () => {
   const source = { template: 'mau_01', html: '<main id="map"></main>', css: '#map { height: 100%; }', js: 'window.templateReady = true;' };
   const call = middleware(env, async (url, options) => {

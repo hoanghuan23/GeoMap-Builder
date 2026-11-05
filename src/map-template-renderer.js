@@ -1,4 +1,5 @@
 import { normalizeTemplateCapabilities, normalizeTemplateComposition, normalizeTemplateLayoutContext, TEMPLATE_SLOTS } from './map-template-composition-contract.js';
+import { createMapTemplateNavigation } from './map-template-navigation.js';
 import { createMapProcessingStatus, MAP_PROCESSING_MESSAGE } from './shared/ui/map-processing-status.js';
 
 const SLOT_NODES = {
@@ -68,6 +69,8 @@ export function createMapTemplateRenderer({ document, map, picker, fetchImpl = g
   const failedCompositions = new Set();
   const anchors = new Map();
   let source = null;
+  let selectedTemplate = null;
+  const applyNavigation = createMapTemplateNavigation(map);
   let shell = null;
   let current = null;
   let capabilities = { mapTypes: [], popupTypes: [] };
@@ -299,7 +302,9 @@ export function createMapTemplateRenderer({ document, map, picker, fetchImpl = g
         variants.set(key, candidate);
         failedKey = '';
         failedCompositions.delete(requestKey);
-        status.textContent = `Đã áp dụng mẫu ${selectedSource.template}.`;
+        status.textContent = selectedTemplate?.mode === 'auto'
+          ? `AI đã chọn và áp dụng ${selectedTemplate.name}.`
+          : `Đã áp dụng mẫu ${selectedSource.template}.`;
         return;
       }
     } catch (error) {
@@ -321,7 +326,9 @@ export function createMapTemplateRenderer({ document, map, picker, fetchImpl = g
   function select(next) {
     ++revision; pending = ''; failedKey = '';
     setLoading(false);
+    selectedTemplate = next || null;
     source = next?.source || null;
+    applyNavigation(next?.navigation);
     // Keep the host viewport stable while AI is working and controls are moved.
     // Otherwise removing the shell restores native margins/borders mid-request.
     if (source) content.dataset.templateActive = 'true';
@@ -337,6 +344,9 @@ export function createMapTemplateRenderer({ document, map, picker, fetchImpl = g
     const previous = JSON.stringify(capabilities);
     hasData = Boolean(next?.hasData);
     capabilities = normalizeTemplateCapabilities(next?.capabilities);
+    picker?.updateContext?.({ hasData, groupId: next?.selectionContext?.groupId || null,
+      layerCount: next?.selectionContext?.layerCount || capabilities.mapTypes.length,
+      mapTypes: capabilities.mapTypes, popupTypes: capabilities.popupTypes });
     if (previous !== JSON.stringify(capabilities)) failedKey = '';
     if (!hasData) {
       ++revision; pending = ''; setLoading(false); unmount();
@@ -349,6 +359,7 @@ export function createMapTemplateRenderer({ document, map, picker, fetchImpl = g
   layoutObserver?.observe(panel);
   const selectElement = document.getElementById('map-template-select');
   selectElement.addEventListener('map-template-change', event => select(event.detail));
-  picker?.ready?.then(() => { if (!source) select({ source: picker.getSelectedSource() }); });
-  return { update, unmount, getComposition: () => current, getShell: () => shell };
+  picker?.ready?.then(() => { if (!source && picker.getSelectedSource?.()) select({ source: picker.getSelectedSource() }); });
+  return { update, unmount, enforceNavigation: () => applyNavigation(selectedTemplate?.navigation),
+    getComposition: () => current, getShell: () => shell };
 }

@@ -38,6 +38,8 @@ try {
     return originalFetch(...args);
   };
   await picker.ready;
+  assert(select.value === '__auto__', 'AI mode was not the initial selection');
+  select.value = '0'; select.dispatchEvent(new Event('change', { bubbles: true })); await frame();
   const analysis = { legend: [{ value: 0, color: '#0066ff' }, { value: 10, color: '#ff5500' }], popupSuggestions: ['info', 'info_image', 'bar', 'line'],
     search_bar: true, search_fields: ['name'], metricButtons: [{ field: 'value', label: 'Số liệu', icon: '✈', color: '#26aa66' }] };
   const before = JSON.stringify(analysis);
