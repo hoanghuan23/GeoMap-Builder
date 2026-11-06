@@ -5,6 +5,9 @@ import { createMapLayerManager } from '../../src/map-layer-manager.js';
 import { createMapProcessingStatus } from '../../src/shared/ui/map-processing-status.js';
 import { createAiPopupContent } from '../../src/shared/popup/ai-popup.js';
 import { polygonLegendLabels } from '../../src/shared/data/polygon-legend.js';
+import { createMapAppearance } from '../../src/map-appearance.js';
+import { createAiMapEditor } from '../../src/ai-map-editor.js';
+import '../../src/map-appearance.css';
 import '../../src/map-template-renderer.css';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -61,6 +64,24 @@ const editorialCss = `.map-template-shell{--editorial-ink:#243a37;color:var(--ed
   .editorial-sidebar{padding:12px}.editorial-sidebar h1{font-size:18px;margin:0}}`;
 
 async function run() {
+  // Native controls should follow a parent surface before any template or AI edit.
+  const nativePopup = document.createElement('div'); nativePopup.className = 'ai-weather-popup';
+  const nativeBody = document.createElement('div'); nativeBody.className = 'maplibregl-popup-content';
+  const nativeClose = document.createElement('button'); nativeClose.className = 'maplibregl-popup-close-button'; nativeClose.textContent = '×';
+  nativeBody.append(nativeClose, createAiPopupContent(document, { properties: { name: 'Khu vực', city: 'Thành phố', value: 20, note: 'Ghi chú' } },
+    [{ name: 'name', role: 'geo' }, { name: 'city', role: 'category' }, { name: 'value', role: 'measure' }, { name: 'note', role: 'text', labelVi: 'Ghi chú' }], 'name'));
+  nativePopup.append(nativeBody); document.body.append(nativePopup);
+  for (const [background, foreground, rgb] of [['#ffffff', '#172033', 'rgb(23, 32, 51)'], ['#172033', '#ffffff', 'rgb(255, 255, 255)']]) {
+    nativeBody.style.background = background; nativeBody.style.color = foreground;
+    for (const element of nativeBody.querySelectorAll('.popup-info-chip dd, .popup-info-note, .maplibregl-popup-close-button')) {
+      assert(getComputedStyle(element).backgroundColor === 'rgba(0, 0, 0, 0)', 'Native popup child paints an independent background');
+    }
+    for (const element of nativeBody.querySelectorAll('dt, dd, .popup-info-caption, .popup-info-heading strong, button')) {
+      assert(getComputedStyle(element).color === rgb, 'Native popup child does not inherit its parent foreground');
+    }
+    assert(getComputedStyle(nativeClose).boxShadow === 'none', 'Native popup close button paints a separate shadow');
+  }
+  nativePopup.remove();
   const useWebgl = new URLSearchParams(location.search).has('webgl');
   let realMap = null;
   let layerManager = null;
@@ -535,6 +556,236 @@ async function run() {
     'Repair did not use the new viewport after resizing during AI generation');
   panel.style.width = originalWidth;
   await wait(100);
+  // Regression: the exact reported chat changes dark search/legend frames on a live template.
+  const darkFrames = document.createElement('style');
+  darkFrames.textContent = `.map-template-shell:not(#appearance-regression) :is([data-template-slot="search"], [data-template-slot="legend"], .map-search-form, .weather-legend){background:#1e293b!important;color:#ffffff!important}
+    .map-template-shell:not(#appearance-regression) :is(.map-search-form input, .weather-legend strong, .weather-legend small){color:#ffffff!important}
+    .map-template-shell:not(#appearance-regression) [data-template-slot="search"]{border:5px solid #1e293b!important;box-shadow:0 0 0 4px #1e293b,inset 0 0 0 3px #1e293b!important}
+    .map-template-shell:not(#appearance-regression) .map-search-form input::placeholder{color:#ffffff!important}
+    .map-template-shell:not(#appearance-regression) :is(.maplibregl-popup-close-button,.popup-info-chip dd,.popup-info-note){background:#1e293b!important;color:#ffffff!important;border:1px solid #1e293b!important}
+    .map-template-shell:not(#appearance-regression) .popup-info-heading{border-color:#1e293b!important}`;
+  document.head.append(darkFrames);
+  const makeAppearancePopup = () => {
+    const popup = document.createElement('div'); popup.className = 'maplibregl-popup ai-weather-popup ai-map-popup';
+    popup.style.cssText = 'position:absolute;left:180px;top:140px;transform:none;width:350px;';
+    const body = document.createElement('div'); body.className = 'maplibregl-popup-content';
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'maplibregl-popup-close-button'; button.textContent = '×';
+    body.append(button, createAiPopupContent(document, { properties: { region: 'Hoài Đức', city: 'Hà Nội', pollution: 20, note: 'Ghi chú mẫu' } },
+      [{ name: 'region', role: 'geo' }, { name: 'city', role: 'category', labelVi: 'Thành phố' },
+        { name: 'pollution', role: 'measure', labelVi: 'Mức độ ô nhiễm' }, { name: 'note', role: 'text', labelVi: 'Ghi chú' }], 'region'));
+    popup.append(body); document.getElementById('map').append(popup); return popup;
+  };
+  let appearancePopup = makeAppearancePopup();
+  const appearanceWorkspace = { revision: 0, activeGroupId: 'appearance-map', groupsById: {
+    'appearance-map': { id: 'appearance-map', title: 'Test', visible: true, layerIds: ['presentation-layer'], activeLayerId: 'presentation-layer' },
+    'other-map': { id: 'other-map', title: 'Other', visible: true, layerIds: ['presentation-layer'], activeLayerId: 'presentation-layer' }
+  }, layersById: { 'presentation-layer': { title: 'Test' } } };
+  const appearance = createMapAppearance({ panel, workspace: appearanceWorkspace });
+  const appearanceApi = { state: { mapType: 'polygon' }, searchData: () => ({ columns: [] }), getView: () => ({ configuration: {} }),
+    context: { modules: { active: () => ({ metricField() {}, metricColumns: () => [] }) } },
+    controllers: { popup: { activeMapPopupSuggestion: () => null } } };
+  const uiOperation = (key, background) => ({ layerId: '', kind: 'appearance', key, value: JSON.stringify({ background }) });
+  let appearanceOperations = ['search', 'legend', 'metrics', 'controls', 'popup'].map(target => uiOperation(target, '#ffffff'));
+  const appearanceEditor = createAiMapEditor({ workspace: appearanceWorkspace, runtimes: new Map([['presentation-layer', { api: appearanceApi }]]),
+    appearance, isLoading: () => false, closePopups() {}, sync: () => appearance.apply(), fetchImpl: async (_url, init) => {
+      const request = JSON.parse(init.body);
+      assert(request.context.appearance.search.background, 'Appearance metadata missing from chat');
+      return { ok: true, json: async () => ({ message: 'Đã đổi màu nền khung chú giải và thanh tìm kiếm sang trắng.', operations: appearanceOperations }) };
+    } });
+  const dataScale = panel.querySelector('.weather-legend-scale');
+  const originalScale = dataScale?.style.cssText;
+  const preview = panel.querySelector('.map-metric-preview');
+  const originalPreview = preview.style.cssText;
+  const searchBorderWidth = getComputedStyle(panel.querySelector('[data-template-slot="search"]')).borderTopWidth;
+  const mapWidth = document.getElementById('map').getBoundingClientRect().width;
+  const beforeAppearanceCalls = calls;
+  await appearanceEditor.chat('Đổi toàn bộ nền giao diện sang trắng', []);
+  const assertMetricFrames = () => {
+    for (const selector of ['[data-template-slot="metrics"]', '.workspace-metrics', '.map-metric-control', '.map-metric-list']) {
+      const container = panel.querySelector(selector);
+      if (!container) continue;
+      const style = getComputedStyle(container);
+      assert(style.backgroundColor === 'rgba(0, 0, 0, 0)' && style.backgroundImage === 'none', `Metric container gained a background: ${selector}`);
+      assert(style.boxShadow === 'none' && style.backdropFilter === 'none', `Metric container retained a backplate effect: ${selector}`);
+    }
+    for (const button of panel.querySelectorAll('.map-metric-toggle, .map-metric-button')) {
+      assert(getComputedStyle(button).backgroundColor === 'rgb(255, 255, 255)', 'Metric button lost its requested white background');
+      assert(getComputedStyle(button).color === 'rgb(23, 32, 51)', 'Metric button text lost contrast');
+    }
+  };
+  const assertWhiteFrames = () => {
+    for (const selector of ['[data-template-slot="search"]', '[data-template-slot="legend"]', '.map-search-form', '.weather-legend',
+      '.maplibregl-popup-content', '.popup-info-chip dd', '.popup-info-note', '.maplibregl-popup-close-button', '.map-search-submit']) {
+      assert(getComputedStyle(panel.querySelector(selector)).backgroundColor === 'rgb(255, 255, 255)', `AI white background did not override template: ${selector}`);
+    }
+    assert(getComputedStyle(panel.querySelector('.map-search-form input')).color === 'rgb(23, 32, 51)', 'White search has unreadable text');
+    assert(getComputedStyle(panel.querySelector('.weather-legend strong')).color === 'rgb(23, 32, 51)', 'White legend has unreadable text');
+    for (const selector of ['.popup-info-chip dd', '.popup-info-note dd', '.maplibregl-popup-close-button']) {
+      assert(getComputedStyle(panel.querySelector(selector)).color === 'rgb(23, 32, 51)', `White popup has unreadable child text: ${selector}`);
+    }
+    assert(getComputedStyle(panel.querySelector('.map-search-form input'), '::placeholder').color === 'rgb(23, 32, 51)', 'Search placeholder retained template white text');
+    for (const selector of ['[data-template-slot="search"]', '.popup-info-chip dd', '.maplibregl-popup-close-button', '.popup-info-heading']) {
+      assert(getComputedStyle(panel.querySelector(selector)).borderTopColor === 'rgb(213, 215, 218)', `Dark template border remains: ${selector}`);
+    }
+    assert(!getComputedStyle(panel.querySelector('[data-template-slot="search"]')).boxShadow.includes('inset'), 'Dark inset search backplate remains');
+    assertMetricFrames();
+  };
+  assertWhiteFrames();
+  assert(dataScale?.style.cssText === originalScale, 'UI background edit changed the data gradient');
+  assert(preview.style.cssText === originalPreview, 'UI background edit changed the data-colored metric preview');
+  assert(getComputedStyle(panel.querySelector('[data-template-slot="search"]')).borderTopWidth === searchBorderWidth, 'UI background edit changed search dimensions');
+  assert(document.getElementById('map').getBoundingClientRect().width === mapWidth, 'UI background edit changed map geometry');
+  assert(calls === beforeAppearanceCalls, 'UI background edit regenerated the template');
+  appearancePopup.remove(); appearancePopup = makeAppearancePopup();
+  await wait(20); assertWhiteFrames();
+  // Reproduce a short unitless pollution button beside taller weather buttons,
+  // including a template that explicitly overrides dimensions with !important.
+  const sizingFrames = document.createElement('style');
+  sizingFrames.textContent = `.map-template-shell:not(#sizing-regression) .map-metric-button{width:142px!important;height:60px!important;align-self:center;transition:none}
+    .map-template-shell:not(#sizing-regression) .map-metric-button:first-child{width:102px!important;height:44px!important}`;
+  document.head.append(sizingFrames);
+  appearance.apply();
+  const toggleSize = panel.querySelector('.map-metric-toggle').getBoundingClientRect();
+  const metricSize = () => [...panel.querySelectorAll('.map-metric-button')].map(button => button.getBoundingClientRect());
+  assert(metricSize()[0].height < metricSize()[1].height, 'Unitless metric sizing reproduction failed');
+  appearanceOperations = [{ layerId: '', kind: 'appearance', key: 'metrics', value: JSON.stringify({ uniformSize: true }) }];
+  await appearanceEditor.chat('chỉnh kích thước các nút chỉ số cho bằng nhau', []);
+  const assertEqualMetrics = (width = 142, height = 60) => {
+    assert(metricSize().every(size => Math.abs(size.width - width) < 1 && Math.abs(size.height - height) < 1),
+      'Metric buttons do not share the requested width and height');
+  };
+  assertEqualMetrics(); assertMetricFrames();
+  assert(panel.querySelector('.map-metric-toggle').getBoundingClientRect().width === toggleSize.width
+    && panel.querySelector('.map-metric-toggle').getBoundingClientRect().height === toggleSize.height, 'Button sizing changed the collapse toggle');
+  assert(calls === beforeAppearanceCalls, 'Button sizing regenerated the template');
+  // Rebuilt controls and active styling must also get the stored dimensions.
+  const rebuiltButton = list.lastElementChild.cloneNode(true);
+  rebuiltButton.removeAttribute('style');
+  list.lastElementChild.replaceWith(rebuiltButton);
+  list.firstElementChild.classList.toggle('active');
+  await wait(30); assertEqualMetrics();
+  for (let i = 0; i < 3; i++) appearance.apply();
+  assertEqualMetrics();
+  const previousShell = renderer.getShell();
+  document.getElementById('map-template-select').dispatchEvent(new CustomEvent('map-template-change', { detail: { source: { ...floatingSource } } }));
+  for (let i = 0; i < 80 && (!renderer.getShell() || renderer.getShell() === previousShell || panel.hasAttribute('data-template-loading')); i++) await wait(50);
+  await wait(20); assertWhiteFrames(); assertEqualMetrics();
+  appearanceWorkspace.activeGroupId = 'other-map'; appearance.apply();
+  assert(metricSize()[0].width === 102 && metricSize()[0].height === 44, 'Metric sizing leaked into another map');
+  assert(getComputedStyle(panel.querySelector('[data-template-slot="search"]')).backgroundColor === 'rgb(30, 41, 59)', 'UI edit leaked into another map');
+  assert(getComputedStyle(panel.querySelector('.popup-info-chip dd')).backgroundColor === 'rgb(30, 41, 59)', 'Popup child edit leaked into another map');
+  appearanceWorkspace.activeGroupId = 'appearance-map'; appearance.apply(); assertWhiteFrames(); assertEqualMetrics();
+  appearanceOperations = [{ layerId: '', kind: 'appearance', key: 'metrics', value: JSON.stringify({ uniformSize: false }) }];
+  await appearanceEditor.chat('Bỏ đồng nhất kích thước nút chỉ số', []);
+  assert(metricSize()[0].width === 102 && metricSize()[0].height === 44, 'Disabling uniform sizing did not restore template dimensions');
+  appearanceOperations = [{ layerId: '', kind: 'appearance', key: 'metrics', value: JSON.stringify({ buttonWidth: 120 }) }];
+  await appearanceEditor.chat('Các nút chỉ số rộng 120px', []);
+  assert(metricSize().every(size => size.width === 120) && metricSize()[0].height === 44, 'Width-only edit changed button heights');
+  appearanceOperations = [{ layerId: '', kind: 'appearance', key: 'metrics', value: JSON.stringify({ buttonHeight: 64 }) }];
+  await appearanceEditor.chat('Cao 64px nữa', []);
+  assertEqualMetrics(120, 64); assertMetricFrames();
+  // Resume the layout tests with the template's original dimensions.
+  delete appearanceWorkspace.groupsById['appearance-map'].appearance.metrics.buttonWidth;
+  delete appearanceWorkspace.groupsById['appearance-map'].appearance.metrics.buttonHeight;
+  sizingFrames.remove(); appearance.apply();
+  appearanceOperations = [uiOperation('search', '#172033')];
+  await appearanceEditor.chat('Đổi riêng thanh tìm kiếm sang tối', []);
+  assert(getComputedStyle(panel.querySelector('.map-search-form input')).color === 'rgb(255, 255, 255)', 'Dark follow-up did not update text contrast');
+  assert(getComputedStyle(panel.querySelector('[data-template-slot="legend"]')).backgroundColor === 'rgb(255, 255, 255)', 'Search follow-up changed legend');
+  appearanceOperations = [{ layerId: '', kind: 'appearance', key: 'search', value: JSON.stringify({ borderColor: '#aa55dd', shadow: false }) }];
+  await appearanceEditor.chat('Đổi viền tìm kiếm và bỏ bóng', []);
+  assert(getComputedStyle(panel.querySelector('[data-template-slot="search"]')).borderTopColor === 'rgb(170, 85, 221)', 'Explicit border request was overwritten by automatic colors');
+  assert(getComputedStyle(panel.querySelector('[data-template-slot="search"]')).boxShadow === 'none', 'Explicit shadow setting was overwritten');
+  const layoutOp = (key, patch) => ({ layerId: '', kind: 'appearance', key, value: JSON.stringify(patch) });
+  const rect = selector => panel.querySelector(selector).getBoundingClientRect();
+  const assertPlacement = () => {
+    const map = rect('#map'); const metrics = rect('[data-template-slot="metrics"]'); const legend = rect('[data-template-slot="legend"]');
+    assert(Math.abs(metrics.left - map.left - 16) < 1, 'Metric block did not move to the left map edge');
+    assert(Math.abs(legend.right - map.right) < 1, 'Legend did not reach the right map edge');
+    assert(metrics.top >= map.top - 1 && metrics.bottom <= map.bottom + 1 && legend.top >= map.top - 1 && legend.bottom <= map.bottom + 1,
+      'Positioned controls escape the map vertically');
+  };
+  appearanceOperations = [layoutOp('metrics', { horizontal: 'right' }), layoutOp('legend', { horizontal: 'left' })];
+  await appearanceEditor.chat('Đưa chỉ số qua phải, chú giải qua trái', []);
+  const beforeLegendMove = rect('[data-template-slot="legend"]');
+  appearanceOperations = [layoutOp('legend', { horizontal: 'left', offsetX: 0 })];
+  await appearanceEditor.chat('chuyển chú giải sang mép bên trái', []);
+  await wait(60);
+  assert(Math.abs(rect('[data-template-slot="legend"]').left - rect('#map').left) < 1, 'Legend did not reach the left map edge');
+  assert(Math.abs(rect('[data-template-slot="legend"]').top - beforeLegendMove.top) < 1, 'Horizontal legend edit changed vertical position');
+  const beforeMove = rect('#map'); const beforeMoveCalls = calls;
+  appearanceOperations = [layoutOp('metrics', { horizontal: 'left' }), layoutOp('legend', { horizontal: 'right', offsetX: 0 })];
+  await appearanceEditor.chat('Đổi phần chỉ số bản đồ sang bên trái bản đồ, chú giải sát bên phải', []);
+  await wait(60); assertPlacement(); assertMetricFrames();
+  assert(rect('#map').width === beforeMove.width && rect('#map').left === beforeMove.left, 'Position edits changed map geometry');
+  assert(calls === beforeMoveCalls, 'Position edit regenerated the template');
+  assert(getComputedStyle(panel.querySelector('[data-template-slot="legend"]')).backgroundColor === 'rgb(255, 255, 255)', 'Position edit lost background settings');
+  const selectedBeforeMoveClick = selected;
+  panel.querySelector('.map-metric-button').click();
+  assert(selected === selectedBeforeMoveClick + 1, 'Moving controls lost their event listeners');
+  const positionedMetrics = panel.querySelector('[data-template-slot="metrics"]');
+  positionedMetrics.append(document.createElement('span'));
+  await wait(30); assertPlacement();
+  positionedMetrics.lastElementChild.remove();
+  panel.style.width = '600px'; await wait(100); assertPlacement();
+  panel.style.width = originalWidth; await wait(100); assertPlacement();
+  const positionedShell = renderer.getShell();
+  document.getElementById('map-template-select').dispatchEvent(new CustomEvent('map-template-change', { detail: { source: { ...floatingSource } } }));
+  for (let i = 0; i < 80 && (!renderer.getShell() || renderer.getShell() === positionedShell || panel.hasAttribute('data-template-loading')); i++) await wait(50);
+  await wait(30); assertPlacement();
+  appearanceWorkspace.activeGroupId = 'other-map'; appearance.apply();
+  assert(!panel.querySelector('[data-ai-positioned]'), 'Control placement leaked into another group');
+  assert(Math.abs(rect('[data-template-slot="legend"]').right - rect('#map').right + 22) < 1, 'Original template legend edge was not restored');
+  appearanceWorkspace.activeGroupId = 'appearance-map'; appearance.apply(); assertPlacement();
+  // Sidebar slots must move onto the actual map region without shifting its grid.
+  document.getElementById('map-template-select').dispatchEvent(new CustomEvent('map-template-change', { detail: { source: { ...editorialSource } } }));
+  for (let i = 0; i < 80 && (!renderer.getShell()?.querySelector('.editorial-layout') || panel.hasAttribute('data-template-loading')); i++) await wait(50);
+  await wait(30); assertPlacement();
+  const sidebarMap = rect('#map');
+  appearanceOperations = [layoutOp('metrics', { horizontal: 'default', vertical: 'default' }), layoutOp('legend', { horizontal: 'default', vertical: 'default' })];
+  await appearanceEditor.chat('Khôi phục vị trí chỉ số và chú giải theo template', []);
+  await wait(40);
+  assert(panel.querySelector('.editorial-sidebar [data-template-slot="metrics"]'), 'Default did not return metrics to the sidebar');
+  assert(!panel.querySelector('[data-ai-positioned]'), 'Reset left a positioned overlay behind');
+  assert(rect('#map').left === sidebarMap.left && rect('#map').width === sidebarMap.width, 'Moving out of sidebar changed map geometry');
+  document.getElementById('map-template-select').dispatchEvent(new CustomEvent('map-template-change', { detail: { source: { ...floatingSource } } }));
+  for (let i = 0; i < 80 && (!renderer.getShell()?.querySelector('.slot-metrics') || panel.hasAttribute('data-template-loading')); i++) await wait(50);
+  appearance.dispose(); darkFrames.remove(); appearancePopup.remove();
+
+  const nativePanel = document.createElement('div'); nativePanel.className = 'map-panel';
+  nativePanel.style.cssText = 'position:relative;width:500px;height:400px;flex:none;';
+  nativePanel.innerHTML = '<div id="map" style="position:absolute;inset:0"></div>'
+    + '<div class="workspace-metrics" style="width:120px;height:100px;top:45px;left:27px;right:auto;margin-left:3px"><button>Chỉ số</button></div>'
+    + '<div class="map-legends" style="width:180px;height:80px">Chú giải</div>'
+    + '<div class="map-query-panel" style="width:200px;height:40px">Tìm kiếm</div>'
+    + '<div class="map-controls" style="width:40px;height:80px">Điều khiển</div>';
+  document.body.append(nativePanel);
+  const nativeGroup = { appearance: { metrics: { horizontal: 'left', vertical: 'top', offsetX: 0, offsetY: 20 },
+    legend: { horizontal: 'right', vertical: 'bottom', offsetX: 0, offsetY: 0 },
+    search: { horizontal: 'center', vertical: 'top', offsetY: 10 }, controls: { horizontal: 'right', vertical: 'center', offsetX: 5 } } };
+  const nativeAppearance = createMapAppearance({ panel: nativePanel, workspace: { activeGroupId: 'native', groupsById: { native: nativeGroup } } });
+  nativeAppearance.apply();
+  const assertNativeLayout = () => {
+    const map = nativePanel.querySelector('#map').getBoundingClientRect();
+    const metrics = nativePanel.querySelector('.workspace-metrics').getBoundingClientRect();
+    const legend = nativePanel.querySelector('.map-legends').getBoundingClientRect();
+    const search = nativePanel.querySelector('.map-query-panel').getBoundingClientRect();
+    const controls = nativePanel.querySelector('.map-controls').getBoundingClientRect();
+    assert(Math.abs(metrics.left - map.left) < 1 && Math.abs(metrics.top - map.top - 20) < 1, 'Native metric offsets incorrect');
+    assert(Math.abs(legend.right - map.right) < 1 && Math.abs(legend.bottom - map.bottom) < 1, 'Native bottom-right anchor incorrect');
+    assert(Math.abs((search.left + search.right - map.left - map.right) / 2) < 1 && Math.abs(search.top - map.top - 10) < 1, 'Native centered search incorrect');
+    assert(Math.abs(controls.right - map.right + 5) < 1 && Math.abs((controls.top + controls.bottom - map.top - map.bottom) / 2) < 1, 'Native vertically centered controls incorrect');
+  };
+  await wait(40); assertNativeLayout();
+  nativePanel.style.width = '320px'; nativePanel.style.height = '250px';
+  await wait(60); assertNativeLayout();
+  nativeAppearance.dispose();
+  assert(!nativePanel.querySelector('[data-ai-positioned]') && nativePanel.children.length === 5, 'Disposal left native layout placeholders');
+  const restoredMetricStyle = nativePanel.querySelector('.workspace-metrics').style;
+  assert(restoredMetricStyle.top === '45px' && restoredMetricStyle.left === '27px' && restoredMetricStyle.right === 'auto' && restoredMetricStyle.marginLeft === '3px',
+    'Disposal lost template-authored inline offsets or margins');
+  nativePanel.remove();
+
   // Ignore a repair reply if the dataset was removed while AI was correcting it.
   extraCss = '.slot-map{height:0}';
   let releaseRepair;

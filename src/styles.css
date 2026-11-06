@@ -2558,7 +2558,7 @@ input[type=range] {
   color: #e2e8f0;
 }
 .weather-cell-popup .maplibregl-popup-tip { border-top-color: #0d1219fa; }
-.weather-cell-popup .maplibregl-popup-close-button { color: #94a3b8; font-size: 20px; }
+.weather-cell-popup .maplibregl-popup-close-button { color: inherit; font-size: 20px; }
 .ai-weather-popup { width: min(360px, calc(100vw - 44px)); }
 .ai-weather-popup .maplibregl-popup-content { min-width: 0; width: 100%; }
 .ai-map-popup { width: min(440px, var(--popup-map-width, calc(100vw - 32px))); z-index: 8; }
@@ -2579,57 +2579,59 @@ input[type=range] {
 .ai-popup-chart .bar-chart-plot { min-height: 0; margin-top: 6px; }
 .ai-popup-chart .chart-zoom-controls button { width: 24px; height: 25px; }
 .ai-weather-popup .maplibregl-popup-tip { display: none; }
+/* The popup frame owns its theme. Details and actions inherit it so switching
+   the frame's surface does not leave dark chips, cards or close buttons. */
 .ai-weather-popup .maplibregl-popup-close-button {
   top: -42px;
   right: 0;
   width: 32px;
   height: 32px;
-  border: 1px solid #ffffff38;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
   border-radius: 50%;
-  background: #303640ee;
-  color: #f8fafc;
+  background: transparent;
+  color: inherit;
   font-size: 21px;
   line-height: 28px;
-  box-shadow: 0 6px 18px #0006;
+  box-shadow: none;
 }
-.ai-weather-popup .maplibregl-popup-close-button:hover { background: #46505d; }
+.ai-weather-popup .maplibregl-popup-close-button:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
 .weather-popup { box-sizing: border-box; min-width: 0; padding: 18px 12px 12px; font: 12px/1.45 Inter, "Segoe UI", Arial, sans-serif; }
 .ai-weather-popup .weather-popup:not(.ai-popup-chart-only) { display: flex; flex-direction: column; max-height: min(600px, calc(var(--popup-map-height, calc(100dvh - 80px)) - 2px)); }
 .weather-popup > .popup-info-heading, .weather-popup > .popup-country-title { flex: 0 0 auto; }
 .weather-popup > .popup-source-records { min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
-.weather-popup > strong { display: block; padding-right: 18px; color: #f8fafc; font-size: 14px; }
-.weather-popup > small { display: block; margin-top: 2px; color: #64748b; }
-.popup-country-title { padding-bottom: 12px; border-bottom: 1px solid #ffffff12; }
+.weather-popup > strong { display: block; padding-right: 18px; color: inherit; font-size: 14px; }
+.weather-popup > small { display: block; margin-top: 2px; color: inherit; }
+.popup-country-title { padding-bottom: 12px; border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
 .popup-source-record { margin-top: 16px; }
-.popup-source-record + .popup-source-record { margin-top: 24px; padding-top: 20px; border-top: 1px solid #ffffff24; }
+.popup-source-record + .popup-source-record { margin-top: 24px; padding-top: 20px; border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
 .weather-popup dl { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 14px 0 0; }
 .ai-weather-popup .weather-popup dl { max-height: min(420px, 55vh); overflow-y: auto; padding-right: 2px; }
-.weather-popup dl > div { padding: 9px; border: 1px solid #ffffff12; border-radius: 8px; background: #ffffff08; }
-.weather-popup dt { color: #94a3b8; }
-.weather-popup dd { margin: 3px 0 0; color: #f8fafc; font-size: 14px; font-weight: 700; }
-.popup-info-heading { position: relative; padding: 0 30px 22px 0; border-bottom: 1px solid #ffffff12; }
-.popup-info-caption { display: block; margin-bottom: 6px; color: #a7b3c5; font-size: 10px; line-height: 1.5; text-transform: uppercase; overflow-wrap: anywhere; }
-.popup-info-heading > strong { display: block; color: #f8fafc; font-size: 17px; line-height: 1.45; overflow-wrap: anywhere; }
+.weather-popup dl > div { padding: 9px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 8px; background: transparent; }
+.weather-popup dt { color: inherit; }
+.weather-popup dd { margin: 3px 0 0; color: inherit; font-size: 14px; font-weight: 700; }
+.popup-info-heading { position: relative; padding: 0 30px 22px 0; border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+.popup-info-caption { display: block; margin-bottom: 6px; color: inherit; font-size: 10px; line-height: 1.5; text-transform: uppercase; overflow-wrap: anywhere; }
+.popup-info-heading > strong { display: block; color: inherit; font-size: 17px; line-height: 1.45; overflow-wrap: anywhere; }
 .weather-popup dl.popup-info-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); align-content: start; gap: 12px 16px; min-height: 0; margin: 18px 0 0; max-height: none; overflow: visible; padding: 0; }
 .ai-weather-popup .weather-popup > dl.popup-info-details { overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .weather-popup .popup-source-record dl.popup-info-details { overflow: visible; }
 .weather-popup .popup-info-details > div { min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; overflow-wrap: anywhere; }
 .weather-popup .popup-info-details > .popup-info-chip { order: 0; grid-column: 1 / -1; justify-self: start; max-width: 100%; }
-.popup-info-chip dt { margin-bottom: 5px; color: #94a3b8; font-size: 11px; }
-.weather-popup .popup-info-chip dd { display: inline-block; max-width: 100%; margin: 0; padding: 2px 8px; border-radius: 999px; background: #ffffff1a; font-size: 12px; font-weight: 500; }
+.popup-info-chip dt { margin-bottom: 5px; color: inherit; font-size: 11px; }
+.weather-popup .popup-info-chip dd { display: inline-block; max-width: 100%; margin: 0; padding: 2px 8px; border-radius: 999px; background: transparent; font-size: 12px; font-weight: 500; }
 .weather-popup .popup-info-details > .popup-info-description { order: 1; grid-column: 1 / -1; margin-top: 2px; }
-.weather-popup .popup-info-description dt { color: #c5cfdd; }
+.weather-popup .popup-info-description dt { color: inherit; }
 .weather-popup .popup-info-description dd { margin-top: 8px; font-size: 15px; font-weight: 400; line-height: 1.8; white-space: pre-wrap; }
 .weather-popup .popup-info-details > .popup-info-value { order: 2; padding: 6px 0; }
-.weather-popup .popup-info-details > .popup-info-meta { order: 3; margin-top: 6px; padding-top: 14px; border-top: 1px solid #ffffff12; }
+.weather-popup .popup-info-details > .popup-info-meta { order: 3; margin-top: 6px; padding-top: 14px; border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
 .weather-popup .popup-info-details > .popup-info-wide { grid-column: 1 / -1; }
 .weather-popup .popup-info-meta dt { font-size: 11px; }
 .weather-popup .popup-info-meta dd { margin-top: 6px; font-size: 15px; }
-.weather-popup .popup-info-details > .popup-info-note { order: 4; grid-column: 1 / -1; margin-top: 4px; padding: 12px; border-radius: 12px; background: #000; }
-.weather-popup .popup-info-note dt { color: #e2e8f0; font-size: 14px; font-weight: 600; }
+.weather-popup .popup-info-details > .popup-info-note { order: 4; grid-column: 1 / -1; margin-top: 4px; padding: 12px; border-radius: 12px; background: transparent; }
+.weather-popup .popup-info-note dt { color: inherit; font-size: 14px; font-weight: 600; }
 .popup-info-note dt::before { content: "ⓘ"; margin-right: 8px; font-weight: 400; }
 .weather-popup .popup-info-note dd { margin-top: 6px; font-size: 13px; font-weight: 400; line-height: 1.65; white-space: pre-wrap; }
-.weather-popup-status { margin: 14px 0 0; color: #cbd5e1; }
+.weather-popup-status { margin: 14px 0 0; color: inherit; }
 .ai-map-popup.has-info-image { width: min(360px, var(--popup-map-width, calc(100vw - 32px))); }
 .ai-map-popup.has-info-image .maplibregl-popup-content { padding: 0; overflow: hidden; background: #fff; color: #1e293b; border-radius: 14px; }
 .info-image-popup { display: flex; flex-direction: column; max-height: min(640px, var(--popup-map-height, calc(100dvh - 48px))); font: 13px/1.55 Inter, "Segoe UI", sans-serif; }

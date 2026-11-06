@@ -1,0 +1,8 @@
+/* A requested foreground also covers placeholders styled by a template.
+   Layered important rules take precedence over unlayered template rules. */
+@layer map-appearance {
+  .map-panel[data-ai-appearance-search] .map-search-form input::placeholder {
+    color: var(--ai-search-text) !important;
+    opacity: .65;
+  }
+}

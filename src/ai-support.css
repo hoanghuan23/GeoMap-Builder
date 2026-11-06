@@ -19,6 +19,11 @@
 }
 
 .ai-support-message { display: flex; align-items: flex-start; gap: 9px; }
+.ai-support-message + .ai-support-message, .ai-support-conversation > div + div { margin-top: 12px; }
+.ai-support-chat-text { white-space: pre-wrap; }
+.ai-support-message-user { justify-content: flex-end; padding-left: 30px; }
+.ai-support-message-user .ai-support-bubble { flex: initial; background: #eaf1ff; border-color: #dbe6ff; border-radius: 13px 4px 13px 13px; }
+.ai-support-message-assistant { padding-right: 8px; }
 
 .ai-support-avatar {
     display: grid;

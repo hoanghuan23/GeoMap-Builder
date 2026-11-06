@@ -34,7 +34,7 @@ export function create(parent) {
       controller.refreshPointStyle(); controller.renderPointStyleControls(); },
     clear() { state.pointData = { type: 'FeatureCollection', features: [] }; },
     renderControls() { controller.renderPointStyleControls(); },
-    metricColumns: () => { const suggestion = controller.activePointSuggestion(); return suggestion ? controller.pointModelFor(suggestion).measures : []; },
+    metricColumns: () => { const suggestion = controller.activePointSuggestion(); return suggestion ? controller.pointModelFor(suggestion, true).measures : []; },
     metricField: () => { const suggestion = controller.activePointSuggestion(); return suggestion && controller.pointSelectionFor(suggestion).metricField; },
     popupContext: () => ({ titleField: pointTitleField(state.aiDataset?.analysis.columns || []) || state.aiDataset?.analysis.search_fields?.[0] }),
     changeMetric(field) { const suggestion = controller.activePointSuggestion(); controller.pointSelectionFor(suggestion).metricField = field;

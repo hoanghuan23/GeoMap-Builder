@@ -36,7 +36,13 @@ export function create(parent) {
       ...categoryColorProperties(state.aiDataset.recommendation.metricField,featureCategoryValues(feature.properties,state.aiDataset.recommendation.metricField))};
       state.boundary=data;context.map.getSource('polygon-data')?.setData(data);context.map.getSource('vietnam-boundary')?.setData(data); },
     refreshGeometry() { if(controller.isRegionHexMode())return controller.rebuildRegionHexGrid(); },
-    update(change) {if(change.style){for(const[key,id]of Object.entries({color:'fixed-color',opacity:'opacity',borderColor:'border-color',borderWidth:'line-width'}))if(change.style[key]!=null)$(id).value=change.style[key];
+    update(change) {if(change.hex){context.tasks.regionHexBuildRevision++;if(change.hex.enabled!==undefined)state.regionHexEnabled=change.hex.enabled;
+        if(change.hex.resolution!==undefined)state.regionHexResolution=change.hex.resolution;
+        controller.syncRegionHexControls();return controller.isRegionHexMode()?controller.rebuildRegionHexGrid():services.view.applyStyle();}
+      if(change.style){for(const[key,id]of Object.entries({color:'fixed-color',opacity:'opacity',borderColor:'border-color',borderWidth:'line-width'}))if(change.style[key]!=null)$(id).value=change.style[key];
+        if(change.style.showBorder!==undefined)$('show-border').checked=change.style.showBorder;
+        $('fixed-color-value').textContent=$('fixed-color').value.toUpperCase();$('opacity-value').value=`${Math.round(Number($('opacity').value)*100)}%`;
+        $('border-color-value').textContent=$('border-color').value.toUpperCase();$('line-width-value').value=`${$('line-width').value} px`;
         if(change.style.palette!==undefined)state.polygonPalette=change.style.palette;style();module.setVisible($('show-map-layers').checked);return;}
       if(change.metric)return module.changeMetric(change.metric);
       return state.aiDataset?.nativeGeometry ? services.runtime.refreshNativeMap(change) : controller.filteredAiBoundary(change);

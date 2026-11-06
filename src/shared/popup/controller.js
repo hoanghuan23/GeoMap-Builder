@@ -1,4 +1,5 @@
 import { mapRegistry } from '../../maps/registry.js';
+import { visibleDatasetColumns } from '../data/display-fields.js';
 import { BarRenderer as default_BarRenderer } from "../../charts/bar-chart.js";
 import { LineRenderer as default_LineRenderer } from "../../charts/line-chart.js";
 import { humanizeField as default_humanizeField } from "../../charts/data-transformers.js";
@@ -116,7 +117,9 @@ export function createController(context) {
     const dataset=state.aiDataset; const recommendation=dataset.recommendation || {};
     const info=context.modules.active()?.getPopupContext(feature) || {};
     const scale=info.legendScale;
-    const displayedColumns=(dataset.analysis.columns || []).filter(column=>!column.name.startsWith('__')).map(column=>{
+    const availableColumns=visibleDatasetColumns(dataset);
+    const popupColumns=dataset.popupFields ? dataset.popupFields.map(name=>availableColumns.find(column=>column.name===name)).filter(Boolean) : availableColumns;
+    const displayedColumns=popupColumns.filter(column=>!column.name.startsWith('__')).map(column=>{
       if(column.name===scale?.field)return {...column,unit:scale.unit,labelVi:scale.aggregation==='count'?'Số bản ghi':column.labelVi};
       return column.role==='time'&&recommendation.filters?.some(filter=>filter.field===column.name&&filter.control==='datetime-select')?{...column,granularity:'datetime'}:column;
     });
@@ -143,12 +146,22 @@ export function createController(context) {
     suggestion = activeMapPopupSuggestion()?.id === suggestion?.id ? activeMapPopupSuggestion() : suggestion;
     const dataset = state.aiDataset;
     dataset.popupSelections ||= {};
-    const available = popupDisplayOptions(suggestion, dataset.analysis.columns).filter(item => item.available);
+    const columns = visibleDatasetColumns(dataset);
+    const available = popupDisplayOptions(suggestion, columns).filter(item => item.available);
     const selection = dataset.popupSelections[suggestion.id] ||= { mode: available[0].name, bar: null, line: null };
     if (!available.some(item => item.name === selection.mode)) selection.mode = available[0].name;
     if (["bar", "line"].includes(selection.mode) && !selection[selection.mode]) {
       const metric = context.modules.active()?.metricField();
-      selection[selection.mode] = createPopupChartSelection(dataset.records, dataset.analysis.columns, metric, selection.mode, suggestion.bindings);
+      selection[selection.mode] = createPopupChartSelection(dataset.records, columns, metric, selection.mode, suggestion.bindings);
+    }
+    if (dataset.hiddenMetricFields?.length) {
+      const measures = new Set(popupChartColumns(columns, suggestion.bindings).filter(column => column.role === 'measure').map(column => column.name));
+      if (selection.bar) {
+        selection.bar.metrics = selection.bar.metrics.filter(field => field === 'count' || measures.has(field));
+        if (!selection.bar.metrics.length) selection.bar.metrics = createPopupChartSelection(dataset.records, columns, context.modules.active()?.metricField(), 'bar', suggestion.bindings).metrics;
+        if (selection.bar.metrics.length < 2) selection.bar.variant = 'single';
+      }
+      if (selection.line && !measures.has(selection.line.measure)) selection.line.measure = createPopupChartSelection(dataset.records, columns, context.modules.active()?.metricField(), 'line', suggestion.bindings).measure;
     }
     return selection;
   }
@@ -181,7 +194,7 @@ export function createController(context) {
       const baseRecords = view.arcInfo?.records || popupRegionRecords(dataset.records, view.feature, dataset.recommendation?.geometry?.field,
         { chartType: activeMapPopupSuggestion().chartType, columns: dataset.analysis.columns, bindings: activeMapPopupSuggestion().bindings });
       card = createInfoImagePopup(document, { sources: [{ title: dataset.fileName || dataset.analysis.datasetTitle,
-        columns: dataset.analysis.columns, popupContent: { ...content, titleField }, records: baseRecords.length ? baseRecords : [view.feature.properties || {}] }, ...joined],
+        columns: visibleDatasetColumns(dataset), popupContent: { ...content, titleField }, records: baseRecords.length ? baseRecords : [view.feature.properties || {}] }, ...joined],
         title: view.arcInfo?.title,
         coordinates: view.feature.geometry?.type === "Point" ? view.feature.geometry.coordinates : null,
         onLayout: () => { if (context.popups.mapPopupView === view) sizeMapPopup(view); } });
@@ -199,7 +212,7 @@ export function createController(context) {
         dataset.analysis.columns.some(column => column.name === field && column.role !== "time")));
       const records = context.modules.active()?.getPopupContext(view.feature).chartRecords || dataset.records;
       chart = buildPopupChart({ records: view.arcInfo?.records || records,
-        columns: view.arcInfo ? popupChartColumns(dataset.analysis.columns, activeMapPopupSuggestion().bindings) : dataset.analysis.columns,
+        columns: view.arcInfo ? popupChartColumns(visibleDatasetColumns(dataset), activeMapPopupSuggestion().bindings) : visibleDatasetColumns(dataset),
         feature: view.arcInfo ? { properties: { __arcPopupTitle: view.arcInfo.title } } : view.feature,
         regionField: view.arcInfo ? "__arcPopupTitle" : dataset.recommendation.geometry.field,
         kind: selection.mode, selection: selection[selection.mode], chartType: view.arcInfo ? "choropleth" : activeMapPopupSuggestion().chartType,
@@ -274,7 +287,7 @@ export function createController(context) {
 
   function buildMapPopupControls(dataset, suggestion) {
     suggestion = activeMapPopupSuggestion()?.id === suggestion.id ? activeMapPopupSuggestion() : suggestion;
-    const columns = dataset.analysis.columns;
+    const columns = visibleDatasetColumns(dataset);
     const selection = popupSelectionFor(suggestion);
     const group = document.createElement("div");
     group.className = "ai-control-group";
@@ -323,7 +336,7 @@ export function createController(context) {
 
   function buildMapPopupSettings(dataset, selection) {
     const settings = document.createElement("div"); settings.className = "ai-popup-settings";
-    const columns = popupChartColumns(dataset.analysis.columns, activeMapPopupSuggestion()?.bindings);
+    const columns = popupChartColumns(visibleDatasetColumns(dataset), activeMapPopupSuggestion()?.bindings);
     const config = selection[selection.mode];
     if (selection.mode === "bar") {
       const variants = document.createElement("div"); variants.className = "ai-bar-chart-types";

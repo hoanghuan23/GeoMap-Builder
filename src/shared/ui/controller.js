@@ -1,4 +1,5 @@
 import { mapRegistry, mapDefinitions } from '../../maps/registry.js';
+import { visibleDatasetColumns } from '../data/display-fields.js';
 import { analyzeSpatialData as default_analyzeSpatialData } from "../data/data-capabilities.js";
 import { compatibleMapTypes as default_compatibleMapTypes } from "../data/data-capabilities.js";
 import { describeDataProfile as default_describeDataProfile } from "../data/data-capabilities.js";
@@ -144,7 +145,7 @@ export function createController(context) {
     const dataset = state.aiDataset;
     const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
     const buttons = context.modules.active()?.definition.id === suggestion?.chartType ? mapMetricButtons(dataset, suggestion) : [];
-    control.hidden = buttons.length < 2;
+    control.hidden = buttons.length < (dataset?.metricFieldsConfigured ? 1 : 2);
     if (control.hidden) {
       $("map-metric-list").replaceChildren();
       context.tasks.mapMetricControlView = null;
@@ -214,7 +215,7 @@ export function createController(context) {
       })));
       select.value = recommendation.metricField; label.append(caption, select); metricControls.push(label);
     }
-    const filterControls = recommendation.filters.flatMap(filter => {
+    const filterControls = recommendation.filters.filter(filter => visibleDatasetColumns(dataset).some(column => column.name === filter.field)).flatMap(filter => {
       const column = dataset.analysis.columns.find(item => item.name === filter.field);
       const values = uniqueRecordValues(records, filter.field).sort((a, b) =>
         column?.role === "time" ? compareTimeValues(a[1], b[1], column) : String(a[1]).localeCompare(String(b[1]), "vi")

@@ -58,6 +58,10 @@ try {
       pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params }));
     });
     await send('Page.enable');
+    // Fixtures use local UI and fallback fonts. Do not let an external font
+    // stylesheet block module execution when the network is unavailable.
+    await send('Network.enable');
+    await send('Network.setBlockedURLs', { urls: ['*://fonts.googleapis.com/*', '*://fonts.gstatic.com/*'] });
     await send('Emulation.setDeviceMetricsOverride', mobile
       ? {width:390,height:844,deviceScaleFactor:1,mobile:true}
       : {width:1000,height:760,deviceScaleFactor:1,mobile:false});

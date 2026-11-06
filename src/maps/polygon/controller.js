@@ -1,4 +1,5 @@
 import { updateRegionHexControls } from "./controls.js";
+import { visibleDatasetColumns } from '../../shared/data/display-fields.js';
 import { CONFIG as default_CONFIG } from "../../shared/config.js";
 import { buildRegionHexGrid as default_buildRegionHexGrid } from "./region-grid.js";
 import { analyzeSpatialData as default_analyzeSpatialData } from "../../shared/data/data-capabilities.js";
@@ -326,7 +327,7 @@ export function createController(context) {
   function polygonDimensionChoices(dataset, suggestion) {
     const geoOrder = { country: 0, admin1: 1, admin2: 2 };
     const priority = column => column.role === "geo" ? geoOrder[column.geoLevel] ?? 3 : 4;
-    const columns = dataset.analysis.columns.filter(column =>
+    const columns = visibleDatasetColumns(dataset).filter(column =>
       !column.name.startsWith("__") && !["point_lat", "point_lng", "h3"].includes(column.geoLevel)
       && (column.role === "geo" || column.role === "category" || column.name === suggestion.bindings.region)
     ).sort((a, b) => priority(a) - priority(b));

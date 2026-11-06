@@ -10,6 +10,7 @@ import { formatTimeValue as default_formatTimeValue } from "../../shared/data/ti
 import { timeValueInfo as default_timeValueInfo } from "../../shared/data/time-values.js";
 import { popupTimeColumn as default_popupTimeColumn } from "../../shared/popup/ai-popup-chart.js";
 import { EMPTY_FEATURE_COLLECTION } from '../../shared/configuration.js';
+import { visibleDatasetColumns } from '../../shared/data/display-fields.js';
 
 /** point operations for one workspace layer. */
 export function createController(context) {
@@ -48,10 +49,12 @@ export function createController(context) {
     return suggestion?.chartType === "point" ? suggestion : null;
   }
 
-  function pointModelFor(suggestion) {
+  function pointModelFor(suggestion, includeHidden = false) {
     const dataset = state.aiDataset;
     dataset.pointModels ||= Object.create(null);
-    return dataset.pointModels[suggestion.id] ||= createPointModel(dataset.records, dataset.analysis.columns, suggestion.bindings);
+    const model = dataset.pointModels[suggestion.id] ||= createPointModel(dataset.records, dataset.analysis.columns, suggestion.bindings);
+    return includeHidden || !dataset.hiddenMetricFields?.length ? model : { ...model,
+      measures: visibleDatasetColumns(dataset, model.measures), groups: visibleDatasetColumns(dataset, model.groups) };
   }
 
   function pointSelectionFor(suggestion) {

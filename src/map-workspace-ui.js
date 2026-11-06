@@ -13,12 +13,15 @@ import { keepSelectOpenAfterMouseClick } from './shared/ui/select-control.js';
 import { createArcFlowOverlayManager } from './shared/view/arc-overlay.js';
 import { createMapTemplateRenderer } from './map-template-renderer.js';
 import { createMapProcessingStatus } from './shared/ui/map-processing-status.js';
+import { createAiMapEditor } from './ai-map-editor.js';
+import { createMapAppearance } from './map-appearance.js';
 
 const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
 
 export async function startMapWorkspace(createRuntime, { styles, styleLabels, renderCatalog, templatePicker }) {
   const workspace = createMapWorkspace();
+  const appearance = createMapAppearance({ panel: document.querySelector('.map-panel'), workspace });
   const uploads = new Map(); const keys = new Set(); const runtimes = new Map();
   const requestComposition = createCompositionClient();
   const $ = id => document.getElementById(id);
@@ -172,7 +175,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   function sync() {
     const group = activeMapGroup(workspace);
     const hasSelection = Boolean(group);
-    const searches = (group?.visible ? group.layerIds : []).map(id => {
+    const searches = (group?.visible ? group.layerIds.filter(id => workspace.layersById[id].visible !== false) : []).map(id => {
       const layer = workspace.layersById[id];
       return { ...runtimes.get(id).api.searchData(), ...(!layer.searchEnabled ? { search_bar: false } : {}),
         layerId: id, groupId: group.id, layerTitle: layer.title };
@@ -210,7 +213,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       if (isVisible && styleReady && !mounted.has(id)) { item.manager.attach(); mounted.add(id); }
       if (!isVisible && mounted.has(id)) { item.manager.detach(); mounted.delete(id); item.api.closePopup(); }
       item.panel.hidden = !active;
-      const groupShown = isVisible && group.visible;
+      const groupShown = isVisible && group.visible && workspace.layersById[id].visible !== false;
       const groupVisible = groupShown && !templateLoading;
       item.manager.setVisible(Boolean(groupVisible));
       arcFlowOverlay.setLayerState(id, { attached: isVisible && styleReady, visible: Boolean(groupVisible) });
@@ -221,9 +224,9 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       if (item.api.state.aiDataset) {
         const dataset = item.api.state.aiDataset;
         const suggestion = dataset.suggestions.find(option => option.id === dataset.selectedSuggestionId);
-        if ((suggestion?.metricButtons?.length || 0) < 2) item.metric.hidden = true;
+        if (item.api.controllers.ui.mapMetricButtons(dataset, suggestion).length < (dataset.metricFieldsConfigured ? 1 : 2)) item.metric.hidden = true;
       }
-      item.legends.hidden = !groupShown;
+      item.legends.hidden = !groupShown || workspace.layersById[id].legendVisible === false;
       const otherLegend = [...item.legends.children].some(node => node !== item.genericLegend && node.tagName === 'DIV' && !node.hidden);
       const count = filterCountryRegionData(layerData(item.api), config, regionId)?.features?.length || 0;
       const legendEnabled = item.api.getView().legendVisible;
@@ -246,7 +249,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     const waiting = Object.values(workspace.layersById).some(layer => layer.sourceKind === 'attribute' && !workspace.attributeJoins.some(join => join.sourceId === layer.id));
     retry.hidden = !(unknown || waiting) || Object.keys(workspace.layersById).length < 2;
     compositionNote.textContent = group?.composition?.reason || (group ? `${group.layerIds.length} lớp dữ liệu trong bản đồ đang hiển thị.` : '');
-    const templateLayers = (group?.visible ? group.layerIds : []).map(id => {
+    const templateLayers = (group?.layerIds || []).map(id => {
       const api = runtimes.get(id)?.api;
       const dataset = api?.state.aiDataset;
       const suggestion = dataset?.suggestions?.find(item => item.id === dataset.selectedSuggestionId);
@@ -258,6 +261,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       mapTypes: templateLayers.map(item => item.chartType),
       popupTypes: templateLayers.flatMap(item => item.popupSuggestions?.map(popup => popup.name) || [])
     } });
+    appearance.apply();
+    document.dispatchEvent(new CustomEvent('map-workspace-change', { detail: { groupId: group?.id || null } }));
   }
 
   function renderLayerTabs(item, group) {
@@ -548,7 +553,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   map.on('rotate', updateCompass);
   updateCompass();
   map.on('style.load', () => { styleReady = true; mounted.clear(); readyResolve(); sync(); arcFlowOverlay.setStyleReady(true); search.refreshHighlight(); });
-  map.on('remove', () => arcFlowOverlay.dispose());
+  map.on('remove', () => { arcFlowOverlay.dispose(); appearance.dispose(); });
   map.on('error', event => {
     console.warn('MapLibre:', event.error?.message);
     if (!styleReady) status('Chưa tải được nền bản đồ. Bạn có thể chọn nền khác để thử lại.');
@@ -556,5 +561,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { map.resize(); for (const item of runtimes.values()) item.api.resizePopup(); }).observe($('map'));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) map.resize(); });
   sync();
-  return { workspace, map, importFiles, selectGroup, selectLayer, removeUpload };
+  const aiEditor = createAiMapEditor({ workspace, runtimes, templatePicker, appearance, isLoading: () => templateLoading || !styleReady || [...uploads.values()].some(upload => upload.processing),
+    sync, closePopups });
+  return { workspace, map, importFiles, selectGroup, selectLayer, removeUpload, aiEditor };
 }

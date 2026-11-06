@@ -134,7 +134,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
     popupSuggestions: popupSuggestions.map(item => ({ ...item })) }));
   if (metricButtons !== null) dataset.suggestions.find(suggestion => suggestion.id === dataset.selectedSuggestionId).metricButtons = metricButtons;
   const context = vm.createContext({
-    testRuntimeOptions: arc ? { arcFlowOverlay: { async updateLayer(_id, payload) { published.push(payload); return true; }, removeLayer() {} } } : {},
+    testRuntimeOptions: { managedWorkspace: true, ...(arc ? { arcFlowOverlay: { async updateLayer(_id, payload) { published.push(payload); return true; }, removeLayer() {} } } : {}) },
     createArcFlowController,
     ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...h3Utils, ...pointStyle, ...polygonStyle,  ...polygonLegend, ...legendContract, ...categoricalColor,
     fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, createInfoImagePopup, collapseCountryFeatures, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,

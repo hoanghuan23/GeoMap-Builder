@@ -92,6 +92,10 @@ export function createController(context) {
     module.restore();
     const result = await module.activate(suggestion);
     if(result===null || context.disposed || dataset!==state.aiDataset || dataset.selectedSuggestionId!==id)return null;
+    if (dataset.hiddenMetricFields?.includes(module.metricField())) {
+      const replacement = module.metricColumns()[0];
+      if (replacement) await module.changeMetric(replacement.name);
+    }
     services.ui.updateModelSections(); services.view.applyMapLayerVisibility(); services.ui.renderAiSuggestionGrid(); services.view.updateDashboard();
     return result;
   }

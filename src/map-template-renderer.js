@@ -111,6 +111,7 @@ export function createMapTemplateRenderer({ document, map, picker, fetchImpl = g
   function fitFloatingMetrics(next) {
     const metrics = next.querySelector('[data-template-slot="metrics"]');
     const search = next.querySelector('[data-template-slot="search"]');
+    if (metrics.closest('[data-ai-positioned]')) return;
     if (metrics.hasAttribute('data-template-adjusted-top')) {
       metrics.style.removeProperty('top');
       metrics.removeAttribute('data-template-adjusted-top');
