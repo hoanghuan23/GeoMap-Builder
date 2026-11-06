@@ -68,7 +68,7 @@ test('picker defaults to AI, allows manual themes and preserves last valid state
   elements['map-template-select'].dispatchEvent(new Event('change'));
   assert.equal(content.dataset.templateTheme, 'light');
   assert.equal(content.dataset.templateReady, 'true');
-  assert.equal(elements['map-template-select'].children[1].textContent, mapTemplates[0].name);
+  assert.equal(elements['map-template-select'].children[1].textContent, `${mapTemplates[0].name} (${mapTemplates[0].description})`);
   content.style.setProperty('--metric-color', '#123456');
   elements['map-template-select'].value = '1';
   elements['map-template-select'].dispatchEvent(new Event('change'));

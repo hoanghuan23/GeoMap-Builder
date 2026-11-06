@@ -152,7 +152,7 @@ export function initializeMapTemplatePicker(document, fetchImpl = globalThis.fet
       const options = nextCatalog.map((template, index) => {
         const option = document.createElement('option');
         option.value = String(index);
-        option.textContent = template.name;
+        option.textContent = template.description ? `${template.name} (${template.description})` : template.name;
         option.title = template.description || template.name;
         return option;
       });

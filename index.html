@@ -9,16 +9,17 @@
   <link rel="stylesheet" href="./src/styles.css">
   <link rel="stylesheet" href="./src/reference-tweaks.css">
   <link rel="stylesheet" href="./src/map-template.css">
+  <link rel="stylesheet" href="./src/ai-support.css">
 </head>
 <body>
 <div class="app-shell">
   <header class="app-header">
     <a class="brand" href="#"><img class="brand-mark" src="./favicon.png" alt=""><span>GeoMap <b>Builder</b></span></a>
-    <nav class="main-nav"><a class="active" href="#">Tạo bản đồ</a><a href="#">Dự án của tôi</a><a href="#">Dữ liệu mẫu</a><a href="#">Hướng dẫn</a></nav>
+    <nav class="main-nav" aria-label="Điều hướng chính"><a id="map-builder-nav" class="active" href="#map-builder" aria-current="page" aria-controls="map-builder-sidebar">Tạo bản đồ</a><a id="ai-support-nav" href="#ai-support" aria-controls="ai-support">AI hỗ trợ</a><a href="#">Dự án của tôi</a><a href="#">Dữ liệu mẫu</a><a href="#">Hướng dẫn</a></nav>
     <div class="header-actions"><button class="icon-button" title="Trợ giúp">?</button><button class="icon-button download-button" type="button" title="Tải xuống" aria-label="Tải xuống"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg></button><button class="profile-button"><span class="avatar">HN</span><span><b>Hoàng Huấn</b><small>Workspace cá nhân</small></span><span>⌄</span></button></div>
   </header>
   <main class="workspace">
-    <aside class="sidebar">
+    <aside id="map-builder-sidebar" class="sidebar">
       <section class="panel-section basemap-section" aria-labelledby="basemap-heading">
         <div class="basemap-heading">
           <span class="basemap-heading-icon" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -96,6 +97,30 @@
           <div class="builder-actions"><button id="reset-config">♙&nbsp; Đặt lại cấu hình</button><button id="clear-data">↻&nbsp; Xóa dữ liệu</button></div>
         </div>
       </section>
+    </aside>
+    <aside id="ai-support" class="ai-support" aria-label="AI hỗ trợ chỉnh sửa bản đồ" hidden>
+      <div class="ai-support-conversation" role="log" aria-label="Cuộc trò chuyện với AI" aria-live="polite">
+        <div class="ai-support-message">
+          <span class="ai-support-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M10 3h4M4 11H2v5h2m16-5h2v5h-2"/><rect x="4" y="6" width="16" height="15" rx="5"/><path d="M9 16h6"/><circle cx="9" cy="11" r="1"/><circle cx="15" cy="11" r="1"/></svg></span>
+          <div class="ai-support-bubble">
+            <p><strong>Bạn có thể yêu cầu tôi chỉnh sửa bản đồ, ví dụ:</strong></p>
+            <ul>
+              <li>Đổi màu tô vùng, chỉnh thang chú giải</li>
+              <li>Thêm/bớt thuộc tính hiển thị</li>
+              <li>Thay đổi kiểu popup, thêm biểu đồ</li>
+              <li>Bật/tắt lớp dữ liệu, lưới lục giác, v.v.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="ai-support-footer">
+        <p id="ai-support-status" class="ai-support-status" role="status" hidden></p>
+        <form id="ai-support-form" class="ai-support-composer">
+          <label class="ai-support-input-label" for="ai-support-input">Nhập yêu cầu chỉnh sửa bản đồ</label>
+          <textarea id="ai-support-input" rows="1" maxlength="4000" placeholder="Nhập yêu cầu chỉnh sửa bản đồ..." aria-describedby="ai-support-status"></textarea>
+          <button id="ai-support-send" class="ai-support-send" type="submit" aria-label="Gửi yêu cầu" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 4 17 8-17 8 3-8-3-8Zm3 8h14"/></svg></button>
+        </form>
+      </div>
     </aside>
     <section class="content-area">
       <div class="map-panel"><div id="map"></div><div id="status" class="status-pill" hidden></div>
