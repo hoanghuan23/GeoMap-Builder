@@ -1,5 +1,6 @@
 import { normalizePolygonLegendRecommendation } from './shared/data/polygon-legend-contract.js';
 import { APPEARANCE_TARGETS, normalizeAppearancePatch, normalizeMapAppearance } from './map-appearance-contract.js';
+import { POPUP_TYPES } from './shared/import/ai-chart-contract.js';
 
 export const EDIT_KINDS = ['appearance', 'style', 'metric', 'metricFields', 'visible', 'legendVisible', 'legend', 'popupMode', 'popupFields', 'hexEnabled', 'hexResolution'];
 export const MAP_EDIT_SCHEMA = { type: 'object', additionalProperties: false, required: ['message', 'operations'], properties: {
@@ -45,8 +46,8 @@ export function normalizeEditContext(raw) {
       metric: names.has(layer.metric) ? layer.metric : null,
       metrics: (Array.isArray(layer.metrics) ? layer.metrics : []).filter(name => names.has(name)),
       availableMetrics: (Array.isArray(layer.availableMetrics) ? layer.availableMetrics : layer.metrics || []).filter(name => names.has(name)),
-      popupModes: (Array.isArray(layer.popupModes) ? layer.popupModes : []).filter(mode => ['info', 'info_image', 'bar', 'line'].includes(mode)),
-      popupMode: ['info', 'info_image', 'bar', 'line'].includes(layer.popupMode) ? layer.popupMode : null,
+      popupModes: (Array.isArray(layer.popupModes) ? layer.popupModes : []).filter(mode => POPUP_TYPES.includes(mode)),
+      popupMode: POPUP_TYPES.includes(layer.popupMode) ? layer.popupMode : null,
       popupFields: Array.isArray(layer.popupFields) ? layer.popupFields.filter(name => names.has(name)) : columns.map(column => column.name),
       legendTarget: target, legend, hexEnabled: layer.hexEnabled === true,
       hexResolution: Number.isInteger(layer.hexResolution) && layer.hexResolution >= 0 && layer.hexResolution <= 15 ? layer.hexResolution : 6

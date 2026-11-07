@@ -27,7 +27,7 @@ export const sharedInstructions = [
   },
   {
     "order": 3,
-    "text": `Mỗi kiểu bản đồ xuất hiện tối đa một lần. Chỉ đề xuất khi phù hợp với grain; nếu không có kiểu phù hợp, trả suggestions: []. suggestions[].chartType chỉ nhận ${allowedIds}, không nhận bar, line, hex_h3, heatmap hoặc pie. bar/line được phép trong popupSuggestions để biểu diễn biểu đồ của đối tượng được bấm; ứng dụng tự dựng từ metadata cột.`
+    "text": `Mỗi kiểu bản đồ xuất hiện tối đa một lần. Chỉ đề xuất khi phù hợp với grain; nếu không có kiểu phù hợp, trả suggestions: []. suggestions[].chartType chỉ nhận ${allowedIds}, không nhận bar, line, hex_h3, heatmap hoặc pie. bar/line/pie được phép trong popupSuggestions để biểu diễn biểu đồ của đối tượng được bấm; ứng dụng tự dựng từ metadata cột.`
   },
   {
     "order": 9,
@@ -39,7 +39,7 @@ export const sharedInstructions = [
   },
   {
     "order": 11,
-    "text": "Với TỪNG suggestion bản đồ, trả popupSuggestions gồm 1–4 phần tử chỉ có name (info, info_image, bar hoặc line) và confidence từ 0 đến 1; mỗi name xuất hiện tối đa một lần, xếp giảm dần theo confidence. Chỉ đề xuất kiểu phù hợp, không mặc định trả đủ cả ba. Đánh giá riêng dữ liệu của MỘT đối tượng được bấm theo bindings và grain của bản đồ đó (vùng, tuyến hoặc điểm), không dựa vào số dòng hoặc số mốc của toàn bảng. Các bản đồ có thể có danh sách và thứ tự popup khác nhau."
+    "text": "Với TỪNG suggestion bản đồ, trả popupSuggestions gồm 1–5 phần tử có name (info, info_image, bar, line hoặc pie), confidence từ 0 đến 1 và pie (null cho các kiểu khác; bindings biểu đồ tròn khi name pie); mỗi name xuất hiện tối đa một lần, xếp giảm dần theo confidence. Chỉ đề xuất kiểu phù hợp, không mặc định trả đủ mọi kiểu. Đánh giá riêng dữ liệu của MỘT đối tượng được bấm theo bindings và grain của bản đồ đó (vùng, tuyến hoặc điểm), không dựa vào số dòng hoặc số mốc của toàn bảng. Các bản đồ có thể có danh sách và thứ tự popup khác nhau."
   },
   {
     "order": 12,
@@ -47,7 +47,7 @@ export const sharedInstructions = [
   },
   {
     "order": 13,
-    "text": "Ưu tiên line khi cùng đối tượng có chuỗi quan sát theo thời gian có ý nghĩa, ít nhất hai mốc có số liệu và chỉ số đo phù hợp; nhiều đối tượng ở các ngày khác nhau không tự tạo chuỗi thời gian của một đối tượng. Chọn bar khi so sánh độ lớn theo các kỳ hoặc hiển thị tổng hợp/số đếm có ý nghĩa; không tự tạo trục phân loại mà popup hiện tại không hỗ trợ, không ghép các chỉ số khác đơn vị. Chọn info khi dữ liệu thiên về mô tả, trạng thái/phân loại, quan sát đơn lẻ hoặc chưa đủ cơ sở biểu đồ; khi chưa chắc chắn ưu tiên info. Tọa độ, mã/ID và cột thứ tự không phải chỉ số đo. Không thêm reason, bindings hoặc cấu hình biểu đồ trong popupSuggestions. Đây là đề xuất trong cùng request phân tích, không gọi AI lại khi bấm đối tượng hoặc đổi bộ lọc."
+    "text": "Ưu tiên pie với confidence cao nhất khi dữ liệu của cùng một đối tượng thể hiện tỷ lệ/tỷ trọng/cơ cấu các nhóm thành phần của MỘT tổng thể 100%, hoặc số lượng/giá trị không âm cùng đơn vị có thể quy thành tỷ trọng. Dữ liệu ví dụ hay tên lĩnh vực không phải điều kiện chọn pie. Không dùng pie để ghép các chỉ số độc lập, khác đơn vị, có giá trị âm hoặc các thời điểm như thể là các nhóm thành phần. Với pie, trả pie.groupField và pie.valueField là cột nhóm/giá trị thực tế (valueField null khi cần đếm bản ghi), measureFields []; hoặc groupField/valueField null và measureFields là các cột thành phần cùng đơn vị. pie.excludedValues liệt kê đúng giá trị nhóm là dòng tổng/phụ tổng để tránh tính hai lần; không đưa cột tổng vào measureFields. pie.title là tiêu đề cơ cấu theo dữ liệu, không lấy từ ví dụ. Gán aggDefault theo ý nghĩa chỉ số, không tự cộng phần trăm qua nhiều mốc; popup tròn mặc định lấy mốc mới nhất. Ưu tiên line khi cùng đối tượng có chuỗi quan sát theo thời gian có ý nghĩa, ít nhất hai mốc có số liệu và chỉ số đo phù hợp; nhiều đối tượng ở các ngày khác nhau không tự tạo chuỗi thời gian của một đối tượng. Chọn bar khi so sánh độ lớn theo các kỳ hoặc hiển thị tổng hợp/số đếm có ý nghĩa; không tự tạo trục phân loại mà popup hiện tại không hỗ trợ, không ghép các chỉ số khác đơn vị. Chọn info khi dữ liệu thiên về mô tả, trạng thái/phân loại, quan sát đơn lẻ hoặc chưa đủ cơ sở biểu đồ; khi chưa chắc chắn ưu tiên info. Tọa độ, mã/ID và cột thứ tự không phải chỉ số đo. Không thêm reason hay code trong popupSuggestions; chỉ pie có thêm bindings khai báo trong trường pie theo schema. Đây là đề xuất trong cùng request phân tích, không gọi AI lại khi bấm đối tượng hoặc đổi bộ lọc."
   },
   {
     "order": 20,

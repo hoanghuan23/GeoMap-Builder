@@ -5,6 +5,8 @@ import { mapRegistry } from '../../maps/registry.js';
 import { popupRegionValue, regionKey, regionTitle } from './subject.js';
 export { popupRegionValue } from './subject.js';
 import { normalizePopupSuggestions } from "../import/ai-chart-contract.js";
+import { createPieSelection, buildPieChartData, pieChartFields } from './pie-chart-data.js';
+import { measureUnit } from '../data/measure-semantics.js';
 
 export function mapDisplaySuggestions(suggestions = [], selectedSuggestionId = null) {
   return suggestions.filter(item => Object.hasOwn(mapRegistry, item.chartType));
@@ -24,21 +26,31 @@ export function popupDisplayOptions(suggestion, columns = []) {
   const time = popupTimeColumn(chartColumns);
   const hasMeasure = chartColumns.some(column => column.role === "measure");
   const options = normalizePopupSuggestions(suggestion?.popupSuggestions).map(item => {
-    const unavailableReason = item.name === "info_image" ? (suggestion?.popupContent?.imageFields?.length || suggestion?.hasJoinedImages ? "" : "Chưa có trường hình ảnh hợp lệ") : item.name !== "line" ? "" : !time ? "Cần cột thời gian để vẽ biểu đồ đường"
-      : !hasMeasure ? "Cần chỉ số đo hợp lệ để vẽ biểu đồ đường" : "";
+    let unavailableReason = '';
+    if (item.name === 'pie') {
+      const pie = createPieSelection(chartColumns, suggestion?.bindings?.value, suggestion?.bindings, item.pie);
+      const { groups, measures } = pieChartFields(chartColumns, suggestion?.bindings);
+      const components = pie.metrics.map(name => measures.find(column => column.name === name));
+      const valid = pie.groupField
+        ? groups.some(column => column.name === pie.groupField) && (pie.measure === 'count' || measures.some(column => column.name === pie.measure))
+        : components.length >= 2 && components.every(Boolean) && new Set(components.map(measureUnit)).size === 1;
+      if (!valid) unavailableReason = 'Cần cột phân nhóm và giá trị hợp lệ hoặc ít nhất hai chỉ số thành phần cùng đơn vị.';
+    } else if (item.name === 'info_image' && !suggestion?.popupContent?.imageFields?.length && !suggestion?.hasJoinedImages) unavailableReason = 'Chưa có trường hình ảnh hợp lệ';
+    else if (item.name === 'line') unavailableReason = !time ? 'Cần cột thời gian để vẽ biểu đồ đường' : !hasMeasure ? 'Cần chỉ số đo hợp lệ để vẽ biểu đồ đường' : '';
     return { ...item, available: !unavailableReason, unavailableReason, fallback: false };
   });
   return options.some(item => item.available) ? options
     : [{ name: "info", confidence: null, available: true, unavailableReason: "", fallback: true }];
 }
 
-export function createPopupChartSelection(records, columns, metricField, kind, bindings = {}) {
+export function createPopupChartSelection(records, columns, metricField, kind, bindings = {}, pieBinding = null) {
   columns = popupChartColumns(columns, bindings);
   const time = popupTimeColumn(columns);
   const times = time ? uniqueTimeValues(records, time) : [];
   const metric = columns.find(column => column.name === metricField && column.role === "measure")?.name
     || columns.find(column => column.role === "measure")?.name || "count";
   const range = { from: times.length ? comparableFilterValue(times[0]) : null, to: times.length ? comparableFilterValue(times.at(-1)) : null };
+  if (kind === 'pie') return { ...createPieSelection(columns, metricField, bindings, pieBinding), ...range, from: range.to };
   return kind === "bar"
     ? { variant: "single", metrics: [metric], aggregation: "auto", ...range }
     : { measure: metric, ...range };
@@ -71,6 +83,10 @@ export function buildPopupChart({ records, columns, feature, regionField, kind, 
     selected = selected.filter(record => timeValueInfo(record[time.name], time));
   }
   if (!selected.length) return empty("Không có dữ liệu trong khoảng thời gian đã chọn.");
+  if (kind === 'pie') {
+    try { return { config: buildPieChartData(selected, columns, selection, region, bindings), message: '' }; }
+    catch (error) { return empty(error.message); }
+  }
   const metrics = kind === "line" ? [selection.measure] : selection.metrics;
   const choices = new Set(columns.filter(column => column.role === "measure").map(column => column.name));
   if (kind === "bar") choices.add("count");

@@ -5,13 +5,20 @@ import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegen
 import { normalizeDataSearchConfig } from "../search/data-search-config.js";
 import { COUNTRY_REGION_CATALOG, normalizeRegionNavigation } from "../geography/country-regions.js";
 import { GEOGRAPHIC_SCOPES_SCHEMA } from "../../maps/polygon/scopes.js";
+import { PIE_BINDING_SCHEMA, normalizePieBinding } from '../popup/pie-chart-data.js';
 
 import { POPUP_CONTENT_SCHEMA, normalizePopupContent } from "../popup/popup-content-contract.js";
 import { GEOGRAPHIC_ENRICHMENT_SCHEMA, normalizeGeographicEnrichment, profileWithGeographicEnrichment } from './geographic-enrichment.js';
 
 const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "text", "ignore"]);
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
-const POPUP_TYPES = Object.freeze(["info", "info_image", "bar", "line"]);
+export const POPUP_TYPES = Object.freeze(["info", "info_image", "bar", "line", "pie"]);
+
+export const POPUP_SUGGESTION_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['name', 'confidence', 'pie'],
+  properties: { name: { type: 'string', enum: POPUP_TYPES }, confidence: { type: 'number', minimum: 0, maximum: 1 },
+    pie: { ...PIE_BINDING_SCHEMA, description: 'Bindings biểu đồ tròn theo cột thực tế khi name pie; các popup khác null.' } }
+};
 
 export function normalizePopupSuggestions(raw) {
   const byName = new Map();
@@ -19,7 +26,8 @@ export function normalizePopupSuggestions(raw) {
     if (!item || !POPUP_TYPES.includes(item.name) || !Number.isFinite(item.confidence)
       || item.confidence < 0 || item.confidence > 1) continue;
     const previous = byName.get(item.name);
-    if (!previous || item.confidence > previous.confidence) byName.set(item.name, { name: item.name, confidence: item.confidence });
+    if (!previous || item.confidence > previous.confidence) byName.set(item.name, { name: item.name, confidence: item.confidence,
+      ...(item.name === 'pie' && item.pie ? { pie: normalizePieBinding(item.pie) } : {}) });
   }
   // Map preserves the first occurrence when duplicate entries have their score updated.
   return [...byName.values()].sort((a, b) => b.confidence - a.confidence);
@@ -154,13 +162,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
           },
           popupSuggestions: {
             type: "array", minItems: 1, maxItems: POPUP_TYPES.length,
-            items: {
-              type: "object", additionalProperties: false, required: ["name", "confidence"],
-              properties: {
-                name: { type: "string", enum: POPUP_TYPES },
-                confidence: { type: "number", minimum: 0, maximum: 1 }
-              }
-            }
+            items: POPUP_SUGGESTION_SCHEMA
           }
         }
       }

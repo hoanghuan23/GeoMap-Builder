@@ -31,6 +31,8 @@ import { normalizeBarChartConfig } from "../src/charts/bar-chart.js";
 import { descriptiveColumns, descriptiveCountryFetch, descriptiveRecords, descriptiveSuggestion } from "./fixtures/descriptive-countries-fixture.js";
 import { accessField, accessLegend, categoricalCountryFixture } from "./fixtures/categorical-countries-fixture.js";
 import { analysis as arcAnalysis, row as arcRow, suggestion as arcSuggestion } from "./fixtures/arc-flow-fixture.js";
+import { pieColumns, pieRows, pieSuggestion } from './fixtures/pie-composition-fixture.js';
+import { normalizePieChartConfig } from '../src/charts/pie-chart.js';
 
 class Element {
   constructor() {
@@ -139,7 +141,7 @@ function harness({ road = false, point = false, path = false, thematic = false, 
     ...popupChart, ...pipeline, ...times, ...roadMap, ...coordinates, ...h3Utils, ...pointStyle, ...polygonStyle,  ...polygonLegend, ...legendContract, ...categoricalColor,
     fetch: fetchImpl, requestAiDataAnalysis, profileTabularData, loadAdministrativeBoundaries: boundaryLoader, landOnlyBoundary: boundaryClipper, legendFixture, AI_CHART_REGISTRY, comparableFilterValue, displayFilterValue, createAiPopupContent, createInfoImagePopup, collapseCountryFeatures, joinRecordsToMapTilerBoundaries, administrativeBoundaryLabel, analyzeSpatialData,
     CONFIG: { DEFAULT_RESOLUTION: 5 },
-    BarRenderer: renderer("bar"), LineRenderer: renderer("line"),
+    BarRenderer: renderer("bar"), LineRenderer: renderer("line"), PieRenderer: renderer('pie'),
     humanizeField: field => field, renderMapIcon() {}, renderChartIcon() {}, keepSelectOpenAfterMouseClick: value => value,
     document: { getElementById: get, createElement: () => new Element(), querySelector: () => new Element(), addEventListener() {},
       querySelectorAll: selector => selector === "#polygon-color-ramp .palette" ? palettes : selector.startsWith("#ai-filter-controls ") ? get("ai-filter-controls").querySelectorAll(selector.slice(20))
@@ -857,8 +859,30 @@ test("Polygon, Line and Point show only their AI-ranked popup choices and initia
   }
 });
 
+test('pie popup uses AI fields, changes group selections and releases its renderer on mode changes', () => {
+  const h = harness({ popupSuggestions: pieSuggestion.popupSuggestions });
+  h.dataset.records = structuredClone(pieRows);
+  h.dataset.analysis.columns = structuredClone(pieColumns);
+  h.dataset.suggestions = [{ ...structuredClone(pieSuggestion), id: 'polygon' }];
+  h.dataset.popupSelections = {};
+  h.run('dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]); populateAiFilters(dataset); openMapPopup(testFeatures[0], [105,21]);');
+  assert.equal(h.run('popupSelectionFor().mode'), 'pie');
+  assert.equal(h.rendered.at(-1).kind, 'pie');
+  assert.equal(normalizePieChartConfig(h.rendered.at(-1).config).total, 10000);
+  const total = h.all('.ai-popup-pie-group-value').find(input => input.value === 'Tổng');
+  assert.equal(total.checked, false, 'AI excludes the real total row');
+  const other = h.all('.ai-popup-pie-group-value').find(input => input.value === 'Khác');
+  other.checked = false; h.change(other);
+  assert.equal(normalizePieChartConfig(h.rendered.at(-1).config).total, 9700);
+  const previousClears = h.cleared.length;
+  h.mode('info');
+  assert.equal(h.cleared.length, previousClears + 1);
+  h.mode('pie');
+  assert.equal(normalizePieChartConfig(h.rendered.at(-1).config).total, 9700, 'manual group choices survive mode switches');
+});
+
 test("missing, invalid or entirely impossible popup proposals show only unscored information fallback", () => {
-  for (const popupSuggestions of [null, [], [{ name: "pie", confidence: .99 }], [{ name: "info", confidence: "1" }]]) {
+  for (const popupSuggestions of [null, [], [{ name: "scatter", confidence: .99 }], [{ name: "info", confidence: "1" }]]) {
     const h = harness({ popupSuggestions });
     assert.deepEqual(h.all(".ai-popup-type").map(button => button.dataset.popupMode), ["info"]);
     assert.equal(h.all(".ai-popup-type")[0].children[1].children[0].textContent, "Hiển thị mặc định");

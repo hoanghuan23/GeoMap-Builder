@@ -1,5 +1,5 @@
 export const TEMPLATE_SLOTS = ['map', 'search', 'metrics', 'legend', 'controls', 'attribution', 'status'];
-export const TEMPLATE_POPUP_KINDS = ['info', 'info_image', 'bar', 'line'];
+export const TEMPLATE_POPUP_KINDS = ['info', 'info_image', 'bar', 'line', 'pie'];
 
 const validCss = value => typeof value === 'string' && value.length <= 100_000
   && !/@import\b|@font-face\b|url\s*\(|expression\s*\(|-moz-binding\b/i.test(value);

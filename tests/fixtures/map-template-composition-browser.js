@@ -1,6 +1,9 @@
 import { createMapTemplateRenderer } from '../../src/map-template-renderer.js';
 import { BarRenderer } from '../../src/charts/bar-chart.js';
 import { LineRenderer } from '../../src/charts/line-chart.js';
+import { PieRenderer } from '../../src/charts/pie-chart.js';
+import { buildPopupChart, createPopupChartSelection } from '../../src/shared/popup/ai-popup-chart.js';
+import { pieColumns, pieRows, pieBinding, pieSuggestion } from './pie-composition-fixture.js';
 import { createMapLayerManager } from '../../src/map-layer-manager.js';
 import { createMapProcessingStatus } from '../../src/shared/ui/map-processing-status.js';
 import { createAiPopupContent } from '../../src/shared/popup/ai-popup.js';
@@ -17,8 +20,10 @@ const slots = ['map', 'search', 'metrics', 'legend', 'controls', 'attribution', 
 const html = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 3 21 8l-9 5-9-5 9-5Z"></path></svg>`
   + slots.map(slot => slot === 'attribution'
     ? '<aside class="attribution-frame"><div class="attribution-inner"><div class="slot-attribution" data-template-slot="attribution"></div></div></aside>'
+    : slot === 'search' ? '<aside class="search-frame"><div class="search-inner"><div class="slot-search" data-template-slot="search"></div></div></aside>'
     : `<div class="slot-${slot}" data-template-slot="${slot}"></div>`).join('');
-const attributionCss = '.attribution-frame{position:absolute;bottom:12px;left:12px;padding:8px 12px;background:#35312d;display:block!important}.attribution-inner{padding:2px;background:#35312d}';
+const attributionCss = '.attribution-frame{position:absolute;bottom:12px;left:12px;padding:8px 12px;background:#35312d;display:block!important}.attribution-inner{padding:2px;background:#35312d}'
+  + '.search-frame{position:absolute;top:12px;left:12px;padding:8px;background:#142136;display:block!important}.search-inner{padding:2px;background:#142136}';
 const component = { kind: 'line', origin: 'generated', html: '<div></div>', css: 'body{color:#123456}',
   js: 'window.renderTemplateComponent=({root,chart})=>{root.textContent=chart.title;document.body.style.height="310px";};' };
 const source = { template: 'mau_01', html: '<main id="map"></main>', css: '#map{}', js: 'throw Error("never execute raw template")' };
@@ -192,6 +197,21 @@ async function run() {
   assert(getComputedStyle(shell.querySelector('.attribution-frame')).display === 'none', 'Hidden attribution left a background wrapper visible');
   assert(shell.querySelector('.attribution-frame').getBoundingClientRect().width === 0, 'Attribution frame left an empty corner block');
   assert(getComputedStyle(shell.querySelector('[data-template-slot="controls"]')).display !== 'none', 'Hiding attribution removed other controls');
+  const searchFrame = shell.querySelector('.search-frame');
+  const searchPanel = shell.querySelector('.map-query-panel');
+  searchPanel.hidden = true;
+  assert(getComputedStyle(searchFrame).display === 'none' && searchFrame.getBoundingClientRect().height === 0,
+    'Disabled search left padded template wrappers visible');
+  assert(getComputedStyle(shell.querySelector('[data-template-slot="map"]')).display !== 'none', 'Hiding search removed the map');
+  assert(getComputedStyle(shell.querySelector('[data-template-slot="controls"]')).display !== 'none', 'Hiding search removed shared controls');
+  searchPanel.hidden = false;
+  assert(getComputedStyle(searchFrame).display !== 'none', 'Re-enabling search did not restore the template frame');
+  const searchParent = searchFrame.parentNode, searchAnchor = searchFrame.nextSibling;
+  const mapSlot = shell.querySelector('[data-template-slot="map"]');
+  mapSlot.append(searchFrame); searchPanel.hidden = true;
+  assert(getComputedStyle(mapSlot).display !== 'none', 'Hiding repositioned search removed its map region');
+  assert(getComputedStyle(searchFrame).display === 'none', 'Repositioned search retained an empty frame');
+  searchPanel.hidden = false; searchParent.insertBefore(searchFrame, searchAnchor);
   assert(!panel.hasAttribute('data-template-loading') && notice.textContent === 'Đã phân tích dữ liệu.', 'Combined waiting notice did not finish after mounting');
   processingStatus.set('');
   assert(shell.getBoundingClientRect().width <= innerWidth + 1, 'Template overflows the viewport');
@@ -474,6 +494,33 @@ async function run() {
     chartRenderer.clear(chartHost);
     assert(!chartHost.childElementCount, 'Native chart did not unmount cleanly');
   }
+  chartHost.classList.add('ai-popup-pie-chart');
+  const pie = buildPopupChart({ records: pieRows, columns: pieColumns, feature: { properties: { region: 'A' } },
+    regionField: 'region', kind: 'pie', bindings: pieSuggestion.bindings,
+    selection: createPopupChartSelection(pieRows, pieColumns, 'trips', 'pie', pieSuggestion.bindings, pieBinding) });
+  PieRenderer.render(chartHost, pie.config);
+  for (let attempt = 0; attempt < 100 && chartHost.querySelectorAll('.recharts-pie-sector').length !== 5; attempt++) await wait(25);
+  assert(chartHost.querySelectorAll('.recharts-pie-sector').length === 5, 'Template pie did not render its real slices');
+  const pieCard = chartHost.firstElementChild;
+  for (const theme of themes) {
+    for (const key of ['surface', 'text', 'secondary', 'border']) floatingShell.style.setProperty(`--template-${key}`, theme[key]);
+    popupContent.style.background = theme.surface; popupContent.style.color = theme.text;
+    await wait(80);
+    assert(chartHost.firstElementChild === pieCard, 'Theme changes remounted the pie chart');
+    assert(getComputedStyle(pieCard).backgroundColor === theme.rgb, 'Pie card did not follow the template surface');
+    assert(getComputedStyle(chartHost.querySelector('.pie-chart-table')).color === getComputedStyle(popupContent).color, 'Pie table lost contrast');
+    assert(chartHost.scrollWidth <= chartHost.clientWidth + 1, 'Pie popup needs horizontal scrolling');
+    assert(chartHost.querySelector('.pie-chart-plot').clientHeight >= 180, 'Template pie plot collapsed');
+    assert(chartHost.querySelectorAll('.pie-chart-legend li').length === 5, 'Template replaced actual pie labels');
+    const sector = chartHost.querySelector('.recharts-pie-sector');
+    sector.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 200, clientY: 200 }));
+    for (let attempt = 0; attempt < 40 && !chartHost.querySelector('.pie-chart-tooltip'); attempt++) await wait(25);
+    const tooltip = chartHost.querySelector('.pie-chart-tooltip');
+    assert(tooltip?.textContent.includes('50%') && tooltip.textContent.includes('5.000'), 'Template pie tooltip lost its real value or percentage');
+    assert(getComputedStyle(tooltip).backgroundColor === theme.rgb, 'Pie tooltip did not follow the template surface');
+  }
+  PieRenderer.clear(chartHost); chartHost.classList.remove('ai-popup-pie-chart');
+  assert(!chartHost.childElementCount, 'Pie renderer did not unmount cleanly');
   assert(JSON.stringify(data) === originalData, 'Template changed chart data');
   for (const key of ['surface', 'text', 'secondary', 'border', 'font', 'label-size']) floatingShell.style.removeProperty(`--template-${key}`);
   popup.remove();

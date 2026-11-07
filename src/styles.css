@@ -1654,6 +1654,7 @@ input[type=range] {
 }
 
 .map-search { width: 100%; }
+.map-query-panel[hidden], .map-search[hidden] { display: none !important; }
 
 .map-query-panel:has(.map-region-navigation:not([hidden])) {
     width: min(550px, calc(100% - 240px));
@@ -2578,6 +2579,23 @@ input[type=range] {
 .ai-popup-chart .bar-chart-heading h2 { font-size: 12px; }
 .ai-popup-chart .bar-chart-plot { min-height: 0; margin-top: 6px; }
 .ai-popup-chart .chart-zoom-controls button { width: 24px; height: 25px; }
+.ai-popup-pie-chart { height: auto; }
+.pie-chart-card { gap: 14px; font-family: var(--template-font, inherit); }
+.pie-chart-card .bar-chart-heading { flex: 0 0 auto; }
+.pie-chart-table-scroll { max-height: 190px; overflow: auto; flex: 0 0 auto; }
+.pie-chart-table { width: 100%; border-collapse: collapse; font-size: var(--template-label-size, 12px); color: inherit; }
+.pie-chart-table caption { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.pie-chart-table th, .pie-chart-table td { padding: 8px 6px; border-bottom: 1px solid var(--template-border, #edf0f3); text-align: right; white-space: nowrap; }
+.pie-chart-table th:first-child { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.pie-chart-table tbody th { font-weight: 400; }
+.pie-chart-table tfoot th, .pie-chart-table tfoot td { font-weight: 600; border-bottom: 0; }
+.pie-chart-plot { height: 230px; min-width: 0; flex: 0 0 auto; }
+.pie-chart-legend { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 16px; list-style: none; margin: 0; padding: 0; max-height: 90px; overflow-y: auto; flex: 0 0 auto; }
+.pie-chart-legend button { display: flex; align-items: center; gap: 6px; padding: 4px 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.pie-chart-legend button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.pie-chart-legend i, .pie-chart-tooltip i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.pie-chart-tooltip { padding: 9px 12px; background: var(--template-surface, #fff); color: var(--template-text, #222); border: 1px solid var(--template-border, #e2e8f0); border-radius: var(--template-radius, 8px); box-shadow: var(--template-shadow, 0 4px 12px #0001); font-family: var(--template-font, inherit); font-size: var(--template-label-size, 12px); line-height: 1.6; }
+.pie-chart-tooltip div { display: flex; align-items: center; gap: 6px; }
 .ai-weather-popup .maplibregl-popup-tip { display: none; }
 /* The popup frame owns its theme. Details and actions inherit it so switching
    the frame's surface does not leave dark chips, cards or close buttons. */

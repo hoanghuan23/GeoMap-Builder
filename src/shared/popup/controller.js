@@ -2,6 +2,8 @@ import { mapRegistry } from '../../maps/registry.js';
 import { visibleDatasetColumns } from '../data/display-fields.js';
 import { BarRenderer as default_BarRenderer } from "../../charts/bar-chart.js";
 import { LineRenderer as default_LineRenderer } from "../../charts/line-chart.js";
+import { PieRenderer as default_PieRenderer } from '../../charts/pie-chart.js';
+import { pieChartFields } from './pie-chart-data.js';
 import { humanizeField as default_humanizeField } from "../../charts/data-transformers.js";
 import { renderChartIcon as default_renderChartIcon } from "../../charts/chart-icons.js";
 import { comparableFilterValue as default_comparableFilterValue } from "../import/ai-data-analysis.js";
@@ -31,6 +33,7 @@ export function createController(context) {
   const BarRenderer = context.dependencies?.BarRenderer ?? default_BarRenderer;
 
   const LineRenderer = context.dependencies?.LineRenderer ?? default_LineRenderer;
+  const PieRenderer = context.dependencies?.PieRenderer ?? default_PieRenderer;
 
   const humanizeField = (...args) => (context.dependencies?.humanizeField ?? default_humanizeField)(...args);
 
@@ -110,7 +113,7 @@ export function createController(context) {
   }
 
   function chartRenderer(kind) {
-    return kind === "line" ? LineRenderer : BarRenderer;
+    return kind === 'pie' ? PieRenderer : kind === "line" ? LineRenderer : BarRenderer;
   }
 
   function aiWeatherPopupContent(feature) {
@@ -148,11 +151,12 @@ export function createController(context) {
     dataset.popupSelections ||= {};
     const columns = visibleDatasetColumns(dataset);
     const available = popupDisplayOptions(suggestion, columns).filter(item => item.available);
-    const selection = dataset.popupSelections[suggestion.id] ||= { mode: available[0].name, bar: null, line: null };
+    const selection = dataset.popupSelections[suggestion.id] ||= { mode: available[0].name, bar: null, line: null, pie: null };
     if (!available.some(item => item.name === selection.mode)) selection.mode = available[0].name;
-    if (["bar", "line"].includes(selection.mode) && !selection[selection.mode]) {
+    if (["bar", "line", "pie"].includes(selection.mode) && !selection[selection.mode]) {
       const metric = context.modules.active()?.metricField();
-      selection[selection.mode] = createPopupChartSelection(dataset.records, columns, metric, selection.mode, suggestion.bindings);
+      selection[selection.mode] = createPopupChartSelection(dataset.records, columns, metric, selection.mode, suggestion.bindings,
+        available.find(option => option.name === 'pie')?.pie);
     }
     if (dataset.hiddenMetricFields?.length) {
       const measures = new Set(popupChartColumns(columns, suggestion.bindings).filter(column => column.role === 'measure').map(column => column.name));
@@ -162,6 +166,10 @@ export function createController(context) {
         if (selection.bar.metrics.length < 2) selection.bar.variant = 'single';
       }
       if (selection.line && !measures.has(selection.line.measure)) selection.line.measure = createPopupChartSelection(dataset.records, columns, context.modules.active()?.metricField(), 'line', suggestion.bindings).measure;
+      if (selection.pie) {
+        selection.pie.metrics = selection.pie.metrics.filter(field => measures.has(field));
+        if (selection.pie.measure !== 'count' && !measures.has(selection.pie.measure)) selection.pie.measure = [...measures][0] || 'count';
+      }
     }
     return selection;
   }
@@ -185,7 +193,7 @@ export function createController(context) {
     clearMapPopupChart(view);
     const dataset = state.aiDataset;
     const selection = popupSelectionFor();
-    const chartMode = ["bar", "line"].includes(selection.mode);
+    const chartMode = ["bar", "line", "pie"].includes(selection.mode);
     const joined = options.popupSources?.(view.feature) || [];
     let card;
     if (selection.mode === "info_image") {
@@ -218,7 +226,7 @@ export function createController(context) {
         kind: selection.mode, selection: selection[selection.mode], chartType: view.arcInfo ? "choropleth" : activeMapPopupSuggestion().chartType,
         bindings: view.arcInfo ? {} : activeMapPopupSuggestion().bindings });
       const container = document.createElement("div");
-      container.className = chart.config ? "ai-popup-chart" : "weather-popup-status";
+      container.className = chart.config ? `ai-popup-chart${selection.mode === 'pie' ? ' ai-popup-pie-chart' : ''}` : "weather-popup-status";
       if (!chart.config) { container.textContent = chart.message; container.setAttribute("role", "status"); }
       else { view.chartContainer = container; view.chartKind = selection.mode; }
       card.append(container);
@@ -301,7 +309,8 @@ export function createController(context) {
       info: ["Chỉ hiển thị thông tin", "Hiển thị các chỉ số dưới dạng thẻ thông tin", null],
       info_image: ["Thông tin kèm hình ảnh", "Xem hình ảnh và thông tin của đối tượng", "image"],
       bar: ["Biểu đồ cột", `Hiển thị biểu đồ cột của ${subject} được chọn`, "singleBar"],
-      line: ["Biểu đồ đường", `Hiển thị biểu đồ đường của ${subject} được chọn`, "line"]
+      line: ["Biểu đồ đường", `Hiển thị biểu đồ đường của ${subject} được chọn`, "line"],
+      pie: ['Biểu đồ tròn', 'Tỷ trọng các nhóm thành phần trong một tổng thể 100%', 'pie']
     };
     for (const option of popupDisplayOptions(suggestion, columns)) {
       const mode = option.name;
@@ -330,7 +339,7 @@ export function createController(context) {
     }
     group.append(caption, types);
     const nodes = [group];
-    if (["bar", "line"].includes(selection.mode)) nodes.push(buildMapPopupSettings(dataset, selection));
+    if (["bar", "line", "pie"].includes(selection.mode)) nodes.push(buildMapPopupSettings(dataset, selection));
     return nodes;
   }
 
@@ -338,6 +347,35 @@ export function createController(context) {
     const settings = document.createElement("div"); settings.className = "ai-popup-settings";
     const columns = popupChartColumns(visibleDatasetColumns(dataset), activeMapPopupSuggestion()?.bindings);
     const config = selection[selection.mode];
+    if (selection.mode === 'pie') {
+      const { groups, measures } = pieChartFields(columns, activeMapPopupSuggestion()?.bindings);
+      settings.append(services.ui.aiField('Chia thành phần theo', services.ui.aiSelect('ai-popup-pie-group',
+        [...groups.map(column => [column.name, column.labelVi || humanizeField(column.name)]), ['', 'Các chỉ số cùng đơn vị']], config.groupField)));
+      if (config.groupField) {
+        settings.append(services.ui.aiField('Giá trị thành phần', services.ui.aiSelect('ai-popup-metric',
+          [...measures.map(column => [column.name, column.labelVi || humanizeField(column.name)]), ['count', 'Số bản ghi']], config.measure)));
+        const values = [...new Set(dataset.records.map(record => record[config.groupField]).filter(value => value != null && String(value).trim()).map(String))];
+        const picker = document.createElement('div'); picker.className = 'ai-bar-metric-list';
+        for (const value of values) {
+          const input = document.createElement('input'); input.type = 'checkbox'; input.className = 'ai-popup-pie-group-value';
+          input.value = value; input.checked = !config.excludedValues.includes(value);
+          const label = document.createElement('label'); const text = document.createElement('span'); text.textContent = value;
+          label.append(input, text); picker.append(label);
+        }
+        settings.append(services.ui.aiField('Nhóm đưa vào tổng thể', picker));
+      } else {
+        const picker = document.createElement('div'); picker.className = 'ai-bar-metric-list';
+        for (const column of measures) {
+          const input = document.createElement('input'); input.type = 'checkbox'; input.className = 'ai-popup-pie-metric';
+          input.value = column.name; input.checked = config.metrics.includes(column.name);
+          const label = document.createElement('label'); const text = document.createElement('span'); text.textContent = column.labelVi || humanizeField(column.name);
+          label.append(input, text); picker.append(label);
+        }
+        settings.append(services.ui.aiField('Chỉ số thành phần (cùng đơn vị)', picker));
+      }
+      settings.append(services.ui.aiField('Cách tính từng thành phần', services.ui.aiSelect('ai-popup-aggregation',
+        [['auto', 'Theo dữ liệu'], ['sum', 'Tổng (SUM)'], ['mean', 'Trung bình (AVG)'], ['min', 'Nhỏ nhất (MIN)'], ['max', 'Lớn nhất (MAX)']], config.aggregation)));
+    }
     if (selection.mode === "bar") {
       const variants = document.createElement("div"); variants.className = "ai-bar-chart-types";
       for (const [variant, label, iconName] of [["single", "Cột đơn", "singleBar"], ["grouped", "Cột ghép", "groupedBar"]]) {
@@ -349,21 +387,23 @@ export function createController(context) {
       }
       settings.append(services.ui.aiField("Hình thức hiển thị", variants));
     }
-    const metrics = selection.mode === "bar" ? barMetricOptions(columns)
-      : columns.filter(column => column.role === "measure").map(column => ({ key: column.name, label: column.labelVi || humanizeField(column.name) }));
-    if (selection.mode === "bar" && config.variant === "grouped") {
-      const picker = document.createElement("div"); picker.className = "ai-bar-metric-list";
-      for (const metric of metrics) {
-        const input = document.createElement("input"); input.type = "checkbox";
-        input.className = "ai-popup-metric-checkbox"; input.value = metric.key; input.checked = config.metrics.includes(metric.key);
-        const label = document.createElement("label"); const text = document.createElement("span"); text.textContent = metric.label;
-        label.append(input, text); picker.append(label);
-      }
-      const field = document.createElement("div"); field.className = "ai-control-group";
-      const caption = document.createElement("span"); caption.textContent = "Chỉ số (tối thiểu 2)";
-      field.append(caption, picker); settings.append(field);
-    } else settings.append(services.ui.aiField("Chỉ số biểu đồ", services.ui.aiSelect("ai-popup-metric", metrics.map(item => [item.key, item.label]),
-      selection.mode === "bar" ? config.metrics[0] : config.measure)));
+    if (selection.mode !== 'pie') {
+      const metrics = selection.mode === "bar" ? barMetricOptions(columns)
+        : columns.filter(column => column.role === "measure").map(column => ({ key: column.name, label: column.labelVi || humanizeField(column.name) }));
+      if (selection.mode === "bar" && config.variant === "grouped") {
+        const picker = document.createElement("div"); picker.className = "ai-bar-metric-list";
+        for (const metric of metrics) {
+          const input = document.createElement("input"); input.type = "checkbox";
+          input.className = "ai-popup-metric-checkbox"; input.value = metric.key; input.checked = config.metrics.includes(metric.key);
+          const label = document.createElement("label"); const text = document.createElement("span"); text.textContent = metric.label;
+          label.append(input, text); picker.append(label);
+        }
+        const field = document.createElement("div"); field.className = "ai-control-group";
+        const caption = document.createElement("span"); caption.textContent = "Chỉ số (tối thiểu 2)";
+        field.append(caption, picker); settings.append(field);
+      } else settings.append(services.ui.aiField("Chỉ số biểu đồ", services.ui.aiSelect("ai-popup-metric", metrics.map(item => [item.key, item.label]),
+        selection.mode === "bar" ? config.metrics[0] : config.measure)));
+    }
     if (selection.mode === "bar") {
       const aggregation = services.ui.aiSelect("ai-popup-aggregation", [["auto", "Theo dữ liệu"], ["sum", "Tổng (SUM)"],
         ["mean", "Trung bình (AVG)"], ["min", "Nhỏ nhất (MIN)"], ["max", "Lớn nhất (MAX)"]], config.aggregation);
@@ -394,7 +434,17 @@ export function createController(context) {
     const selection = popupSelectionFor();
     const config = selection[selection.mode];
     if (!config) return;
-    if (control.matches(".ai-popup-metric")) {
+    if (control.matches('.ai-popup-pie-group')) {
+      config.groupField = control.value; config.excludedValues = []; config.title = '';
+    } else if (control.matches('.ai-popup-pie-group-value')) {
+      const excluded = new Set(config.excludedValues);
+      if (control.checked) excluded.delete(control.value); else excluded.add(control.value);
+      config.excludedValues = [...excluded];
+    } else if (control.matches('.ai-popup-pie-metric')) {
+      const checked = [...document.querySelectorAll('#ai-filter-controls .ai-popup-pie-metric:checked')];
+      if (checked.length < 2) { control.checked = true; services.ui.showToast('Biểu đồ tròn cần ít nhất hai chỉ số thành phần.'); return; }
+      config.metrics = checked.map(input => input.value);
+    } else if (control.matches(".ai-popup-metric")) {
       if (selection.mode === "bar") { config.metrics = [control.value]; config.aggregation = "auto"; }
       else config.measure = control.value;
     } else if (control.matches(".ai-popup-metric-checkbox")) {

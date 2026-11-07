@@ -116,10 +116,10 @@ test("popup recommendations have a compact per-map schema and survive server/cli
   const suggestionSchema = ANALYSIS_RESPONSE_SCHEMA.properties.suggestions.items;
   assert.ok(suggestionSchema.required.includes("popupSuggestions"));
   const schema = suggestionSchema.properties.popupSuggestions;
-  assert.equal(schema.minItems, 1); assert.equal(schema.maxItems, 4);
-  assert.deepEqual(schema.items.required, ["name", "confidence"]);
+  assert.equal(schema.minItems, 1); assert.equal(schema.maxItems, 5);
+  assert.deepEqual(schema.items.required, ["name", "confidence", "pie"]);
   assert.equal(schema.items.additionalProperties, false);
-  assert.deepEqual(schema.items.properties.name.enum, ["info", "info_image", "bar", "line"]);
+  assert.deepEqual(schema.items.properties.name.enum, ["info", "info_image", "bar", "line", "pie"]);
   assert.equal(schema.items.properties.confidence.minimum, 0);
   assert.equal(schema.items.properties.confidence.maximum, 1);
   const dataProfile = { ...profile, columns: [...profile.columns,
@@ -143,7 +143,7 @@ test("popup normalization drops invalid entries, keeps the best duplicate and pr
     bindings: { region: "province", value: "temperature" }, popupSuggestions: [
       { name: "line", confidence: .4 }, { name: "info", confidence: .8, reason: "discard extra keys" },
       { name: "bar", confidence: .8 }, { name: "line", confidence: .8 }, { name: "bar", confidence: .6 },
-      { name: "pie", confidence: 1 }, { name: "info", confidence: "1" }, { name: "bar", confidence: -1 },
+      { name: "scatter", confidence: 1 }, { name: "info", confidence: "1" }, { name: "bar", confidence: -1 },
       { name: "line", confidence: 1.1 }, { name: "info", confidence: NaN }, { name: "bar", confidence: Infinity },
       { name: "line", confidence: true }, null, "info", {}
     ] }] };
@@ -157,7 +157,7 @@ test("popup normalization drops invalid entries, keeps the best duplicate and pr
 });
 
 test("missing or invalid popup output keeps valid maps and normalizes to an empty fallback list", () => {
-  for (const popupSuggestions of [undefined, null, [], {}, "line", [{ name: "pie", confidence: .9 }]]) {
+  for (const popupSuggestions of [undefined, null, [], {}, "line", [{ name: "scatter", confidence: .9 }]]) {
     const result = normalizeFixture({ columns: [], suggestions: [{ id: "map", chartType: "choropleth",
       bindings: { region: "province", value: "temperature" }, popupSuggestions }] }, profile);
     assert.equal(result.source, "ai"); assert.equal(result.suggestions[0].id, "map");

@@ -219,12 +219,13 @@ test("middleware forwards per-column temperature semantics and legends without c
     assert.match(payload.instructions, /Đặt tên định danh chính ở đầu/);
     const suggestionSchema = payload.text.format.schema.properties.suggestions.items;
     assert.ok(suggestionSchema.required.includes("popupSuggestions"));
-    assert.deepEqual(suggestionSchema.properties.popupSuggestions.items.required, ["name", "confidence"]);
+    assert.deepEqual(suggestionSchema.properties.popupSuggestions.items.required, ["name", "confidence", "pie"]);
     assert.ok(suggestionSchema.required.includes("metricButtons"));
     assert.deepEqual(suggestionSchema.properties.metricButtons.items.required, ["field", "label", "icon", "color"]);
     assert.match(payload.instructions, /AI quyết định các chỉ số cần nút chọn nhanh/);
     assert.match(payload.instructions, /Trả metricButtons trong cùng request phân tích/);
-    assert.match(payload.instructions, /bar\/line được phép trong popupSuggestions/);
+    assert.match(payload.instructions, /bar\/line\/pie được phép trong popupSuggestions/);
+    assert.match(payload.instructions, /Ưu tiên pie.*100%/);
     assert.match(payload.instructions, /MỘT đối tượng được bấm/);
     return { ok: true, json: async () => ({ output_text: JSON.stringify({
       search_bar: true, search_fields: ["province", "temperature", "not_in_input", "province"],

@@ -1,5 +1,5 @@
 import { POPUP_CONTENT_SCHEMA, normalizePopupContent } from "./shared/popup/popup-content-contract.js";
-import { normalizePopupSuggestions } from "./shared/import/ai-chart-contract.js";
+import { normalizePopupSuggestions, POPUP_TYPES, POPUP_SUGGESTION_SCHEMA } from './shared/import/ai-chart-contract.js';
 
 const nullableString = { anyOf: [{ type: 'string', maxLength: 160 }, { type: 'null' }] };
 export const MAP_COMPOSITION_SCHEMA = {
@@ -25,10 +25,7 @@ export const MAP_COMPOSITION_SCHEMA = {
           type: 'object', additionalProperties: false, required: ['sourceField', 'targetField'],
           properties: { sourceField: { type: 'string', maxLength: 160 }, targetField: { type: 'string', maxLength: 160 } }
         } },
-        popupSuggestions: { type: 'array', maxItems: 4, items: {
-          type: 'object', additionalProperties: false, required: ['name', 'confidence'],
-          properties: { name: { type: 'string', enum: ['info', 'info_image', 'bar', 'line'] }, confidence: { type: 'number', minimum: 0, maximum: 1 } }
-        } },
+        popupSuggestions: { type: 'array', maxItems: POPUP_TYPES.length, items: POPUP_SUGGESTION_SCHEMA },
         popupContent: POPUP_CONTENT_SCHEMA,
         confidence: { type: 'number', minimum: 0, maximum: 1 }, reason: { type: 'string', maxLength: 800 }
       }

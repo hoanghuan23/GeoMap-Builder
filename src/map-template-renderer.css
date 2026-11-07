@@ -7,6 +7,10 @@
 .map-template-shell [data-template-slot="controls"],
 .map-template-shell [data-template-slot="attribution"] { pointer-events: auto; }
 .map-template-shell [data-template-slot="attribution"]:has(> .map-attribution[hidden]) { display: none !important; }
+/* A search frame may have its own padding, background and shadow. Hide every
+   dedicated wrapper, stopping before any layout shared with another slot. */
+.map-template-shell:not(#map-template-native-styles) [data-template-slot="search"]:has(> .map-query-panel[hidden]):not(:has(#map, [data-template-slot]:not([data-template-slot="search"]))),
+.map-template-shell:not(#map-template-native-styles) :not([data-template-slot]):has([data-template-slot="search"] > .map-query-panel[hidden]):not(:has(#map, [data-template-slot]:not([data-template-slot="search"]))) { display: none !important; }
 .content-area[data-template-active="true"] .map-panel { margin: 0; border: 0; border-radius: 0; }
 .content-area[data-template-rendered="true"] .map-template-shell .map-metric-preview { background: var(--metric-color) !important; }
 /* Numeric ticks keep the data renderer's geometry. At left:100%, an auto-sized
@@ -280,6 +284,7 @@
     height: min(320px, max(220px, calc(var(--popup-map-height, 640px) - 80px)));
     min-width: 0;
   }
+  :where(.ai-popup-chart.ai-popup-pie-chart) { height: auto; }
   :where(.ai-popup-chart .bar-chart-card) {
     background: var(--template-surface, #fff);
     color: var(--template-text, #1d2939);

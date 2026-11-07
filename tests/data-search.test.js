@@ -48,6 +48,7 @@ function harness(t, options = {}) {
     return elements.get(id);
   };
   const previous = globalThis.document;
+  get('map-search').closest = selector => selector === '.map-query-panel' ? get('map-query-panel') : null;
   globalThis.document = { ...element(), getElementById: get, createElement: element };
   t.after(() => {
     if (previous === undefined) delete globalThis.document;
@@ -114,9 +115,29 @@ test("region dropdown filters actual polygon sources and search, then restores t
   controller.setData({ ...config, search_bar: false });
   assert.equal(get('map-search-box').hidden, true);
   assert.equal(select.hidden, false);
+  assert.equal(get('map-query-panel').hidden, false, 'region navigation remains visible independently of search');
   controller.setData();
   assert.equal(get('map-search').hidden, true);
+  assert.equal(get('map-query-panel').hidden, true);
   assert.equal(select.hidden, true);
+});
+
+test('AI-disabled search hides its entire frame and restores it only for a searchable layer', t => {
+  const { controller, get } = harness(t);
+  const snapshot = countryData();
+  assert.equal(get('map-query-panel').hidden, true, 'no empty search frame before loading');
+  const disabled = { ...snapshot, search_bar: false, search_fields: [] };
+  controller.setData(disabled);
+  assert.equal(get('map-search').hidden, true);
+  assert.equal(get('map-query-panel').hidden, true);
+  controller.setVisible(false); controller.setVisible(true);
+  assert.equal(get('map-query-panel').hidden, true, 'restoring the map must respect AI false');
+  controller.setData({ layers: [{ ...disabled, layerId: 'off' }, { ...snapshot, search_bar: true, layerId: 'on' }] });
+  assert.equal(get('map-query-panel').hidden, false);
+  controller.setData({ layers: [{ ...disabled, layerId: 'off' }] });
+  assert.equal(get('map-query-panel').hidden, true, 'switching back clears the whole visible frame');
+  controller.destroy();
+  assert.equal(get('map-query-panel').hidden, true);
 });
 
 test("group dropdown applies a common region to all layers and keeps choices available for empty intersections", t => {

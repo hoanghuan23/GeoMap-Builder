@@ -416,7 +416,7 @@ export function createController(context) {
     });
 
     $("ai-filter-controls").addEventListener("change", async event => {
-      if (event.target.matches(".ai-popup-metric, .ai-popup-metric-checkbox, .ai-popup-aggregation, .ai-popup-range")) {
+      if (event.target.matches(".ai-popup-metric, .ai-popup-metric-checkbox, .ai-popup-aggregation, .ai-popup-range, .ai-popup-pie-group, .ai-popup-pie-group-value, .ai-popup-pie-metric")) {
         services.popup.changeMapPopupControl(event.target);
         return;
       }

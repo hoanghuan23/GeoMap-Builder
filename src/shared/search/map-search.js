@@ -625,6 +625,11 @@ export function createMapSearch({ map, onSelect = null, onRegionChange = null, m
   const searchBox = document.getElementById("map-search-box");
   const navigation = document.getElementById("map-region-navigation");
   if (!root || !form || !input || !results || !clearButton) return { setData() {}, setVisible() {}, destroy() {} };
+  const panel = root.closest?.('.map-query-panel');
+  const hideSearch = hidden => {
+    root.hidden = hidden;
+    if (panel) panel.hidden = hidden;
+  };
 
   let index = { entries: [] };
   let matches = [];
@@ -671,7 +676,7 @@ export function createMapSearch({ map, onSelect = null, onRegionChange = null, m
       : buildDataSearchIndex({ ...layers[0], minFilteredObjects });
     reset();
     renderRegions();
-    root.hidden = !index.enabled && !regions.length;
+    hideSearch(!index.enabled && !regions.length);
     if (searchBox) searchBox.hidden = !index.enabled;
     input.disabled = !index.enabled;
     input.placeholder = index.placeholder;
@@ -776,7 +781,7 @@ export function createMapSearch({ map, onSelect = null, onRegionChange = null, m
     ...(navigation ? [[navigation, "change", changeRegion]] : [])
   ];
   listeners.forEach(([element, event, handler]) => element.addEventListener(event, handler));
-  root.hidden = true;
+  hideSearch(true);
   input.disabled = true;
   reset();
 
@@ -810,7 +815,7 @@ export function createMapSearch({ map, onSelect = null, onRegionChange = null, m
       index = { entries: [] };
       regions = []; regionId = ""; renderRegions();
       reset();
-      root.hidden = true;
+      hideSearch(true);
       input.disabled = true;
     }
   };

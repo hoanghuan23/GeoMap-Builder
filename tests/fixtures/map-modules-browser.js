@@ -5,6 +5,9 @@ import { analysis as arcAnalysis, row as arcRow, suggestion as arcSuggestion } f
 import { createAiMapEditor } from '../../src/ai-map-editor.js';
 import { initializeAiSupport } from '../../src/ai-support.js';
 import { weatherEditColumns, weatherEditRows, weatherEditSuggestion } from './map-edit-weather.js';
+import { pieColumns, pieRows, pieSuggestion } from './pie-composition-fixture.js';
+import '../../src/styles.css';
+import { createMapSearch } from '../../src/shared/search/map-search.js';
 
 // Exercise actual module controls and DOM namespaces without network AI or GPU dependencies.
 const result = document.getElementById('module-result');
@@ -78,6 +81,21 @@ try {
     assert(canvas.getCanvas().getContext('webgl2'), 'WebGL2 unavailable');
     overlay = createArcFlowOverlayManager(canvas, { onError: error => graphicsErrors.push(error.message) });
   }
+  stage('search-visibility');
+  const searchPanel = document.querySelector('.map-query-panel');
+  searchPanel.style.cssText = 'padding:8px;background:#142136;box-shadow:0 4px 16px #0008';
+  const dataSearch = createMapSearch({ map: canvas });
+  const searchData = { data: { type: 'FeatureCollection', features: ['A', 'B'].map((name, index) => ({
+    type: 'Feature', properties: { name }, geometry: { type: 'Point', coordinates: [105 + index, 21] }
+  })) }, columns: [{ name: 'name', role: 'category' }], search_bar: false, search_fields: ['name'] };
+  dataSearch.setData(searchData);
+  assert(getComputedStyle(searchPanel).display === 'none' && searchPanel.getBoundingClientRect().height === 0,
+    'AI-disabled search left a painted empty frame visible');
+  dataSearch.setData({ ...searchData, search_bar: true });
+  assert(getComputedStyle(searchPanel).display !== 'none', 'AI-enabled search did not restore its frame');
+  dataSearch.setData(searchData);
+  assert(getComputedStyle(searchPanel).display === 'none', 'Changing back to AI false left an empty search bar');
+  dataSearch.destroy(); searchPanel.removeAttribute('style');
   const published = new Map(); const entries = [];
   const build = id => {
     const dom = createLayerDocument(document, id, templates);
@@ -93,7 +111,7 @@ try {
   };
   const pipeline = (records, columns, suggestion) => ({ records, rawRecords: records,
     validRowRate: Object.fromEntries(columns.map(column => [column.name, 1])), analysis: { source: 'ai', datasetTitle: 'Browser fixture', columns,
-      search_bar: true, search_fields: [suggestion.bindings.region || suggestion.bindings.source], suggestions: [{ ...suggestion, confidence: .9, popupSuggestions: [{ name: 'info', confidence: 1 }] }] } });
+      search_bar: true, search_fields: [suggestion.bindings.region || suggestion.bindings.source], suggestions: [{ ...suggestion, confidence: .9, popupSuggestions: suggestion.popupSuggestions || [{ name: 'info', confidence: 1 }] }] } });
   const pointRows = [{ name: 'A', lat: 21, lng: 105, value: 10 }, { name: 'B', lat: 22, lng: 106, value: 20 }];
   const pointColumns = [{ name: 'name', role: 'category' }, { name: 'lat', role: 'geo', geoLevel: 'point_lat' }, { name: 'lng', role: 'geo', geoLevel: 'point_lng' }, { name: 'value', role: 'measure', aggDefault: 'sum' }];
   const pointSuggestion = { id: 'points', chartType: 'point', title: 'Points', bindings: { region: 'name', lat: 'lat', lng: 'lng' } };
@@ -134,6 +152,30 @@ try {
   assert(arc.api.getView().tableRecords.length === 2 && published.has('arc-one'), 'arc view or overlay missing');
   assert(arc.dom.document.getElementById('arc-flow-style-controls').querySelector('input'), 'arc controls not generated');
   assert(canvas.getLayer('point-one--point-marker') && canvas.getLayer('line-one--data-lines') && canvas.getLayer('polygon-one--polygon-fill'), 'mixed layers lost their resources');
+  stage('pie-popup');
+  const pie = build('pie-one');
+  const pieData = { type: 'FeatureCollection', features: pieRows.map(properties => ({ type: 'Feature', id: 'composition-a',
+    properties, geometry: polygons.features[0].geometry })) };
+  await pie.api.load({ data: pieData, nativePipeline: pipeline(pieRows, pieColumns, pieSuggestion) }, { name: 'composition.geojson' });
+  assert(pie.api.controllers.popup.popupSelectionFor().mode === 'pie', 'AI pie ranking did not select the donut popup');
+  pie.api.openPopup(pie.api.getView().data.features[0], [105.1, 21.1]);
+  let pieHost;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    pieHost = document.querySelector('.ai-popup-pie-chart');
+    if (pieHost?.querySelectorAll('.recharts-pie-sector').length === 5) break;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert(pieHost?.querySelectorAll('.recharts-pie-sector').length === 5, 'Donut slices did not render');
+  assert(pieHost.querySelectorAll('.pie-chart-table tbody tr').length === 5, 'Pie table contains a total row as a component');
+  assert(pieHost.querySelector('.pie-chart-table tfoot').textContent.includes('10.000'), 'Pie total is not computed from actual values');
+  assert(pieHost.querySelectorAll('.pie-chart-legend li').length === 5, 'Pie legend does not match actual groups');
+  assert(pieHost.querySelector('.pie-chart-legend button').getAttribute('aria-label').includes('50%'), 'Pie percentages do not total the selected data');
+  const sector = pieHost.querySelector('.recharts-pie-sector');
+  sector.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 200, clientY: 200 }));
+  for (let attempt = 0; attempt < 40 && !pieHost.querySelector('.pie-chart-tooltip'); attempt++) await new Promise(resolve => setTimeout(resolve, 25));
+  assert(pieHost.querySelector('.pie-chart-tooltip')?.textContent.includes('50%'), 'Pie tooltip does not display the actual percentage');
+  assert(pieHost.querySelector('.pie-chart-plot').clientHeight >= 180, 'Pie plot collapsed');
+  pie.api.closePopup();
   stage('ai-map-edit');
   const workspace = { revision: 0, activeGroupId: 'chat-map', groupsById: { 'chat-map': { id: 'chat-map', title: 'Chat map', visible: true,
     layerIds: entries.map(entry => entry.api.context.options.id), activeLayerId: 'point-one' } },

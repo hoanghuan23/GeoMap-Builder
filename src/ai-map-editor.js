@@ -3,6 +3,7 @@ import { popupDisplayOptions } from './shared/popup/ai-popup-chart.js';
 import { resolveAggregation } from './shared/import/ai-chart-pipeline.js';
 import { normalizePolygonLegendRecommendation, polygonLegendTarget } from './shared/data/polygon-legend-contract.js';
 import { visibleDatasetColumns } from './shared/data/display-fields.js';
+import { POPUP_TYPES } from './shared/import/ai-chart-contract.js';
 
 const selected = api => api.state.aiDataset?.suggestions.find(item => item.id === api.state.aiDataset.selectedSuggestionId);
 
@@ -23,7 +24,7 @@ export function createAiMapEditor({ workspace, runtimes, templatePicker, appeara
           || normalizePolygonLegendRecommendation(column.legend, { ...legendTarget, role: column.role }));
         const popup = api.controllers.popup.activeMapPopupSuggestion();
         const popupModes = popup && api.state.mapType !== 'arc_flow' ? popupDisplayOptions({ ...popup,
-          popupSuggestions: ['info', 'info_image', 'bar', 'line'].map(name => ({ name, confidence: 1 })) }, visibleDatasetColumns(dataset, columns)).filter(option => option.available).map(option => option.name) : [];
+          popupSuggestions: POPUP_TYPES.map(name => ({ name, confidence: 1 })) }, visibleDatasetColumns(dataset, columns)).filter(option => option.available).map(option => option.name) : [];
         return { id, title: workspace.layersById[id].title, mapType: api.state.mapType === 'arc_flow' ? 'arc' : api.state.mapType,
           columns: columns.filter(column => !column.name.startsWith('__') && column.role !== 'ignore').map(column => ({ name: column.name, label: column.labelVi, role: column.role })),
           visible: group.visible && workspace.layersById[id].visible !== false,
