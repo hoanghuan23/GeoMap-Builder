@@ -501,12 +501,15 @@ async function run() {
   PieRenderer.render(chartHost, pie.config);
   for (let attempt = 0; attempt < 100 && chartHost.querySelectorAll('.recharts-pie-sector').length !== 5; attempt++) await wait(25);
   assert(chartHost.querySelectorAll('.recharts-pie-sector').length === 5, 'Template pie did not render its real slices');
+  const sliceColors = () => [...chartHost.querySelectorAll('.recharts-pie-sector path')].map(path => path.getAttribute('fill'));
+  assert(JSON.stringify(sliceColors()) === JSON.stringify(pieBinding.palette.slice(0, 5)), 'Pie slices did not use the AI palette');
   const pieCard = chartHost.firstElementChild;
   for (const theme of themes) {
     for (const key of ['surface', 'text', 'secondary', 'border']) floatingShell.style.setProperty(`--template-${key}`, theme[key]);
     popupContent.style.background = theme.surface; popupContent.style.color = theme.text;
     await wait(80);
     assert(chartHost.firstElementChild === pieCard, 'Theme changes remounted the pie chart');
+    assert(JSON.stringify(sliceColors()) === JSON.stringify(pieBinding.palette.slice(0, 5)), 'Template changed the AI pie colors');
     assert(getComputedStyle(pieCard).backgroundColor === theme.rgb, 'Pie card did not follow the template surface');
     assert(getComputedStyle(chartHost.querySelector('.pie-chart-table')).color === getComputedStyle(popupContent).color, 'Pie table lost contrast');
     assert(chartHost.scrollWidth <= chartHost.clientWidth + 1, 'Pie popup needs horizontal scrolling');

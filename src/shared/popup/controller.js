@@ -220,6 +220,7 @@ export function createController(context) {
         dataset.analysis.columns.some(column => column.name === field && column.role !== "time")));
       const records = context.modules.active()?.getPopupContext(view.feature).chartRecords || dataset.records;
       chart = buildPopupChart({ records: view.arcInfo?.records || records,
+        colorRecords: dataset.records,
         columns: view.arcInfo ? popupChartColumns(visibleDatasetColumns(dataset), activeMapPopupSuggestion().bindings) : visibleDatasetColumns(dataset),
         feature: view.arcInfo ? { properties: { __arcPopupTitle: view.arcInfo.title } } : view.feature,
         regionField: view.arcInfo ? "__arcPopupTitle" : dataset.recommendation.geometry.field,

@@ -2,15 +2,22 @@ import { numericMapValue } from '../data/map-value.js';
 import { measureUnit } from '../data/measure-semantics.js';
 
 const nullableField = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+export const isPieColor = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+export function normalizePiePalette(raw) {
+  return [...new Set((Array.isArray(raw) ? raw : []).filter(isPieColor).map(color => color.toLowerCase()))].slice(0, 64);
+}
+
 export const PIE_BINDING_SCHEMA = {
   anyOf: [{ type: 'null' }, {
     type: 'object', additionalProperties: false,
-    required: ['groupField', 'valueField', 'measureFields', 'excludedValues', 'title'],
+    required: ['groupField', 'valueField', 'measureFields', 'excludedValues', 'title', 'palette'],
     properties: {
       groupField: { ...nullableField, description: 'Cột nhóm thành phần trong cùng một đối tượng bản đồ; null khi mỗi cột đo là một thành phần.' },
       valueField: { ...nullableField, description: 'Cột giá trị/tỷ lệ của nhóm; null để đếm bản ghi khi groupField có giá trị.' },
       measureFields: { type: 'array', items: { type: 'string' }, description: 'Các cột thành phần cùng đơn vị khi groupField null; không gồm cột tổng, tọa độ hoặc các chỉ số không tạo thành một tổng thể.' },
       excludedValues: { type: 'array', items: { type: 'string' }, description: 'Giá trị nhóm thực tế cần loại vì là dòng tổng/phụ tổng; [] khi không có. Không bịa tên.' },
+      palette: { type: 'array', minItems: 2, maxItems: 64, items: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' },
+        description: 'Bảng màu HEX do AI đề xuất riêng cho các thành phần của biểu đồ tròn, ít nhất hai màu khác nhau, dễ phân biệt. Không dùng bảng màu mặc định của ứng dụng.' },
       title: { ...nullableField, description: 'Tiêu đề tiếng Việt ngắn theo nội dung cơ cấu, không chứa dữ liệu minh họa.' }
     }
   }]
@@ -22,7 +29,7 @@ export function normalizePieBinding(raw) {
   return { groupField: field(raw.groupField), valueField: field(raw.valueField),
     measureFields: [...new Set((Array.isArray(raw.measureFields) ? raw.measureFields : []).filter(value => field(value)))],
     excludedValues: [...new Set((Array.isArray(raw.excludedValues) ? raw.excludedValues : []).filter(value => typeof value === 'string'))],
-    title: field(raw.title) };
+    title: field(raw.title), palette: normalizePiePalette(raw.palette) };
 }
 
 export function pieChartFields(columns, bindings = {}) {
@@ -43,7 +50,8 @@ export function createPieSelection(columns, metricField, bindings = {}, rawBindi
   const measures = pie ? pie.measureFields
     : fields.measures.filter(column => measureUnit(column) === measureUnit(metric)).map(column => column.name);
   return { groupField: pie?.groupField || group?.name || '', measure: pie ? pie.valueField || 'count' : metric?.name || 'count',
-    metrics: measures, aggregation: 'auto', excludedValues: pie?.excludedValues || [], title: pie?.title || '' };
+    metrics: measures, aggregation: 'auto', excludedValues: pie?.excludedValues || [], title: pie?.title || '', palette: pie?.palette || [],
+    colorFields: fields.measures.map(column => column.name) };
 }
 
 function aggregate(values, aggregation) {
@@ -59,11 +67,18 @@ function aggregate(values, aggregation) {
 }
 
 /** Use only declared columns and AI exclusions; never infer group/total names from labels. */
-export function buildPieChartData(records, columns, selection, region, bindings = {}) {
+export function buildPieChartData(records, columns, selection, region, bindings = {}, colorRecords = records) {
   const { groups, measures } = pieChartFields(columns, bindings);
   const group = groups.find(column => column.name === selection.groupField);
   const label = column => column.labelVi || column.name;
   const aggregation = column => selection.aggregation === 'auto' ? column.aggDefault : selection.aggregation;
+  const palette = normalizePiePalette(selection.palette);
+  if (palette.length < 2) throw new Error('Chưa có bảng màu hợp lệ do AI đề xuất cho biểu đồ tròn. Hãy phân tích lại dữ liệu.');
+  // Use the complete dataset domain so filters, popup subjects and checkbox changes cannot shift colors.
+  const colorKeys = selection.groupField
+    ? [...new Set(colorRecords.map(record => record[selection.groupField]).filter(value => value != null && String(value).trim() !== '').map(String))]
+    : selection.colorFields || measures.map(column => column.name);
+  const colors = new Map(colorKeys.map((key, index) => [key, palette[index % palette.length]]));
   let data, unit = '', valueLabel = 'Số bản ghi';
   if (selection.groupField) {
     if (!group) throw new Error('Chọn cột phân nhóm hợp lệ cho biểu đồ tròn.');
@@ -79,7 +94,7 @@ export function buildPieChartData(records, columns, selection, region, bindings 
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key).push(metric ? numericMapValue(record[metric.name]) : 1);
     }
-    data = [...buckets].map(([name, values]) => ({ name, value: metric ? aggregate(values, aggregation(metric)) : values.length }));
+    data = [...buckets].map(([name, values]) => ({ name, value: metric ? aggregate(values, aggregation(metric)) : values.length, color: colors.get(name) }));
     unit = metric?.unit || '';
     valueLabel = metric ? label(metric) : valueLabel;
   } else {
@@ -89,7 +104,7 @@ export function buildPieChartData(records, columns, selection, region, bindings 
     unit = selected[0].unit || '';
     valueLabel = 'Giá trị';
     data = selected.map(column => ({ name: selected.filter(item => label(item) === label(column)).length > 1 ? `${label(column)} (${column.name})` : label(column),
-      value: aggregate(records.map(record => numericMapValue(record[column.name])), aggregation(column)) }));
+      value: aggregate(records.map(record => numericMapValue(record[column.name])), aggregation(column)), color: colors.get(column.name) }));
   }
   const total = data.reduce((sum, item) => sum + item.value, 0);
   if (!Number.isFinite(total) || total <= 0) throw new Error('Tổng giá trị phải lớn hơn 0 để tính tỷ trọng.');

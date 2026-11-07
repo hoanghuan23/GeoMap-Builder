@@ -868,6 +868,8 @@ test('pie popup uses AI fields, changes group selections and releases its render
   h.run('dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]); populateAiFilters(dataset); openMapPopup(testFeatures[0], [105,21]);');
   assert.equal(h.run('popupSelectionFor().mode'), 'pie');
   assert.equal(h.rendered.at(-1).kind, 'pie');
+  const aiColors = h.rendered.at(-1).config.data.map(item => item.color);
+  assert.deepEqual(aiColors, pieSuggestion.popupSuggestions[0].pie.palette.slice(0, 5));
   assert.equal(normalizePieChartConfig(h.rendered.at(-1).config).total, 10000);
   const total = h.all('.ai-popup-pie-group-value').find(input => input.value === 'Tổng');
   assert.equal(total.checked, false, 'AI excludes the real total row');
@@ -879,6 +881,7 @@ test('pie popup uses AI fields, changes group selections and releases its render
   assert.equal(h.cleared.length, previousClears + 1);
   h.mode('pie');
   assert.equal(normalizePieChartConfig(h.rendered.at(-1).config).total, 9700, 'manual group choices survive mode switches');
+  assert.deepEqual(h.rendered.at(-1).config.data.map(item => item.color), aiColors.slice(0, 4));
 });
 
 test("missing, invalid or entirely impossible popup proposals show only unscored information fallback", () => {

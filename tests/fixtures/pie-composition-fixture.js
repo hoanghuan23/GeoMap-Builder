@@ -6,6 +6,7 @@ export const pieColumns = [
 ];
 export const pieRows = [['Xe máy', 5000], ['Ô tô', 2500], ['Xe buýt', 1500], ['Xe đạp', 700], ['Khác', 300], ['Tổng', 10000]]
   .map(([vehicle, trips]) => ({ region: 'A', vehicle, trips }));
-export const pieBinding = { groupField: 'vehicle', valueField: 'trips', measureFields: [], excludedValues: ['Tổng'], title: 'Cơ cấu phương tiện giao thông' };
+export const pieBinding = { groupField: 'vehicle', valueField: 'trips', measureFields: [], excludedValues: ['Tổng'], title: 'Cơ cấu phương tiện giao thông',
+  palette: ['#31688e', '#35b779', '#fde725', '#440154', '#21918c', '#f89540'] };
 export const pieSuggestion = { id: 'composition', chartType: 'choropleth', title: 'Cơ cấu', bindings: { region: 'region', value: 'trips' },
   popupSuggestions: [{ name: 'pie', confidence: .99, pie: pieBinding }, { name: 'info', confidence: .8 }] };

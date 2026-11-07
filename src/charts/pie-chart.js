@@ -1,27 +1,28 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { isPieColor } from '../shared/popup/pie-chart-data.js';
 
 const roots = new WeakMap();
 const h = React.createElement;
-export const PIE_COLORS = Object.freeze(['#5296f7', '#b2dfbc', '#f8c4ab', '#ffe7a0', '#bc95f7', '#6cc9d6', '#ed8daa', '#9ab0d2']);
 const number = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
 const percent = value => `${number.format(value)}%`;
 
 export function normalizePieChartConfig(input) {
   if (!input || !Array.isArray(input.data) || input.data.length < 2) throw new Error('Biểu đồ tròn cần ít nhất hai nhóm thành phần.');
   const names = new Set();
-  const data = input.data.map((item, index) => {
+  const data = input.data.map(item => {
     if (typeof item.name !== 'string' || !item.name.trim() || names.has(item.name)) throw new Error('Tên nhóm biểu đồ tròn phải khác nhau và không để trống.');
     names.add(item.name);
     if (item.value == null || typeof item.value === 'string' && !item.value.trim() || !['number', 'string'].includes(typeof item.value)) throw new Error('Có nhóm thiếu giá trị biểu đồ tròn.');
     const value = Number(item.value);
     if (!Number.isFinite(value) || value < 0) throw new Error('Giá trị biểu đồ tròn phải là số không âm.');
-    return { ...item, value, color: item.color || PIE_COLORS[index % PIE_COLORS.length] };
+    return { ...item, value };
   });
   const total = data.reduce((sum, item) => sum + item.value, 0);
   if (!Number.isFinite(total) || total <= 0) throw new Error('Tổng giá trị phải lớn hơn 0.');
   if (data.filter(item => item.value > 0).length < 2) throw new Error('Biểu đồ tròn cần ít nhất hai nhóm có giá trị lớn hơn 0.');
+  if (data.some(item => !isPieColor(item.color))) throw new Error('Chưa có màu hợp lệ do AI đề xuất cho từng thành phần biểu đồ tròn.');
   return { ...input, chartKind: 'pie', total, data: data.map(item => ({ ...item, percentage: item.value / total * 100 })),
     title: input.title || 'Cơ cấu tỷ trọng', unit: input.unit || '', groupLabel: input.groupLabel || 'Thành phần',
     valueLabel: input.valueLabel || 'Giá trị', showLegend: input.showLegend !== false,

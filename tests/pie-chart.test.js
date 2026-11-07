@@ -4,6 +4,7 @@ import { normalizePieChartConfig } from '../src/charts/pie-chart.js';
 import { buildPopupChart, createPopupChartSelection, popupDisplayOptions } from '../src/shared/popup/ai-popup-chart.js';
 import { normalizePopupSuggestions, POPUP_SUGGESTION_SCHEMA } from '../src/shared/import/ai-chart-contract.js';
 import { normalizeEditContext } from '../src/ai-map-edit-contract.js';
+import { normalizeCompositionInput } from '../src/map-composition-contract.js';
 import { pieColumns, pieRows, pieBinding, pieSuggestion } from './fixtures/pie-composition-fixture.js';
 
 const feature = { properties: { region: 'A' } };
@@ -33,9 +34,54 @@ test('reference composition isolates the selected object, excludes AI total rows
   assert.deepEqual(config.data.map(item => item.name), ['Xe máy', 'Ô tô', 'Xe buýt', 'Xe đạp', 'Khác']);
   config.data.forEach((item, index) => assert.ok(Math.abs(item.percentage - [50, 25, 15, 7, 3][index]) < 1e-10));
   assert.equal(new Set(config.data.map(item => item.color)).size, 5);
+  assert.deepEqual(config.data.map(item => item.color), pieBinding.palette.slice(0, 5));
   assert.equal(config.groupLabel, 'Phương tiện');
   assert.equal(config.valueLabel, 'Số lượt di chuyển');
   assert.equal(JSON.stringify(pieRows), before);
+});
+
+test('AI palettes survive composition metadata and determine slice colors', () => {
+  const palette = ['#a11234', '#12b345', '#3456c7', '#ed8a12', '#952cb3'];
+  const binding = { ...pieBinding, palette };
+  const popupSuggestions = [{ name: 'pie', confidence: .99, pie: binding }];
+  const input = normalizeCompositionInput({ groups: [], newLayerIds: ['a'], layers: [{ id: 'a', columns: pieColumns, popupSuggestions }] });
+  assert.deepEqual(input.layers[0].popupSuggestions[0].pie.palette, palette);
+  const config = normalizePieChartConfig(chart({ binding: input.layers[0].popupSuggestions[0].pie }).config);
+  assert.deepEqual(config.data.map(item => item.color), palette);
+});
+
+test('pie keeps component colors when groups are excluded, subjects change or time is filtered', () => {
+  const columns = [...pieColumns, { name: 'date', role: 'time', timeParse: 'iso', granularity: 'day' }];
+  const records = [
+    ...pieRows.map(row => ({ ...row, date: '2026-09-01' })),
+    ...pieRows.slice(1).map(row => ({ ...row, date: '2026-09-02' })),
+    ...pieRows.slice(1).map(row => ({ ...row, region: 'B', date: '2026-09-02' }))
+  ];
+  const selection = createPopupChartSelection(records, columns, 'trips', 'pie', pieSuggestion.bindings, pieBinding);
+  const latest = chart({ records, columns, selection });
+  assert.equal(latest.config.data[0].name, 'Ô tô');
+  assert.equal(latest.config.data[0].color, pieBinding.palette[1]);
+  const earlier = chart({ records, columns, selection: { ...selection, from: '2026-09-01', to: '2026-09-01' } });
+  assert.equal(earlier.config.data.find(item => item.name === 'Ô tô').color, pieBinding.palette[1]);
+  const excluded = chart({ records, columns, selection: { ...selection, excludedValues: ['Tổng', 'Ô tô'] } });
+  assert.equal(excluded.config.data[0].name, 'Xe buýt');
+  assert.equal(excluded.config.data[0].color, pieBinding.palette[2]);
+  const other = buildPopupChart({ records, columns, feature: { properties: { region: 'B' } }, regionField: 'region',
+    kind: 'pie', bindings: pieSuggestion.bindings, selection });
+  assert.equal(other.config.data[0].color, pieBinding.palette[1]);
+});
+
+test('pie rejects missing or invalid AI palettes instead of supplying application colors', () => {
+  for (const palette of [undefined, [], ['red', 'url(invalid)'], ['#123456'], ['#ABCDEF', '#abcdef']]) {
+    const result = chart({ binding: { ...pieBinding, palette } });
+    assert.equal(result.config, null);
+    assert.match(result.message, /bảng màu.*AI/);
+  }
+  const normalized = normalizePopupSuggestions([{ name: 'pie', confidence: 1,
+    pie: { ...pieBinding, palette: ['#A11234', 'red', '#12B345', '#a11234'] } }]);
+  assert.deepEqual(normalized[0].pie.palette, ['#a11234', '#12b345']);
+  assert.throws(() => normalizePieChartConfig({ data: [{ name: 'a', value: 1 }, { name: 'b', value: 2 }] }), /màu.*AI/);
+  assert.throws(() => normalizePieChartConfig({ data: [{ name: 'a', value: 1, color: '#123456' }, { name: 'b', value: 2, color: 'red' }] }), /màu.*AI/);
 });
 
 test('pie groups use the actual dataset and latest snapshot instead of fixed reference categories', () => {
@@ -44,7 +90,7 @@ test('pie groups use the actual dataset and latest snapshot instead of fixed ref
   const records = ['2026-09-01', '2026-09-02'].flatMap((date, index) => ['Trực tiếp', 'Trực tuyến'].map((channel, group) => ({
     region: 'A', channel, date, share: index ? [60, 40][group] : [25, 75][group]
   })));
-  const binding = { groupField: 'channel', valueField: 'share', measureFields: [], excludedValues: [], title: 'Cơ cấu kênh' };
+  const binding = { groupField: 'channel', valueField: 'share', measureFields: [], excludedValues: [], title: 'Cơ cấu kênh', palette: ['#bc3754', '#208f8c'] };
   const result = chart({ columns, records, binding });
   assert.equal(result.message, '');
   assert.deepEqual(result.config.data.map(item => item.value), [60, 40]);
@@ -55,11 +101,14 @@ test('pie groups use the actual dataset and latest snapshot instead of fixed ref
 test('pie supports wide component columns, excludes total columns and refuses different units', () => {
   const columns = [pieColumns[0], ...['online', 'store', 'total'].map(name => ({ name, role: 'measure', unit: 'đồng', aggDefault: 'sum' }))];
   const records = [{ region: 'A', online: 30, store: 70, total: 100 }];
-  const binding = { groupField: null, valueField: null, measureFields: ['online', 'store'], excludedValues: [], title: null };
+  const binding = { groupField: null, valueField: null, measureFields: ['online', 'store'], excludedValues: [], title: null, palette: ['#805acb', '#d8a124'] };
   const result = chart({ columns, records, binding });
   assert.equal(result.message, '');
   assert.deepEqual(normalizePieChartConfig(result.config).data.map(item => item.percentage), [30, 70]);
   assert.equal(normalizePieChartConfig(result.config).total, 100);
+  assert.deepEqual(result.config.data.map(item => item.color), binding.palette);
+  const reversed = chart({ columns, records, binding: { ...binding, measureFields: ['store', 'online'] } });
+  assert.deepEqual(reversed.config.data.map(item => item.color), [...binding.palette].reverse());
   assert.match(chart({ columns: columns.map(column => column.name === 'store' ? { ...column, unit: 'lượt' } : column), records, binding }).message, /cùng đơn vị/);
 });
 

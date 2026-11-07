@@ -67,7 +67,7 @@ export function popupRegionRecords(records, feature, regionField, options = {}) 
     ? records.filter(record => popupFeaturesMatch({ properties: record }, feature, regionField, options)) : [];
 }
 
-export function buildPopupChart({ records, columns, feature, regionField, kind, selection, chartType = "choropleth", bindings = {} }) {
+export function buildPopupChart({ records, columns, feature, regionField, kind, selection, chartType = "choropleth", bindings = {}, colorRecords = records }) {
   columns = popupChartColumns(columns, bindings);
   const empty = message => ({ config: null, message });
   const rules = mapRegistry[chartType]?.popup;
@@ -84,7 +84,7 @@ export function buildPopupChart({ records, columns, feature, regionField, kind, 
   }
   if (!selected.length) return empty("Không có dữ liệu trong khoảng thời gian đã chọn.");
   if (kind === 'pie') {
-    try { return { config: buildPieChartData(selected, columns, selection, region, bindings), message: '' }; }
+    try { return { config: buildPieChartData(selected, columns, selection, region, bindings, colorRecords), message: '' }; }
     catch (error) { return empty(error.message); }
   }
   const metrics = kind === "line" ? [selection.measure] : selection.metrics;
