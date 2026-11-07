@@ -65,6 +65,34 @@ test('restoring a module is idempotent and disposal releases its events and owne
   assert.equal(layer.layers.size, 0); assert.equal(layer.sources.size, 0);
 });
 
+test('point appearance and layer restoration keep source data until an explicit data update', async () => {
+  const layer = pointLayer();
+  await layer.module.activate(layer.suggestion, layer.dataset);
+  const source = layer.sources.get('point-data');
+  const setData = source.setData.bind(source);
+  let writes = 0;
+  source.setData = data => { writes++; setData(data); };
+  const original = source.data;
+  layer.module.restore();
+  layer.module.update({ style: { opacity: .3, size: 150 } });
+  layer.runtime.controllers.view.applyStyle();
+  layer.layers.delete('point-marker');
+  layer.module.restore();
+  assert.equal(writes, 0, 'style and missing-layer restoration must not upload GeoJSON');
+  assert.equal(source.data, original);
+  assert.ok(layer.layers.has('point-marker'));
+
+  const updated = { ...original, features: original.features.slice(0, 1) };
+  layer.module.acceptData(updated);
+  layer.runtime.controllers.view.applyStyle();
+  assert.equal(writes, 1);
+  assert.equal(source.data, updated);
+  layer.layers.clear(); layer.sources.clear();
+  layer.module.restore();
+  assert.equal(layer.sources.get('point-data').data, updated, 'basemap restoration uses the latest data');
+  layer.runtime.dispose();
+});
+
 test('disposing a module unbinds its controls and prevents later activation from recreating layers', async () => {
   const layer=pointLayer(); const control=layer.get('point-style-controls');
   control.removeEventListener=(type, callback)=>{if(control.events[type]===callback)delete control.events[type];};
@@ -97,11 +125,30 @@ for(const chartType of ['map_line','choropleth','arc_flow'])test(`two ${chartTyp
   };
   const first=await build(),second=await build();
   const before=second.module.getView();
+  let writes = 0;
+  for (const source of first.sources.values()) {
+    const setData = source.setData.bind(source);
+    source.setData = data => { writes++; setData(data); };
+  }
   first.module.update({style:{opacity:.3}});
+  if (chartType === 'choropleth') {
+    first.runtime.controllers.view.applyStyle();
+    first.layers.delete('polygon-fill'); first.module.restore();
+    assert.equal(writes, 0, 'polygon style and missing-layer restoration must not upload GeoJSON');
+    const original = first.module.getView().data;
+    const updated = { ...original, features: original.features.map(feature => ({ ...feature, geometry: {
+      type: 'Polygon', coordinates: [[[107, 23], [108, 23], [108, 24], [107, 23]]]
+    } })) };
+    first.module.acceptData(updated); first.runtime.controllers.view.applyStyle();
+    assert.equal(writes, 2, 'explicit updates publish the fill and boundary sources once each');
+    assert.equal(first.sources.get('polygon-data').data.features[0].geometry, updated.features[0].geometry);
+    assert.deepEqual(first.module.getView().extent, [107, 23, 108, 24]);
+  }
   assert.equal(first.module.getView().configuration.style.opacity,.3);
   assert.deepEqual(second.module.getView().configuration,before.configuration);
   assert.notEqual(first.module.getView().data,before.data);
   first.layers.clear();first.sources.clear();first.module.restore();first.module.style();first.module.setVisible(true);
+  if (chartType === 'choropleth') assert.deepEqual(first.sources.get('polygon-data').data.features, first.module.getView().data.features);
   assert.equal(first.module.getView().configuration.style.opacity,.3);
   assert.ok(first.layers.size>0);assert.ok(first.sources.size>0);
   first.runtime.dispose();second.runtime.dispose();

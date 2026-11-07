@@ -34,7 +34,7 @@ export function create(parent) {
     activate: controller.activateAiChoropleth,
     acceptData(data) { if(controller.usesCategoricalPolygonColor())for(const feature of data.features)feature.properties={...feature.properties,
       ...categoryColorProperties(state.aiDataset.recommendation.metricField,featureCategoryValues(feature.properties,state.aiDataset.recommendation.metricField))};
-      state.boundary=data;context.map.getSource('polygon-data')?.setData(data);context.map.getSource('vietnam-boundary')?.setData(data); },
+      state.boundary=data;context.map.getSource('polygon-data')?.setData({...data,features:(data.features || []).filter(feature=>["Polygon","MultiPolygon"].includes(feature.geometry?.type))});context.map.getSource('vietnam-boundary')?.setData(data); },
     refreshGeometry() { if(controller.isRegionHexMode())return controller.rebuildRegionHexGrid(); },
     update(change) {if(change.hex){context.tasks.regionHexBuildRevision++;if(change.hex.enabled!==undefined)state.regionHexEnabled=change.hex.enabled;
         if(change.hex.resolution!==undefined)state.regionHexResolution=change.hex.resolution;
@@ -54,8 +54,10 @@ export function create(parent) {
         {id:'h3-border',type:'line',source:'h3-grid',paint:{'line-color':'#ffffff','line-width':.5,'line-opacity':.75}},
         {id:'vietnam-border',type:'line',source:'vietnam-boundary',paint:{'line-color':'#00e65c','line-width':2}}
       ]) if(!map.getLayer(layer.id)) map.addLayer(layer);
-      PolygonRenderer.render(map,state.boundary ? {...state.boundary,features:(state.boundary.features || []).filter(feature=>["Polygon","MultiPolygon"].includes(feature.geometry?.type))} : EMPTY_FEATURE_COLLECTION,{sourceId:'polygon-data',fillLayerId:'polygon-fill',borderLayerId:'polygon-border',
-        fillPaint:{'fill-color':'#389e55','fill-opacity':.32},borderPaint:{'line-color':'#00e65c','line-width':2}});
+      if (!map.getSource('polygon-data') || !map.getLayer('polygon-fill') || !map.getLayer('polygon-border')) {
+        PolygonRenderer.render(map,state.boundary ? {...state.boundary,features:(state.boundary.features || []).filter(feature=>["Polygon","MultiPolygon"].includes(feature.geometry?.type))} : EMPTY_FEATURE_COLLECTION,{sourceId:'polygon-data',fillLayerId:'polygon-fill',borderLayerId:'polygon-border',updateData:false,
+          fillPaint:{'fill-color':'#389e55','fill-opacity':.32},borderPaint:{'line-color':'#00e65c','line-width':2}});
+      }
       map.moveLayer?.('vietnam-border'); renderGeographicScopeMarkers(map,state.boundary);
     },
     style,

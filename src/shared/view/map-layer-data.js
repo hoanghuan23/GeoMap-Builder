@@ -1,6 +1,8 @@
 import { normalizePopupContent } from '../popup/popup-content-contract.js';
 import { geometryKinds } from '../geography/geojson-layers.js';
 
+const extentCache = new WeakMap();
+
 export function asFeatureCollection(data) {
   if (!data) return { type: 'FeatureCollection', features: [] };
   if (data.type === 'FeatureCollection') return data;
@@ -8,6 +10,10 @@ export function asFeatureCollection(data) {
 }
 
 export function geometryExtent(data) {
+  if (!data || typeof data !== 'object') return null;
+  // Geometry updates create a new GeoJSON object; style/property edits reuse it.
+  // Weak keys let discarded datasets leave the cache with no explicit cleanup.
+  if (extentCache.has(data)) return extentCache.get(data)?.slice() || null;
   const extent = [Infinity, Infinity, -Infinity, -Infinity];
   const visit = coordinates => {
     if (!Array.isArray(coordinates)) return;
@@ -20,7 +26,9 @@ export function geometryExtent(data) {
   };
   const geometry = value => { if (value?.type === 'GeometryCollection') value.geometries.forEach(geometry); else visit(value?.coordinates); };
   asFeatureCollection(data).features.forEach(feature => geometry(feature.geometry));
-  return extent.every(Number.isFinite) ? extent : null;
+  const result = extent.every(Number.isFinite) ? extent : null;
+  extentCache.set(data, result);
+  return result?.slice() || null;
 }
 
 export function layerData(subject) {
@@ -34,17 +42,19 @@ export function describeWorkspaceLayer(id, runtime, title) {
   const dataset = state.aiDataset;
   const analysis = dataset?.analysis || state.spatialAnalysis;
   const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
-  const data = runtime.getView ? runtime.getView().sourceData || runtime.getView().data : dataset?.nativeGeometry ? { type: 'FeatureCollection', features: dataset.nativeGeometry.features }
+  const view = runtime.getView?.();
+  const data = view ? view.sourceData || view.data : dataset?.nativeGeometry ? { type: 'FeatureCollection', features: dataset.nativeGeometry.features }
     : dataset?.boundaries?.features?.length ? dataset.boundaries : dataset?.spatialData || state.sourceBoundary || layerData(state);
   const columns = analysis?.columns || [
     ...(state.dataProfile?.textFields || []).map(name => ({ name, role: 'text' })),
     ...(state.dataProfile?.numericFields || []).map(name => ({ name, role: 'measure' }))
   ];
   const time = columns.find(column => column.role === 'time');
-  const sourceKind = !geometryExtent(data) && dataset && !dataset.suggestions?.length ? 'attribute' : 'spatial';
+  const extent = geometryExtent(data);
+  const sourceKind = !extent && dataset && !dataset.suggestions?.length ? 'attribute' : 'spatial';
   return { id, title, sourceKind, popupContent: normalizePopupContent(analysis?.popupContent, columns), popupSuggestions: suggestion?.popupSuggestions || [], grain: analysis?.grain || 'Đối tượng không gian từ geometry có sẵn', chartType: suggestion?.chartType || state.mapType,
-    available: Boolean(geometryExtent(data)) && (!dataset || suggestion?.available === true) && Boolean(state.mapType || state.uploadLayers?.length),
-    geometryKinds: geometryKinds(data), extent: geometryExtent(data), columns,
+    available: Boolean(extent) && (!dataset || suggestion?.available === true) && Boolean(state.mapType || state.uploadLayers?.length),
+    geometryKinds: geometryKinds(data), extent, columns,
     time: time ? { field: time.name, granularity: time.granularity || '', count: dataset?.profile?.columns?.find(column => column.name === time.name)?.uniqueCount || 0 } : null,
     search_bar: analysis?.search_bar !== false, search_fields: analysis?.search_fields || columns.filter(column => ['text', 'geo', 'id', 'category'].includes(column.role)).slice(0, 3).map(column => column.name) };
 }

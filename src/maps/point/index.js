@@ -22,7 +22,7 @@ export function create(parent) {
       if(change.selection)Object.assign(controller.pointSelectionFor(controller.activePointSuggestion()),change.selection);
       return controller.refreshPointView(controller.activePointSuggestion(), change);
     },
-    restore() { PointRenderer.render(context.map, state.pointData, { sourceId: 'point-data', layerId: 'point-marker',
+    restore() { PointRenderer.render(context.map, state.pointData, { sourceId: 'point-data', layerId: 'point-marker', updateData: false,
       paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 4, 10, 6, 16, 10] } }); },
     style() { for (const [key, value] of Object.entries(state.aiDataset?.activePointView?.paint || pointPaint(state.pointStyle)))
       if (context.map.getLayer('point-marker')) context.map.setPaintProperty('point-marker', key, value); controller.renderPointLegend(); },

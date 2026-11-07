@@ -43,3 +43,36 @@ test('extent and composition descriptors avoid raw values; CSV exports real fiel
   const csv = csvForRecords([{ name: '=SUM(A1)', temperature: 0, __private: 'secret' }]);
   assert.match(csv, /'=SUM/); assert.equal(csv.includes('secret'), false); assert.match(csv, /"0"/);
 });
+
+test('unchanged GeoJSON reuses its extent without revisiting coordinates or exposing the cached bounds', () => {
+  let reads = 0;
+  const data = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: {
+    type: 'Polygon', get coordinates() { reads++; return geometry.coordinates; }
+  } }] };
+  const extent = geometryExtent(data);
+  assert.deepEqual(extent, [105, 21, 106, 22]);
+  const initialReads = reads;
+  extent[0] = -180;
+  data.features[0].properties.name = 'Updated label';
+  assert.deepEqual(geometryExtent(data), [105, 21, 106, 22]);
+  assert.equal(reads, initialReads, 'property/style changes must not scan coordinates again');
+
+  const filtered = { ...data, features: [] };
+  assert.equal(geometryExtent(filtered), null);
+  assert.equal(geometryExtent(filtered), null);
+  const replacement = { ...data, features: [{ type: 'Feature', properties: {}, geometry: {
+    type: 'Point', coordinates: [107, 23]
+  } }] };
+  assert.deepEqual(geometryExtent(replacement), [107, 23, 107, 23]);
+  assert.deepEqual(geometryExtent(data), [105, 21, 106, 22], 'filtered/replacement datasets keep independent extents');
+});
+
+test('extent covers geometry collections and ignores invalid positions', () => {
+  const data = { type: 'Feature', geometry: { type: 'GeometryCollection', geometries: [
+    { type: 'Point', coordinates: [999, 21] },
+    { type: 'LineString', coordinates: [[105, 0], [106, -10], [NaN, 20]] },
+    { type: 'Point', coordinates: [0, 0] }
+  ] } };
+  assert.deepEqual(geometryExtent(data), [0, -10, 106, 0]);
+  assert.equal(geometryExtent(null), null);
+});

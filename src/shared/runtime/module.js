@@ -40,8 +40,9 @@ export function viewSnapshot(context, definition, { data, sourceData = context.s
     regionNavigation: dataset?.analysis.regionNavigation ?? state.spatialAnalysis?.regionNavigation,
     filtered: filtered || Object.values(dataset?.filters || {}).some(value => Array.isArray(value) ? value.length > 0 : value != null && value !== ''),
     sourceRecords: dataset?.records, locationKeys: dataset?.boundaries?.locationKeys };
-  return { data, sourceData, search, configuration, extent: geometryExtent(data), legendVisible, popupLayerId, camera, definition,
-    tableRecords: tableRecords || (dataset && (!state.mapType || !geometryExtent(data)) ? dataset.records : (data?.features || []).map(feature => feature.properties || {})) };
+  const extent = geometryExtent(data);
+  return { data, sourceData, search, configuration, extent, legendVisible, popupLayerId, camera, definition,
+    tableRecords: tableRecords || (dataset && (!state.mapType || !extent) ? dataset.records : (data?.features || []).map(feature => feature.properties || {})) };
 }
 
 /** Shared lifecycle only; drawing, controls and data transformations stay in each map. */

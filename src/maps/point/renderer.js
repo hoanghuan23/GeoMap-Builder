@@ -4,8 +4,9 @@ export const PointRenderer = {
     const layerId = config.layerId || "point-marker";
     const source = map.getSource(sourceId);
 
-    if (source) source.setData(data);
-    else map.addSource(sourceId, { type: "geojson", data });
+    // Restoring layers after a style change must not re-upload existing data.
+    if (!source) map.addSource(sourceId, { type: "geojson", data });
+    else if (config.updateData !== false) source.setData(data);
 
     if (!map.getLayer(layerId)) {
       map.addLayer({
