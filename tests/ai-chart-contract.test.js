@@ -36,6 +36,20 @@ test("Point group binding survives server/client normalization separately from i
   }
 });
 
+test("Point display fields preserve AI priority and discard invalid columns", () => {
+  const columns = [{ name: "code", role: "id" }, { name: "sector", role: "category" },
+    { name: "status", role: "text" }, { name: "city", role: "geo", geoLevel: "admin1" },
+    { name: "lat", role: "geo", geoLevel: "point_lat" }, { name: "lng", role: "geo", geoLevel: "point_lng" }];
+  const dataProfile = { rowCount: 3, columns: columns.map(column => ({ name: column.name })) };
+  const raw = { columns, suggestions: [{ id: "facilities", chartType: "point",
+    bindings: { lat: "lat", lng: "lng", region: "code", group: "sector" },
+    pointGroupFields: ["status", "sector", "city", "status", "code", "lat", "missing"] }] };
+  assert.ok(ANALYSIS_RESPONSE_SCHEMA.properties.suggestions.items.required.includes("pointGroupFields"));
+  const result = normalizeFixture(raw, dataProfile);
+  assert.deepEqual(result.suggestions[0].pointGroupFields, ["status", "sector", "city"]);
+  assert.deepEqual(normalizeFixture(result, dataProfile).suggestions[0].pointGroupFields, result.suggestions[0].pointGroupFields);
+});
+
 test("AI search defaults survive server/client normalization and reject invalid fields", () => {
   assert.ok(ANALYSIS_RESPONSE_SCHEMA.required.includes("search_bar"));
   assert.ok(ANALYSIS_RESPONSE_SCHEMA.required.includes("search_fields"));

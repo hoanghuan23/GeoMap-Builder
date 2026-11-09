@@ -119,7 +119,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend", "popupSuggestions", "metricButtons", "geographicScopes"],
+        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend", "popupSuggestions", "metricButtons", "geographicScopes", "pointGroupFields"],
         properties: {
           geographicScopes: GEOGRAPHIC_SCOPES_SCHEMA,
           id: { type: "string" },
@@ -163,6 +163,8 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
               }
             }
           },
+          pointGroupFields: { type: "array", items: { type: "string" },
+            description: "Point: chỉ các cột phù hợp để người dùng chọn hiển thị/tô màu theo nhóm, xếp theo mức quan trọng; cột đầu tiên là mặc định. Kiểu bản đồ khác trả []." },
           popupSuggestions: {
             type: "array", minItems: 1, maxItems: POPUP_TYPES.length,
             items: POPUP_SUGGESTION_SCHEMA
@@ -248,6 +250,11 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile, problems 
     normalizedBindings[slot] = b[slot];
   }
   if (spec.nullableValue) normalizedBindings.value ??= null;
+  const pointGroupFields = raw.chartType === 'point' && Array.isArray(raw.pointGroupFields)
+    ? [...new Set(raw.pointGroupFields.filter(name => typeof name === 'string' && !name.startsWith('__')
+      && name !== normalizedBindings.lat && name !== normalizedBindings.lng
+      && ['category', 'text', 'geo'].includes(roleOf.get(name))))]
+    : null;
   seenIds.add(raw.id);
   return {
     id: raw.id,
@@ -259,6 +266,7 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile, problems 
     reason: typeof raw.reason === "string" ? raw.reason.trim() : "",
     legend: spec.colorLegend && normalizedBindings.value ? raw.legend ?? null : null,
     popupSuggestions: normalizePopupSuggestions(raw.popupSuggestions),
+    ...(pointGroupFields ? { pointGroupFields } : {}),
     source: "ai"
   };
 }

@@ -50,8 +50,12 @@ export function createController(context) {
     const dataset = state.aiDataset;
     dataset.pointModels ||= Object.create(null);
     const model = dataset.pointModels[suggestion.id] ||= createPointModel(dataset.records, dataset.analysis.columns, suggestion.bindings);
-    return includeHidden || !dataset.hiddenMetricFields?.length ? model : { ...model,
-      measures: visibleDatasetColumns(dataset, model.measures), groups: visibleDatasetColumns(dataset, model.groups) };
+    const proposed = Array.isArray(suggestion.pointGroupFields)
+      ? suggestion.pointGroupFields.map(name => model.groups.find(column => column.name === name)).filter(Boolean)
+      : model.groups;
+    const groups = includeHidden ? proposed : visibleDatasetColumns(dataset, proposed);
+    return { ...model, groups, measures: includeHidden ? model.measures : visibleDatasetColumns(dataset, model.measures),
+      defaultGroupField: Array.isArray(suggestion.pointGroupFields) ? groups[0]?.name || null : model.defaultGroupField };
   }
 
   function pointSelectionFor(suggestion) {
@@ -122,9 +126,9 @@ export function createController(context) {
       swatch.style.background = input.checked ? view.colors[input.value] : "#dce3ed";
     });
     const counter = document.querySelector("#ai-filter-controls [data-role='point-group-count']");
-    if (counter) {
+    if (counter && view.selection.groupField) {
       const group = pointModelFor(activePointSuggestion()).groups.find(column => column.name === view.selection.groupField);
-      counter.textContent = `${selected.size}/${group.values.length}`;
+      if (group) counter.textContent = `${selected.size}/${group.values.length}`;
     }
     document.querySelectorAll("#ai-filter-controls .ai-point-time").forEach(select => { select.value = view.selection.time; });
   }

@@ -59,6 +59,7 @@ class Element {
 }
 
 function harness({ road = false, point = false, path = false, thematic = false, arc = false, storeNameRole = "category", pointRecords = storeRecords,
+  pointColumns = storeColumns, pointGroupFields = null, pointBindingGroup = null,
   metricButtons = null,
   popupSuggestions = [{ name: "info", confidence: .95 }, { name: "bar", confidence: .9 }, { name: "line", confidence: .85 }],
   fetchImpl = () => assert.fail("map interactions must not call AI"), boundaryLoader = loadAdministrativeBoundaries,
@@ -118,9 +119,11 @@ function harness({ road = false, point = false, path = false, thematic = false, 
   }
   if (point) {
     dataset.analysis = { source: "ai", datasetTitle: "Cửa hàng", grain: "một cửa hàng/tháng",
-      columns: storeColumns.map(column => column.name === "ten_cua_hang" ? { ...column, role: storeNameRole } : column) };
+      columns: pointColumns.map(column => column.name === "ten_cua_hang" ? { ...column, role: storeNameRole } : column) };
     dataset.records = pointRecords;
     dataset.suggestions = storeSuggestions.map(item => ({ ...item, available: true, effectiveConfidence: item.confidence }));
+    if (pointGroupFields !== null) dataset.suggestions[0].pointGroupFields = pointGroupFields;
+    if (pointBindingGroup) dataset.suggestions[0].bindings = { ...dataset.suggestions[0].bindings, group: pointBindingGroup };
     dataset.selectedSuggestionId = "stores";
   }
   if (path) {
@@ -1410,6 +1413,21 @@ test("Point display selector includes text store names and a city with a single 
   group.value = "thanh_pho"; h.change(group);
   assert.deepEqual(h.all(".ai-point-value").map(input => input.value), ["Hà Nội"]);
   assert.equal(h.sources.get("point-data").data.features.length, storeRecords.length);
+});
+
+test("Point selector uses only AI proposed groups and defaults to its first choice", () => {
+  const pointColumns = [...storeColumns, { name: "sector", role: "category", labelVi: "Khối" },
+    { name: "address", role: "text" }];
+  const pointRecords = storeRecords.map(record => ({ ...record,
+    sector: record.ma_cua_hang === "CH01" ? "Tư nhân" : "Công lập", address: "Địa chỉ cơ sở" }));
+  const h = harness({ point: true, pointColumns, pointRecords, pointGroupFields: ["sector", "thanh_pho"], pointBindingGroup: "thanh_pho" });
+  assert.deepEqual(h.all(".ai-point-group")[0].children.map(option => option.value), ["sector", "thanh_pho"]);
+  assert.equal(h.run("dataset.activePointView.selection.groupField"), "sector");
+  assert.deepEqual(h.run("dataset.activePointView.legendRows.map(row => row.label)"), ["Công lập", "Tư nhân"]);
+
+  const plain = harness({ point: true, pointColumns, pointRecords, pointGroupFields: [] });
+  assert.equal(plain.all(".ai-point-group").length, 0);
+  assert.equal(plain.run("dataset.activePointView.selection.groupField"), null);
 });
 
 test("Point picker accepts more than eight groups and reset keeps only the top five", async () => {
