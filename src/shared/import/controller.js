@@ -64,10 +64,10 @@ export function createController(context) {
       try { spatialData = recordsToPointGeoJSON(pipeline.records); } catch { /* Text data without coordinates. */ }
       return { kind: "ai-pipeline", pipeline: { ...pipeline, spatialData } };
     }
-    if (!["xlsx", "xls", "csv", "json", "geojson"].includes(extension)) {
+    if (!["xlsx", "xlsm", "xls", "csv", "json", "geojson"].includes(extension)) {
       throw new Error("Định dạng chưa hỗ trợ. Hãy chọn CSV, Excel, JSON, GeoJSON, TXT hoặc DOCX.");
     }
-    if (["xlsx", "xls", "csv"].includes(extension)) {
+    if (["xlsx", "xlsm", "xls", "csv"].includes(extension)) {
       const parsed = await parseSpreadsheetFile(file, {
         extension,
         sheetName,
