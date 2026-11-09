@@ -34,6 +34,10 @@ Workspace sử dụng snapshot để lấy dữ liệu và chú giải. Arc Flow
 
 Model cấu hình riêng được tạo lại cho từng instance. Dữ liệu thô, metadata và kết quả chuẩn hóa thuộc dataset của runtime; không truyền state của một runtime cho runtime khác.
 
+`tableRecords` trong snapshot chỉ được tạo khi có nơi đọc (bảng/CSV) và được dùng lại trong cùng snapshot. Đọc metadata, dữ liệu bản đồ hoặc cấu hình tìm kiếm không duyệt lại properties của toàn bộ feature. Snapshot mới phản ánh dữ liệu và properties hiện tại, kể cả khi thay properties trên geometry đang dùng.
+
+SheetJS nằm trong worker đọc bảng; nhánh dự phòng không có Worker tải parser bằng import động khi cần. Renderer popup cột/đường/tròn tải React/Recharts ở lần vẽ đầu tiên qua `src/charts/lazy-renderers.js`; đóng hoặc thay popup hủy lượt vẽ đang chờ. Các hàm định dạng ngày và màu đường dùng chung nằm trong `line-format.js` để pipeline dữ liệu không kéo renderer vào gói khởi động.
+
 ## Giao diện và AI
 
 Markup cố định của bộ điều chỉnh thuộc `controls.js` của module. `createLayerDocument.mountHTML()` gắn markup vào slot chung và cấp ID riêng cho mỗi dataset, kể cả `for` và các thuộc tính ARIA. Các bộ lọc động tiếp tục do controller của module dựng.

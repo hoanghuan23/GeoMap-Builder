@@ -35,3 +35,27 @@ test("AbortSignal chỉ ở main thread và không bị structured-clone sang Wo
   assert.equal("signal" in messages[1].payload.options, false);
   assert.equal(messages[0].payload.options.includeSamples, false);
 });
+
+test('no-Worker fallback still parses Vietnamese CSV and profiles records', async t => {
+  const originalWorker = globalThis.Worker;
+  globalThis.Worker = undefined;
+  t.after(() => { if (originalWorker === undefined) delete globalThis.Worker; else globalThis.Worker = originalWorker; });
+  const records = [{ 'Tỉnh': 'Hà Nội', 'Giá trị': '0' }];
+  const parsed = await parseSpreadsheetFile({ arrayBuffer: async () => new TextEncoder().encode('Tỉnh,Giá trị\nHà Nội,0').buffer },
+    { extension: 'csv', includeSamples: false });
+  assert.deepEqual(parsed.records, records);
+  assert.equal(parsed.profile.rowCount, 1);
+  const profiled = await profileRecordsInWorker(records, { includeSamples: false });
+  assert.equal(profiled.records, records);
+  assert.deepEqual(profiled.profile, parsed.profile);
+});
+
+test('aborting while the fallback module loads prevents parsing', async t => {
+  const originalWorker = globalThis.Worker;
+  globalThis.Worker = undefined;
+  t.after(() => { if (originalWorker === undefined) delete globalThis.Worker; else globalThis.Worker = originalWorker; });
+  const controller = new AbortController();
+  const pending = profileRecordsInWorker([{ value: 1 }], { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+});

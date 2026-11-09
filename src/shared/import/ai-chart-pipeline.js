@@ -1,6 +1,6 @@
 import { mapRegistry } from "../../maps/registry.js";
 import { BAR_COLORS, humanizeField } from "../../charts/data-transformers.js";
-import { formatLineX, LINE_COLORS } from "../../charts/line-chart.js";
+import { formatLineX, LINE_COLORS } from "../../charts/line-format.js";
 import { serializeTabularValue } from "./tabular-data.js";
 import { chartTimeValue, compareTimeValues, timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "../data/time-values.js";
 import { AGGREGATION_VALUES, measureAggregation, measureUnit } from "../data/measure-semantics.js";

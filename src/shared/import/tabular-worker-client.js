@@ -1,15 +1,21 @@
-import { parseSpreadsheetBuffer, profileRecords } from "./tabular-parser.js";
-
 let requestSequence = 0;
 
 function abortError() {
   return new DOMException("Aborted", "AbortError");
 }
 
-function runWorker(action, payload, { signal, transfer = [] } = {}) {
+async function runWorker(action, payload, { signal, transfer = [] } = {}) {
   if (signal?.aborted) return Promise.reject(abortError());
   if (typeof Worker === "undefined") {
-    return Promise.resolve(action === "spreadsheet" ? parseSpreadsheetBuffer(payload.buffer, payload.options) : profileRecords(payload.records, payload.options));
+    if (action === "profile") {
+      const { profileTabularData } = await import("./tabular-data.js");
+      if (signal?.aborted) throw abortError();
+      return { records: payload.records, profile: profileTabularData(payload.records, payload.options) };
+    }
+    // Keep SheetJS out of the startup bundle, including the no-Worker fallback.
+    const { parseSpreadsheetBuffer } = await import("./tabular-parser.js");
+    if (signal?.aborted) throw abortError();
+    return parseSpreadsheetBuffer(payload.buffer, payload.options);
   }
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./tabular-parser.worker.js", import.meta.url), { type: "module" });

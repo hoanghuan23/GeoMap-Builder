@@ -1,8 +1,6 @@
 import { mapRegistry } from '../../maps/registry.js';
 import { visibleDatasetColumns } from '../data/display-fields.js';
-import { BarRenderer as default_BarRenderer } from "../../charts/bar-chart.js";
-import { LineRenderer as default_LineRenderer } from "../../charts/line-chart.js";
-import { PieRenderer as default_PieRenderer } from '../../charts/pie-chart.js';
+import { BarRenderer as default_BarRenderer, LineRenderer as default_LineRenderer, PieRenderer as default_PieRenderer } from '../../charts/lazy-renderers.js';
 import { pieChartFields } from './pie-chart-data.js';
 import { humanizeField as default_humanizeField } from "../../charts/data-transformers.js";
 import { renderChartIcon as default_renderChartIcon } from "../../charts/chart-icons.js";

@@ -41,8 +41,13 @@ export function viewSnapshot(context, definition, { data, sourceData = context.s
     filtered: filtered || Object.values(dataset?.filters || {}).some(value => Array.isArray(value) ? value.length > 0 : value != null && value !== ''),
     sourceRecords: dataset?.records, locationKeys: dataset?.boundaries?.locationKeys };
   const extent = geometryExtent(data);
+  // Most callers only need map/search metadata. Materialize rows on demand and
+  // keep them within this snapshot so later data/property edits stay fresh.
+  let records = tableRecords;
   return { data, sourceData, search, configuration, extent, legendVisible, popupLayerId, camera, definition,
-    tableRecords: tableRecords || (dataset && (!state.mapType || !extent) ? dataset.records : (data?.features || []).map(feature => feature.properties || {})) };
+    get tableRecords() {
+      return records ||= dataset && (!state.mapType || !extent) ? dataset.records : (data?.features || []).map(feature => feature.properties || {});
+    } };
 }
 
 /** Shared lifecycle only; drawing, controls and data transformations stay in each map. */
