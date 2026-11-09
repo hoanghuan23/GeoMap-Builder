@@ -119,7 +119,7 @@ export function createController(context) {
     const info=context.modules.active()?.getPopupContext(feature) || {};
     const scale=info.legendScale;
     const availableColumns=visibleDatasetColumns(dataset);
-    const popupColumns=dataset.popupFields ? dataset.popupFields.map(name=>availableColumns.find(column=>column.name===name)).filter(Boolean) : availableColumns;
+    const popupColumns=Array.isArray(dataset.popupFields) ? dataset.popupFields.map(name=>availableColumns.find(column=>column.name===name)).filter(Boolean) : availableColumns;
     const displayedColumns=popupColumns.filter(column=>!column.name.startsWith('__')).map(column=>{
       if(column.name===scale?.field)return {...column,unit:scale.unit,labelVi:scale.aggregation==='count'?'Số bản ghi':column.labelVi};
       return column.role==='time'&&recommendation.filters?.some(filter=>filter.field===column.name&&filter.control==='datetime-select')?{...column,granularity:'datetime'}:column;
@@ -200,7 +200,8 @@ export function createController(context) {
       const baseRecords = view.arcInfo?.records || popupRegionRecords(dataset.records, view.feature, dataset.recommendation?.geometry?.field,
         { chartType: activeMapPopupSuggestion().chartType, columns: dataset.analysis.columns, bindings: activeMapPopupSuggestion().bindings });
       card = createInfoImagePopup(document, { sources: [{ title: dataset.fileName || dataset.analysis.datasetTitle,
-        columns: visibleDatasetColumns(dataset), popupContent: { ...content, titleField }, records: baseRecords.length ? baseRecords : [view.feature.properties || {}] }, ...joined],
+        columns: visibleDatasetColumns(dataset), displayFields: dataset.popupFields,
+        popupContent: { ...content, titleField }, records: baseRecords.length ? baseRecords : [view.feature.properties || {}] }, ...joined],
         title: view.arcInfo?.title,
         coordinates: view.feature.geometry?.type === "Point" ? view.feature.geometry.coordinates : null,
         onLayout: () => { if (context.popups.mapPopupView === view) sizeMapPopup(view); } });

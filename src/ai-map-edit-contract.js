@@ -87,7 +87,7 @@ export function normalizeEditResult(raw, context) {
         && value.every(name => layer.availableMetrics.includes(name)) && new Set(value).size === value.length; break;
       case 'visible': case 'legendVisible': valid = typeof value === 'boolean'; break;
       case 'popupMode': valid = layer.popupModes.includes(value); break;
-      case 'popupFields': valid = layer.popupModes.includes('info') && Array.isArray(value) && value.length <= layer.columns.length
+      case 'popupFields': valid = (layer.popupModes.includes('info') || layer.mapType === 'arc') && Array.isArray(value) && value.length <= layer.columns.length
         && value.every(name => layer.columns.some(column => column.name === name)) && new Set(value).size === value.length; break;
       case 'hexEnabled': valid = layer.mapType === 'polygon' && typeof value === 'boolean'; break;
       case 'hexResolution': valid = layer.mapType === 'polygon' && Number.isInteger(value) && value >= 0 && value <= 15; break;

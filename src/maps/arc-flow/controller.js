@@ -57,7 +57,10 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
     const view = state.arcFlowView; if (!view) return;
     const b = currentSuggestion.bindings;
     const rows = [[view.model.metricLabel, flow.value, { unit: view.model.unit }], ['Bản ghi tổng hợp', flow.rowIndices.length]];
-    for (const column of view.model.columns) if (![b.source, b.target, b.sourceLat, b.sourceLng, b.targetLat, b.targetLng, b.value].includes(column.name)) {
+    const popupColumns = Array.isArray(state.aiDataset.popupFields)
+      ? state.aiDataset.popupFields.map(name => view.model.columns.find(column => column.name === name)).filter(Boolean)
+      : view.model.columns;
+    for (const column of popupColumns) if (![b.source, b.target, b.sourceLat, b.sourceLng, b.targetLat, b.targetLng, b.value].includes(column.name)) {
       const value = flow.properties[column.name];
       if (value != null && value !== '') rows.push([column.labelVi || column.name, value, column]);
     }

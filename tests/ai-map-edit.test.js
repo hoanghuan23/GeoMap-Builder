@@ -23,6 +23,19 @@ test('map edit rejects the whole batch for unknown layers, fields, styles, modes
   assert.throws(() => normalizeEditResult(result([op('hexEnabled', true)]), normalizeEditContext({ ...rawContext(), layers: [{ ...rawContext().layers[0], mapType: 'point' }] })));
 });
 
+test('chat can add or remove popup fields while preserving the other selected fields', () => {
+  const raw = rawContext();
+  raw.layers[0].columns.push({ name: 'address', role: 'text' }, { name: 'phone', role: 'text' });
+  raw.layers[0].popupFields = ['address', 'name'];
+  const context = normalizeEditContext(raw);
+  assert.deepEqual(context.layers[0].popupFields, ['address', 'name']);
+  assert.deepEqual(JSON.parse(normalizeEditResult(result([op('popupFields', ['address', 'name', 'phone'])]), context).operations[0].value),
+    ['address', 'name', 'phone']);
+  assert.deepEqual(JSON.parse(normalizeEditResult(result([op('popupFields', ['address'])]), context).operations[0].value), ['address']);
+  const arc = normalizeEditContext({ ...raw, layers: [{ ...raw.layers[0], mapType: 'arc', popupModes: [] }] });
+  assert.deepEqual(JSON.parse(normalizeEditResult(result([op('popupFields', ['phone'])]), arc).operations[0].value), ['phone']);
+});
+
 test('legend edits preserve the metric target, aggregation and units; data colors cannot bypass the legend', () => {
   const raw = rawContext(); raw.layers[0].legendTarget = { field: 'temperature', aggregation: 'mean', unit: '°C' };
   const context = normalizeEditContext(raw);

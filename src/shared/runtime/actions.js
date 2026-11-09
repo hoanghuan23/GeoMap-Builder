@@ -117,6 +117,7 @@ export function createController(context) {
       geoAliases: {},
       geoSelections: {},
       popupSelections: {},
+      ...(Array.isArray(pipeline.analysis.popupFields) ? { popupFields: [...pipeline.analysis.popupFields] } : {}),
       recommendation: null,
       boundaries: null
     };

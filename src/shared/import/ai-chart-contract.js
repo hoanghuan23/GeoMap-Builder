@@ -72,10 +72,12 @@ const LEGEND_SCHEMA = { anyOf: [...POLYGON_LEGEND_SCHEMA.anyOf, { type: "null" }
 export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["datasetTitle", "grain", "columns", "suggestions", "search_bar", "search_fields", "regionNavigation", "popupContent", "geographicEnrichment"],
+  required: ["datasetTitle", "grain", "columns", "suggestions", "search_bar", "search_fields", "regionNavigation", "popupContent", "popupFields", "geographicEnrichment"],
   properties: {
     geographicEnrichment: GEOGRAPHIC_ENRICHMENT_SCHEMA,
     popupContent: POPUP_CONTENT_SCHEMA,
+    popupFields: { type: "array", items: { type: "string" },
+      description: "Các tên cột gốc nên hiển thị trong popup thông tin, theo thứ tự ưu tiên. Chỉ chọn thông tin hữu ích cho một đối tượng; không liệt kê toàn bộ cột." },
     datasetTitle: { type: "string" },
     grain: { type: "string" },
     search_bar: { type: "boolean", description: "Có nên bật tìm kiếm mặc định theo số đối tượng và lợi ích tìm nhanh; không dùng ngưỡng 30 cứng." },
@@ -331,6 +333,8 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     ...(geographicEnrichment.length ? { geographicEnrichment } : {}),
     ...(pointGeocoding ? { pointGeocoding } : {}),
     ...(raw.popupContent ? { popupContent: normalizePopupContent(raw.popupContent, columns) } : {}),
+    ...(Array.isArray(raw.popupFields) ? { popupFields: [...new Set(raw.popupFields.filter(name =>
+      typeof name === 'string' && !name.startsWith('__') && columns.some(column => column.name === name && column.role !== 'ignore')))] } : {}),
     suggestions: suggestions.map(suggestion => ({ ...suggestion, source })),
     ...normalizeDataSearchConfig(raw, columns),
     ...(Object.hasOwn(raw, "regionNavigation") ? { regionNavigation: source === "ai" ? normalizeRegionNavigation(raw.regionNavigation, columns) : null } : {}),

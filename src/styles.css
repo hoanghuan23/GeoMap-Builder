@@ -2574,8 +2574,15 @@ input[type=range] {
   box-sizing: border-box;
   min-width: 0;
   width: 100%;
-  max-height: min(640px, var(--popup-map-height, calc(100vh - 48px)));
+  --popup-content-height: min(640px, var(--popup-map-height, calc(100vh - 48px)));
+  max-height: var(--popup-content-height);
+  overflow: hidden;
+}
+.ai-map-popup:not(.has-info-image) .maplibregl-popup-content > .weather-popup {
+  box-sizing: border-box;
+  max-height: calc(var(--popup-content-height) - 2px);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .ai-weather-popup.ai-map-popup .maplibregl-popup-close-button { top: 8px; right: 8px; z-index: 1; }
 .ai-popup-chart { height: 320px; min-width: 0; margin-top: 16px; }

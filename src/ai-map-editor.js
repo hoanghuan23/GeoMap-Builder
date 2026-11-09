@@ -32,7 +32,9 @@ export function createAiMapEditor({ workspace, runtimes, templatePicker, appeara
           style: view.configuration?.style || {}, metric: module?.metricField(), metrics: module?.metricColumns().map(column => column.name) || [],
           availableMetrics: (module?.allMetricColumns?.() || module?.metricColumns() || []).map(column => column.name),
           popupModes, popupMode: dataset?.popupSelections?.[suggestion?.id]?.mode || popupDisplayOptions(popup, visibleDatasetColumns(dataset, columns))[0]?.name,
-          popupFields: visibleDatasetColumns(dataset, columns).filter(column => !dataset?.popupFields || dataset.popupFields.includes(column.name)).map(column => column.name), legendTarget, legend,
+          popupFields: Array.isArray(dataset?.popupFields)
+            ? dataset.popupFields.filter(name => visibleDatasetColumns(dataset, columns).some(column => column.name === name))
+            : visibleDatasetColumns(dataset, columns).map(column => column.name), legendTarget, legend,
           hexEnabled: view.configuration?.regionHexEnabled, hexResolution: view.configuration?.regionHexResolution };
       }) });
   }

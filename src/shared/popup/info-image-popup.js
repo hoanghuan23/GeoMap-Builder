@@ -72,15 +72,17 @@ export function createInfoImagePopup(documentRef, { sources, coordinates, title,
       if (source.records.length > 1) section.append(node('h3', 'info-image-source-label', `Mục ${recordIndex + 1}`));
       const config = source.popupContent;
       if (source !== configured[0] && present(record[config.titleField])) section.append(node('h4', '', record[config.titleField]));
+      const selected = Array.isArray(source.displayFields) ? new Set(source.displayFields) : null;
       for (const [fields, className] of [[config.addressFields, 'info-image-address'], [config.descriptionFields, 'info-image-description']]) {
         for (const field of fields) if (present(record[field])) {
+          if (selected && !selected.has(field)) continue;
           const value = node('p', className);
           setPopupValue(documentRef, value, record[field]);
           section.append(value);
         }
       }
       const links = node('div', 'info-image-links');
-      for (const field of config.linkFields) for (const url of popupUrls(record[field])) {
+      for (const field of config.linkFields) for (const url of selected && !selected.has(field) ? [] : popupUrls(record[field])) {
         const link = node('a', '', source.columns.find(column => column.name === field)?.labelVi || field);
         link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; links.append(link);
       }
@@ -88,7 +90,7 @@ export function createInfoImagePopup(documentRef, { sources, coordinates, title,
       const excluded = new Set([config.titleField, ...config.imageFields, ...config.descriptionFields, ...config.addressFields, ...config.linkFields]);
       const details = node('dl', 'info-image-details');
       for (const detail of aiPopupRows(record, source.columns)) {
-        if (excluded.has(detail.field) || detail.field.startsWith('__')) continue;
+        if (excluded.has(detail.field) || detail.field.startsWith('__') || selected && !selected.has(detail.field)) continue;
         const row = node('div', ''); const value = node('dd', '');
         setPopupValue(documentRef, value, record[detail.field], detail.value);
         row.append(node('dt', '', detail.label), value); details.append(row);

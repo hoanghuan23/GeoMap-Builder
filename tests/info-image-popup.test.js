@@ -91,3 +91,28 @@ test('popup metadata uses only exact real columns and survives both analysis nor
   assert.equal(options[0].available, true);
   assert.equal(popupDisplayOptions({ popupSuggestions: [{ name: 'info_image', confidence: 1 }] }, columns)[0].name, 'info');
 });
+
+test('AI popup field choices keep their order, reject unknown fields, and limit image popup details', () => {
+  assert.ok(ANALYSIS_RESPONSE_SCHEMA.required.includes('popupFields'));
+  const profile = { columns, rowCount: 2 };
+  const raw = { datasetTitle: 'Địa điểm', grain: 'Một địa điểm', columns, suggestions: [],
+    popupFields: ['google_maps_url', 'ten_chua', 'google_maps_url', 'missing', '__internal'], popupContent: imagePopupContent };
+  const analysis = validateAndNormalizeAnalysis(raw, profile);
+  assert.deepEqual(analysis.popupFields, ['google_maps_url', 'ten_chua']);
+  assert.deepEqual(validateAndNormalizeAnalysis(analysis, profile).popupFields, analysis.popupFields);
+
+  const card = createInfoImagePopup(documentRef, { sources: [{ ...sources[0], displayFields: ['google_maps_url'] }] });
+  assert.ok(find(card, 'info-image-photo'));
+  assert.equal(all(card).filter(child => child.className === 'info-image-description').length, 0);
+  assert.equal(all(card).filter(child => child.className === 'info-image-details').flatMap(child => child.children).length, 0);
+  assert.ok(find(card, 'info-image-links').children.length > 0);
+});
+
+test('AI may select more than twelve useful popup fields', () => {
+  const manyColumns = Array.from({ length: 15 }, (_, index) => ({ name: `field_${index}`, role: 'text' }));
+  const popupFields = manyColumns.map(column => column.name);
+  assert.equal(ANALYSIS_RESPONSE_SCHEMA.properties.popupFields.maxItems, undefined);
+  const analysis = validateAndNormalizeAnalysis({ datasetTitle: 'Dữ liệu', grain: 'Một đối tượng',
+    columns: manyColumns, suggestions: [], popupFields }, { columns: manyColumns, rowCount: 1 });
+  assert.deepEqual(analysis.popupFields, popupFields);
+});
