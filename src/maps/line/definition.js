@@ -34,12 +34,6 @@ export const definition = Object.freeze({
       lat: Object.freeze(["geo", "measure"]), lng: Object.freeze(["geo", "measure"]), x: Object.freeze(["time", "id", "measure", "category"]) }),
     icon: "line",
     renderer: "MapLibre",
-  instructions: [
-  {
-    "order": 24,
-    "text": "Bản đồ Line/map_line khác biểu đồ đường trong popup. Có HAI cách dựng Line: (1) bảng tên/mã đường: bindings.region là tên/mã tuyến category/geo/text/id, bindings.value là chỉ số hoặc trạng thái tô màu tùy chọn, các binding tọa độ và x là null; ứng dụng ghép mạng đường Việt Nam theo Khu vực, tên và mã đường. (2) chuỗi tọa độ có thứ tự/di chuyển/hành trình: bindings.lat và lng là cột tọa độ; bindings.region là mã nhóm tuyến/hành trình/đối tượng di chuyển nếu có; bindings.x là thứ tự hoặc thời gian nếu có; bindings.value là chỉ số/trạng thái tùy chọn. Nếu không có x, dùng thứ tự dòng trong file. Không nối các nhóm tuyến khác nhau. Không dùng đường nối tọa độ để giả lập mạng đường thực tế."
-  }
-],
   bindingPlan(bindings, profile) {
     const native = profile?.spatial?.nativeGeometry === true && profile.spatial.geometryKinds?.includes('line');
     const coordinates = bindings.lat && bindings.lng;
