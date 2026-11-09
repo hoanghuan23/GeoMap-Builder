@@ -290,7 +290,36 @@ const weatherStations = { type: "FeatureCollection", features: Array.from({ leng
   geometry: { type: "Point", coordinates: [105.935752 + index / 100, 21.079462 + index / 100] }
 })) };
 
-test("weather station GeoJSON calls AI with properties and bounded samples, then exposes Point metrics", async () => {
+test("Point GeoJSON uses the AI ownership group instead of forcing a single color", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    const { context, sources } = createHarness();
+    context.requestAiDataAnalysis = requestAiDataAnalysis;
+    const data = { type: "FeatureCollection", features: Array.from({ length: 47 }, (_, index) => ({
+      type: "Feature", properties: { name: `Cơ sở ${index}`, sector: index < 38 ? "Tư nhân" : "Công lập" },
+      geometry: { type: "Point", coordinates: [105.8 + index / 1000, 21] }
+    })) };
+    globalThis.fetch = async (_url, options) => {
+      const { profile } = JSON.parse(options.body);
+      const analysis = mockAiAnalysis(profile);
+      return { ok: true, json: async () => ({ ...analysis,
+        columns: analysis.columns.map(column => column.name === "sector" ? { ...column, role: "category", labelVi: "Khối" } : column),
+        suggestions: analysis.suggestions.filter(item => item.chartType === "point").map(item => ({ ...item,
+          bindings: { ...item.bindings, group: "sector" } }))
+      }) };
+    };
+    context.facilitiesFile = { name: "facilities.geojson", text: async () => JSON.stringify(data) };
+    await vm.runInContext("processSpatialFiles([facilitiesFile])", context);
+    assert.equal(sources.get("point-data").data.features.length, 47);
+    const view = JSON.parse(vm.runInContext("JSON.stringify(state.aiDataset.activePointView)", context));
+    assert.equal(view.selection.groupField, "sector");
+    assert.equal(view.legendTitle, "Khối");
+    assert.deepEqual(view.legendRows.map(row => [row.label, row.count]), [["Tư nhân", 38], ["Công lập", 9]]);
+    assert.equal(new Set(view.legendRows.map(row => row.color)).size, 2);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("weather station GeoJSON calls AI with bounded samples, preserving measures without Point metric filters", async () => {
   const originalFetch = globalThis.fetch;
   try {
     for (const includeSamples of [true, false]) {
@@ -329,15 +358,18 @@ test("weather station GeoJSON calls AI with properties and bounded samples, then
       assert.equal(sources.get("point-data").data.features.length, 25);
       assert.deepEqual(sources.get("point-data").data.features[0].geometry.coordinates, weatherStations.features[0].geometry.coordinates);
       const mapControls = get("ai-filter-controls").children.find(node => node.className === "ai-popup-map-controls");
-      const metricSelect = mapControls.children.find(node => node.children[1]?.className === "ai-point-metric").children[1];
-      assert.deepEqual(metricSelect.children.map(option => option.textContent), ["Nhiệt độ", "Độ ẩm"]);
+      assert.equal(mapControls.children.some(node => node.children[1]?.className === "ai-point-metric"), false);
+      assert.equal(sources.get("point-data").data.features[0].properties.nhiet_do_c, weatherStations.features[0].properties.nhiet_do_c);
+      const originalPaint = vm.runInContext("JSON.stringify(state.aiDataset.activePointView.paint)", context);
       vm.runInContext(`
         const suggestion = activePointSuggestion();
         state.aiDataset.pointSelections[suggestion.id].metricField = "do_am_phan_tram";
         refreshPointView(suggestion);
       `, context);
-      assert.equal(vm.runInContext("state.aiDataset.activePointView.metric.field", context), "do_am_phan_tram");
-      assert.equal(calls, 1, "switching metrics reuses the same AI analysis");
+      assert.equal(vm.runInContext("state.aiDataset.activePointView.metric", context), null);
+      assert.equal(vm.runInContext("state.aiDataset.activePointView.selection.metricField", context), null);
+      assert.equal(vm.runInContext("JSON.stringify(state.aiDataset.activePointView.paint)", context), originalPaint);
+      assert.equal(calls, 1, "rerendering reuses the same AI analysis");
       await vm.runInContext("removeUploadedFile(state.primaryUploadId)", context);
       assert.equal(vm.runInContext("state.aiDataset", context), null);
       assert.equal(sources.get("point-data").data.features.length, 0);

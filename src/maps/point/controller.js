@@ -5,7 +5,6 @@ import { createPointModel as default_createPointModel } from "./style.js";
 import { mergePointStyle as default_mergePointStyle } from "./style.js";
 import { normalizePointSelection as default_normalizePointSelection } from "./style.js";
 import { POINT_DEFAULT_GROUPS as default_POINT_DEFAULT_GROUPS } from "./style.js";
-import { POINT_GROUP_LIMIT as default_POINT_GROUP_LIMIT } from "./style.js";
 import { formatTimeValue as default_formatTimeValue } from "../../shared/data/time-values.js";
 import { timeValueInfo as default_timeValueInfo } from "../../shared/data/time-values.js";
 import { popupTimeColumn as default_popupTimeColumn } from "../../shared/popup/ai-popup-chart.js";
@@ -34,8 +33,6 @@ export function createController(context) {
 
   const POINT_DEFAULT_GROUPS = context.dependencies?.POINT_DEFAULT_GROUPS ?? default_POINT_DEFAULT_GROUPS;
 
-  const POINT_GROUP_LIMIT = context.dependencies?.POINT_GROUP_LIMIT ?? default_POINT_GROUP_LIMIT;
-
   const formatTimeValue = (...args) => (context.dependencies?.formatTimeValue ?? default_formatTimeValue)(...args);
 
   const timeValueInfo = (...args) => (context.dependencies?.timeValueInfo ?? default_timeValueInfo)(...args);
@@ -61,8 +58,7 @@ export function createController(context) {
     const dataset = state.aiDataset;
     dataset.pointSelections ||= Object.create(null);
     return dataset.pointSelections[suggestion.id] ||= normalizePointSelection(pointModelFor(suggestion), {
-      ...dataset.pointSelectionDefaults,
-      metricField: services.ui.mapMetricButtons(dataset, suggestion)[0]?.field
+      ...dataset.pointSelectionDefaults
     });
   }
 
@@ -71,9 +67,6 @@ export function createController(context) {
     const selection = pointSelectionFor(suggestion);
     const group = model.groups.find(column => column.name === selection.groupField);
     const nodes = [];
-    if (model.measures.length) {
-      nodes.push(services.ui.aiField("Chỉ số", services.ui.aiSelect("ai-point-metric", model.measures.map(column => [column.name, column.label]), selection.metricField)));
-    }
     if (model.groups.length) {
       nodes.push(services.ui.aiField("Hiển thị theo", services.ui.aiSelect("ai-point-group", model.groups.map(column => [column.name, column.label]), selection.groupField)));
     }
@@ -85,7 +78,7 @@ export function createController(context) {
         const search = Object.assign(document.createElement("input"), { type: "search", className: "ai-series-search", placeholder: "Tìm…" });
         search.setAttribute("aria-label", `Tìm ${label}`);
         const counter = document.createElement("span"); counter.dataset.role = "point-group-count";
-        counter.textContent = `${selection.selectedValues.length}/${POINT_GROUP_LIMIT}`;
+        counter.textContent = `${selection.selectedValues.length}/${group.values.length}`;
         const reset = Object.assign(document.createElement("button"), { type: "button", className: "ai-point-reset secondary-button", textContent: `Đặt lại (top ${POINT_DEFAULT_GROUPS})` });
         const head = document.createElement("div"); head.className = "ai-series-head"; head.append(counter, reset);
         const list = document.createElement("div"); list.className = "ai-series-list";
@@ -107,7 +100,7 @@ export function createController(context) {
         const hasTime = date instanceof Date && !date.toISOString().endsWith("T00:00:00.000Z");
         return [value, formatTimeValue(value, model.timeColumn, hasTime)];
       });
-      const time = services.ui.aiSelect("ai-point-time", choices, selection.time);
+      const time = services.ui.aiSelect("ai-point-time", [["", "Tất cả"], ...choices], selection.time);
       const label = model.timeColumn.labelVi || humanizeField(model.timeColumn.name);
       time.setAttribute("aria-label", `${label} hiển thị bản đồ`);
       nodes.push(services.ui.aiField(label, time));
@@ -129,16 +122,11 @@ export function createController(context) {
       swatch.style.background = input.checked ? view.colors[input.value] : "#dce3ed";
     });
     const counter = document.querySelector("#ai-filter-controls [data-role='point-group-count']");
-    if (counter) counter.textContent = `${selected.size}/${POINT_GROUP_LIMIT}`;
+    if (counter) {
+      const group = pointModelFor(activePointSuggestion()).groups.find(column => column.name === view.selection.groupField);
+      counter.textContent = `${selected.size}/${group.values.length}`;
+    }
     document.querySelectorAll("#ai-filter-controls .ai-point-time").forEach(select => { select.value = view.selection.time; });
-  }
-
-  function pointMetricText(metric) {
-    if (!metric) return "";
-    const label = metric.unit && !metric.label.toLocaleLowerCase("vi").includes(metric.unit.toLocaleLowerCase("vi")) ? `${metric.label} (${metric.unit})` : metric.label;
-    const format = value => new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 }).format(value);
-    const range = metric.min == null ? "Không có giá trị hợp lệ" : metric.min === metric.max ? format(metric.min) : `${format(metric.min)} – ${format(metric.max)}`;
-    return `Kích thước theo ${label}: ${range}${metric.missingCount ? ` · ${metric.missingCount.toLocaleString("vi-VN")} điểm thiếu chỉ số (cỡ nhỏ nhất)` : ""}`;
   }
 
   function pointColorOverridesFor(suggestion) {
@@ -159,7 +147,7 @@ export function createController(context) {
     $("point-show-border").checked = style.showBorder;
     $("point-show-legend").checked = style.showLegend;
     const view = activePointSuggestion() ? state.aiDataset.activePointView : null;
-    const grouped = Boolean(view?.metric) && view.selection.mode === "pick";
+    const grouped = Boolean(view?.selection.groupField);
     $("point-fixed-color-field").hidden = grouped;
     $("point-group-color-field").hidden = !grouped;
     $("point-show-legend-field").hidden = !view;
@@ -212,8 +200,9 @@ export function createController(context) {
       row.append(swatch, label, amount); list.append(row);
     }
     const note = document.createElement("small");
-    note.textContent = [view.selection.time ? formatTimeValue(view.selection.time, popupTimeColumn(state.aiDataset.analysis.columns)) : "",
-      pointMetricText(view.metric) || "Kích thước điểm thay đổi theo mức thu phóng"].filter(Boolean).join(" · ");
+    note.textContent = view.selection.time ? formatTimeValue(view.selection.time, popupTimeColumn(state.aiDataset.analysis.columns))
+      : view.selection.time === "" ? "Tất cả thời gian" : "";
+    note.hidden = !note.textContent;
     legend.replaceChildren(heading, list, note);
   }
 
@@ -275,24 +264,24 @@ export function createController(context) {
   }
 
   async function handleChange(event) {
-  if (event.target.matches(".ai-point-metric, .ai-point-group, .ai-point-mode, .ai-point-value, .ai-point-time")) {
+  if (event.target.matches(".ai-point-group, .ai-point-mode, .ai-point-value, .ai-point-time")) {
         const suggestion = activePointSuggestion();
         if (!suggestion) return true;
         const selection = pointSelectionFor(suggestion);
         const control = event.target;
         let rebuildControls = false;
-        if (control.matches(".ai-point-metric")) { await services.ui.changeAiMapMetric(control.value); return true; }
-        else if (control.matches(".ai-point-group")) {
+        if (control.matches(".ai-point-group")) {
           selection.groupField = control.value;
           selection.selectedValues = [];
+          delete selection.mode;
           state.aiDataset.pointSelections[suggestion.id] = normalizePointSelection(pointModelFor(suggestion), selection);
           rebuildControls = true;
         } else if (control.matches(".ai-point-mode")) { selection.mode = control.value; rebuildControls = true; }
         else if (control.matches(".ai-point-value")) {
           const values = control.checked ? [...selection.selectedValues, control.value] : selection.selectedValues.filter(value => value !== control.value);
-          if (values.length > POINT_GROUP_LIMIT || !values.length) {
+          if (!values.length) {
             control.checked = !control.checked;
-            services.ui.showToast(values.length ? `Chỉ có thể hiển thị tối đa ${POINT_GROUP_LIMIT} nhóm.` : "Cần chọn ít nhất một nhóm.");
+            services.ui.showToast("Cần chọn ít nhất một nhóm.");
             return true;
           }
           selection.selectedValues = values;
@@ -308,12 +297,12 @@ export function createController(context) {
         const suggestion = activePointSuggestion();
         if (!suggestion) return true;
         const selection = pointSelectionFor(suggestion);
-        state.aiDataset.pointSelections[suggestion.id] = normalizePointSelection(pointModelFor(suggestion), { ...selection, selectedValues: [] });
+        state.aiDataset.pointSelections[suggestion.id] = normalizePointSelection(pointModelFor(suggestion), { ...selection, mode: "pick", selectedValues: [] });
         refreshPointView(suggestion, { rebuildControls: true });
         return true;
       }
   return false;
   }
 
-  return { bindControls, handleChange, handleClick, activePointSuggestion, pointModelFor, pointSelectionFor, populatePointControls, syncPointControls, pointMetricText, pointColorOverridesFor, renderPointStyleControls, buildActivePointView, refreshPointStyle, renderPointLegend, refreshPointView, activateAiPoint };
+  return { bindControls, handleChange, handleClick, activePointSuggestion, pointModelFor, pointSelectionFor, populatePointControls, syncPointControls, pointColorOverridesFor, renderPointStyleControls, buildActivePointView, refreshPointStyle, renderPointLegend, refreshPointView, activateAiPoint };
 }

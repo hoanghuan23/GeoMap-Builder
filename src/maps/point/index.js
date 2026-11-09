@@ -34,15 +34,13 @@ export function create(parent) {
       controller.refreshPointStyle(); controller.renderPointStyleControls(); },
     clear() { state.pointData = { type: 'FeatureCollection', features: [] }; },
     renderControls() { controller.renderPointStyleControls(); },
-    metricColumns: () => { const suggestion = controller.activePointSuggestion(); return suggestion ? controller.pointModelFor(suggestion, true).measures : []; },
-    metricField: () => { const suggestion = controller.activePointSuggestion(); return suggestion && controller.pointSelectionFor(suggestion).metricField; },
+    metricColumns: () => [],
+    metricField: () => null,
     popupContext: () => ({ titleField: pointTitleField(state.aiDataset?.analysis.columns || []) || state.aiDataset?.analysis.search_fields?.[0] }),
-    changeMetric(field) { const suggestion = controller.activePointSuggestion(); controller.pointSelectionFor(suggestion).metricField = field;
-      for (const select of document.querySelectorAll('#ai-filter-controls .ai-point-metric')) select.value = field; controller.refreshPointView(suggestion); },
     getView() { const selection = state.aiDataset?.activePointView?.selection;
       return viewSnapshot(context, definition, { data: state.pointData, titleField: pointTitleField(state.aiDataset?.analysis.columns || []),
         filtered: Boolean(selection?.mode === 'pick' || selection?.time), legendVisible: state.pointStyle.showLegend, configuration:{style:{...state.pointStyle}}, popupLayerId: 'point-marker' }); },
-    presentation: () => ({ stylePanel: 'point-style-controls', description: 'Kích thước, màu sắc, độ mờ, đường viền và chú giải', filterDescription: 'Chọn chỉ số, nhóm điểm và thời gian hiển thị' })
+    presentation: () => ({ stylePanel: 'point-style-controls', description: 'Kích thước, màu sắc, độ mờ, đường viền và chú giải', filterDescription: 'Chọn nhóm điểm và thời gian hiển thị' })
   });
   module.renderFilters=()=>controller.populatePointControls(controller.activePointSuggestion());
   return module;

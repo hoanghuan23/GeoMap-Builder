@@ -93,7 +93,6 @@ export function createController(context) {
           signal,
           source: { fileName: file.name, extension }
         });
-        result.pipeline.pointSelectionDefaults = { mode: "all" };
         return { ...result, data: parsed };
       }
       const records = parsed.type === "FeatureCollection" ? parsed.features.map(feature => feature.properties || {}) : [parsed.properties || {}];

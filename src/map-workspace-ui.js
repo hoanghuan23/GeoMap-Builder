@@ -18,6 +18,13 @@ import { createMapAppearance } from './map-appearance.js';
 
 const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
+const pendingLocationStatus = layer => layer.runtime.state.aiDataset?.analysis?.pointGeocoding?.matched === 0
+  ? layer.runtime.state.aiDataset.analysis.pointGeocoding.reason ? 'Tra tọa độ gặp lỗi' : 'Chưa định vị được địa chỉ'
+  : 'Chưa có vị trí trên bản đồ';
+const pendingLocationReason = layer => layer.runtime.state.aiDataset?.analysis?.pointGeocoding?.matched === 0
+  ? layer.runtime.state.aiDataset.analysis.pointGeocoding.reason ? 'Chưa nhận được kết quả tra tọa độ. Hãy thử phân tích lại.'
+    : 'Chưa tìm được tọa độ từ các địa chỉ trong tệp để hiển thị điểm trên bản đồ.'
+  : layer.attributeReason || layer.runtime.state.aiDataset?.fallbackReason || 'Cần tọa độ hoặc ghép dữ liệu với một lớp bản đồ có đối tượng tương ứng.';
 
 export async function startMapWorkspace(createRuntime, { styles, styleLabels, renderCatalog, templatePicker }) {
   const workspace = createMapWorkspace();
@@ -299,10 +306,10 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       if (layer?.sourceKind !== 'attribute') continue;
       const reports = workspace.attributeJoinReports.filter(report => report.sourceId === layer.id);
       const joins = workspace.attributeJoins.filter(join => join.sourceId === layer.id);
-      upload.status = joins.length ? 'Đã liên kết' : 'Chờ liên kết';
+      upload.status = joins.length ? 'Đã ghép dữ liệu với bản đồ' : pendingLocationStatus(layer);
       upload.message = `${upload.status} · ` + (reports.length ? reports.map(report => report.stats
         ? `${workspace.layersById[report.targetLayerId]?.title}: ${report.stats.matchedObjects} đối tượng khớp, ${report.stats.unmatchedObjects} chưa khớp; ${report.stats.matchedRows} dòng khớp, ${report.stats.unmatchedRows} chưa khớp${report.stats.ambiguousRows ? ` (${report.stats.ambiguousRows} khóa mơ hồ)` : ''}. ${report.reason}`
-        : report.reason).join(' · ') : layer.attributeReason || layer.runtime.state.aiDataset?.fallbackReason || 'Chưa có lớp không gian và khóa liên kết phù hợp.');
+        : report.reason).join(' · ') : pendingLocationReason(layer));
     }
     for (const item of runtimes.values()) item.api.refreshPopupMetadata();
     renderUploads();
@@ -312,7 +319,11 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     const list = $('uploaded-layer-list'); list.replaceChildren();
     for (const [id, upload] of uploads) {
       const row = document.createElement('li'); const name = textNode('span', upload.file.name); name.title = upload.file.name;
-      const detail = textNode('em', upload.message || upload.status);
+      const report = workspace.layersById[upload.layerId]?.runtime?.state?.aiDataset?.analysis?.pointGeocoding;
+      const lookup = report ? `${report.reason && !report.matched ? `Tra tọa độ chưa hoàn tất (${report.total} địa chỉ)`
+        : `Định vị được ${report.matched}/${report.total} địa chỉ${report.unmatched ? `; ${report.unmatched} chưa khớp` : ''}`}${report.googleMapsMatched ? `; Google Maps bổ sung ${report.googleMapsMatched}` : ''}${report.approximate ? `; ${report.approximate} vị trí ước tính` : ''}${report.truncated ? ' (mẫu có giới hạn)' : ''}${report.reason ? ` · ${report.reason}` : ''}` : '';
+      const detail = textNode('em', [upload.message || upload.status, lookup].filter(Boolean).join(' · '));
+      detail.title = detail.textContent;
       const remove = textNode('button', '×', 'remove-uploaded-layer'); remove.type = 'button'; remove.setAttribute('aria-label', `Xóa ${upload.file.name}`);
       remove.addEventListener('click', () => removeUpload(id)); row.append(name, detail, remove);
       if (upload.sheets) {
@@ -404,8 +415,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         runtimes.set(layer.id, item);
         sidebars.append(item.panel); metrics.append(item.metric); legendOriginal.append(item.legends);
         upload.processing = false; upload.sheets = null;
-        upload.layerId = layer.id; upload.status = layer.sourceKind === 'attribute' ? 'Chờ liên kết' : state.mapType ? 'Sẵn sàng' : 'Chưa có bản đồ';
-        upload.message = layer.sourceKind === 'attribute' ? `Chờ liên kết${state.aiDataset?.fallbackReason ? ` · ${state.aiDataset.fallbackReason}` : ''}`
+        upload.layerId = layer.id; upload.status = layer.sourceKind === 'attribute' ? pendingLocationStatus(layer) : state.mapType ? 'Sẵn sàng' : 'Chưa có bản đồ';
+        upload.message = layer.sourceKind === 'attribute' ? `${upload.status} · ${pendingLocationReason(layer)}`
           : state.aiDataset?.fallbackReason || (state.mapType ? title : 'AI chưa đề xuất được bản đồ khả dụng.');
         newIds.push(layer.id);
       } catch (error) {

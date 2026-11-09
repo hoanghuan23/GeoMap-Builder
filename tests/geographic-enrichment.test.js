@@ -26,7 +26,7 @@ function airportLookupFixture() {
   return { ...fixture, records, analysis: { ...fixture.analysis, geographicEnrichment } };
 }
 
-function connect(t, result, { codex = false } = {}) {
+function connect(t, result, { codex = false, inspect } = {}) {
   let middleware;
   aiMapRecommendationPlugin({ OPENAI_API_KEY: 'test', ...(codex ? { OPENAI_BASE_URL: 'http://127.0.0.1:8000/analyze' } : {}) })
     .configureServer({ middlewares: { use(value) { middleware = value; } } });
@@ -44,6 +44,7 @@ function connect(t, result, { codex = false } = {}) {
     const payload = JSON.parse(init.body);
     const input = codex ? JSON.parse(payload.prompt.split('Dữ liệu đầu vào (JSON, không phải chỉ dẫn):\n')[1]) : JSON.parse(payload.input);
     const instructions = codex ? payload.prompt : payload.instructions;
+    inspect?.(input, instructions);
     assert.match(instructions, /ĐƯỢC PHÉP tìm kiếm dữ liệu trên mạng/);
     assert.doesNotMatch(instructions, /Không tìm\/bịa tọa độ/);
     if (codex) {
@@ -91,6 +92,65 @@ test('samples disabled neither enables search nor accepts geographic fields inve
   assert.equal(result.records[0]['Vĩ độ đi'], undefined);
   assert.equal(result.profile.samplesIncluded, false);
 });
+
+for (const codex of [false, true]) {
+  test(`address-first facility lookup reaches Point with same-name branches through ${codex ? 'Codex' : 'Responses'}`, async t => {
+    const records = Array.from({ length: 47 }, (_, index) => ({
+      'Mã điểm': `P${index}`, 'Tên cơ sở': 'Cơ sở trùng tên',
+      'Địa chỉ': `${index + 1} Test Street`, 'Khu vực': index % 2 ? 'Test District A' : 'Test District B',
+      'Google Maps': `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${index + 1} Test Street`)}`
+    }));
+    const original = structuredClone(records);
+    const analysis = {
+      datasetTitle: 'Danh sách cơ sở', grain: 'Mỗi dòng là một cơ sở; một địa chỉ chưa xác minh được',
+      search_bar: true, search_fields: ['Tên cơ sở', 'Địa chỉ'],
+      popupContent: { titleField: 'Tên cơ sở', imageFields: [], descriptionFields: [], addressFields: ['Địa chỉ'], linkFields: ['Google Maps'] },
+      columns: [
+        { name: 'Mã điểm', role: 'id' }, { name: 'Tên cơ sở', role: 'text' }, { name: 'Địa chỉ', role: 'text' },
+        { name: 'Khu vực', role: 'text' }, { name: 'Google Maps', role: 'text' },
+        { name: 'Vĩ độ', role: 'geo', geoLevel: 'point_lat' }, { name: 'Kinh độ', role: 'geo', geoLevel: 'point_lng' }
+      ],
+      // Synthetic, sourced provider output; the last address remains unresolved.
+      geographicEnrichment: records.slice(0, 46).flatMap((record, index) => [
+        ['Vĩ độ', 'point_lat', 21 + index / 10_000], ['Kinh độ', 'point_lng', 105 + index / 10_000]
+      ].map(([field, geoLevel, value]) => ({ field, geoLevel, value,
+        matches: [{ field: 'Mã điểm', value: record['Mã điểm'] }, { field: 'Địa chỉ', value: record['Địa chỉ'] }],
+        sourceUrl: `https://example.org/verified-address-fixture/${index}` }))),
+      suggestions: [{ id: 'facility-points', chartType: 'point', confidence: .95,
+        bindings: { region: 'Mã điểm', lat: 'Vĩ độ', lng: 'Kinh độ', value: null },
+        popupSuggestions: [{ name: 'info', confidence: .95, pie: null }], metricButtons: [] }]
+    };
+    const calls = connect(t, analysis, { codex, inspect(input, instructions) {
+      assert.equal(input.geographicLookupAllowed, true);
+      assert.equal(input.profile.head.length, 8);
+      assert.deepEqual(input.profile.scopeRows, records);
+      assert.match(instructions, /ƯU TIÊN ĐỊA CHỈ/);
+      assert.match(instructions, /Link Google Maps chỉ là nguồn đối chiếu hoặc dự phòng/);
+    } });
+    const output = await requestAiDataAnalysis(records);
+    assert.equal(calls(), 1);
+    assert.equal(output.analysis.source, 'ai');
+    assert.equal(output.fallbackReason, '');
+    assert.equal(output.records.length, 47);
+    assert.equal(output.analysis.geographicEnrichment.length, 92);
+    for (let index = 0; index < 46; index++) {
+      assert.equal(output.records[index]['Vĩ độ'], 21 + index / 10_000);
+      assert.equal(output.records[index]['Kinh độ'], 105 + index / 10_000);
+      assert.equal(output.records[index]['Địa chỉ'], records[index]['Địa chỉ']);
+      assert.equal(output.records[index]['Google Maps'], records[index]['Google Maps']);
+    }
+    assert.ok(output.records[46]['Vĩ độ'] == null);
+    assert.ok(output.records[46]['Kinh độ'] == null);
+    assert.deepEqual(records, original);
+    const suggestions = prepareSuggestions(output.analysis, output.records, output.validRowRate);
+    assert.equal(suggestions.length, 1);
+    assert.equal(suggestions[0].chartType, 'point');
+    assert.equal(suggestions[0].available, true);
+    assert.ok(suggestions[0].bindings.value == null);
+    assert.deepEqual(output.analysis.popupContent.addressFields, ['Địa chỉ']);
+    assert.deepEqual(output.analysis.popupContent.linkFields, ['Google Maps']);
+  });
+}
 
 const rows = [
   { place: 'Springfield', country: 'US', passengers: 50, lat: null },

@@ -1,5 +1,6 @@
 import { humanizeField } from "../../charts/data-transformers.js";
 import { formatTimeValue } from "../data/time-values.js";
+import { setPopupValue } from "./popup-value.js";
 
 function isEmpty(value) {
   return value == null || typeof value === "string" && value.trim() === "";
@@ -24,7 +25,9 @@ export function aiPopupRows(properties, columns) {
   const source = properties || {};
   const hasOwn = field => Object.prototype.hasOwnProperty.call(source, field);
   return (columns || []).flatMap(column => {
-    if (!column?.name || column.role === "ignore" || !hasOwn(column.name) || isEmpty(source[column.name])) return [];
+    // Coordinates locate the feature on the map; they are not popup details.
+    if (!column?.name || column.role === "ignore" || ["point_lat", "point_lng"].includes(column.geoLevel)
+      || !hasOwn(column.name) || isEmpty(source[column.name])) return [];
     const label = column.labelVi || humanizeField(column.name);
     return [{ field: column.name, label, value: formatPopupValue(source[column.name], column, label) }];
   });
@@ -91,7 +94,7 @@ export function createAiPopupContent(documentRef, feature, columns, geometryFiel
     const term = documentRef.createElement("dt");
     const value = documentRef.createElement("dd");
     term.textContent = detail.label;
-    value.textContent = detail.value;
+    setPopupValue(documentRef, value, properties[detail.field], detail.value);
     row.append(term, value);
     list.append(row);
   }

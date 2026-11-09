@@ -142,6 +142,24 @@ function categoryGroupSummary(records, columns) {
   return result;
 }
 
+// Select evidence rows only; geographic roles and map types remain AI decisions.
+function addressColumn(name) {
+  const label = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").replace(/[_-]/g, " ");
+  return !/e[\s_-]?mail/i.test(label) && /\b(?:dia[\s_-]*chi|address)\b/i.test(label);
+}
+
+function googleMapsLink(value) {
+  if (typeof value !== "string" || !/^https?:\/\//i.test(value.trim())) return false;
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) return false;
+    return url.hostname === "maps.app.goo.gl"
+      || url.hostname === "goo.gl" && /^\/maps(?:\/|$)/.test(url.pathname)
+      || /^(?:www\.)?google\.(?:com|[a-z]{2}|(?:com|co)\.[a-z]{2})$/.test(url.hostname) && /^\/maps(?:\/|$)/.test(url.pathname)
+      || /^maps\.google\.(?:com|[a-z]{2}|(?:com|co)\.[a-z]{2})$/.test(url.hostname);
+  } catch { return false; }
+}
+
 export function profileTabularData(records, { includeSamples = true, maxSamples = 5, maxHead = 8, uniqueCap = 10_000 } = {}) {
   if (!Array.isArray(records) || !records.length) throw new Error("File không có bản ghi dữ liệu.");
   const states = new Map();
@@ -245,9 +263,12 @@ export function profileTabularData(records, { includeSamples = true, maxSamples 
   const profile = { rowCount: records.length, columns, samplesIncluded: Boolean(includeSamples) };
   if (includeSamples) {
     profile.head = head;
-    // Supply same-row context for qualified labels even when they occur after head/reservoir samples.
-    const scopeRows = records.filter(record => Object.values(record || {}).some(value =>
-      typeof value === "string" && value.length <= 500 && countryLookupName(value) !== value.trim()));
+    // Keep addresses and map links paired with their original identity/context,
+    // including locations beyond the head/reservoir samples.
+    const addressFields = columns.filter(column => addressColumn(column.name)).map(column => column.name);
+    const scopeRows = records.filter(record => addressFields.some(field => typeof record?.[field] === "string" && record[field].trim())
+      || Object.values(record || {}).some(value => googleMapsLink(value)
+        || typeof value === "string" && value.length <= 500 && countryLookupName(value) !== value.trim()));
     if (scopeRows.length) {
       profile.scopeRows = scopeRows.slice(0, 100).map(record => Object.fromEntries(Object.entries(record).map(([key, value]) =>
         [key, typeof value === "string" ? value.slice(0, 1600) : jsonValue(value)])));

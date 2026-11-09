@@ -112,14 +112,35 @@ try {
   const pipeline = (records, columns, suggestion) => ({ records, rawRecords: records,
     validRowRate: Object.fromEntries(columns.map(column => [column.name, 1])), analysis: { source: 'ai', datasetTitle: 'Browser fixture', columns,
       search_bar: true, search_fields: [suggestion.bindings.region || suggestion.bindings.source], suggestions: [{ ...suggestion, confidence: .9, popupSuggestions: suggestion.popupSuggestions || [{ name: 'info', confidence: 1 }] }] } });
-  const pointRows = [{ name: 'A', lat: 21, lng: 105, value: 10 }, { name: 'B', lat: 22, lng: 106, value: 20 }];
-  const pointColumns = [{ name: 'name', role: 'category' }, { name: 'lat', role: 'geo', geoLevel: 'point_lat' }, { name: 'lng', role: 'geo', geoLevel: 'point_lng' }, { name: 'value', role: 'measure', aggDefault: 'sum' }];
-  const pointSuggestion = { id: 'points', chartType: 'point', title: 'Points', bindings: { region: 'name', lat: 'lat', lng: 'lng' } };
+  const pointRows = [{ name: 'A', sector: 'Tư nhân', lat: 21, lng: 105, value: 10, cost: 0 }, { name: 'B', sector: 'Công lập', lat: 22, lng: 106, value: null, cost: null }];
+  const pointColumns = [{ name: 'name', role: 'category' }, { name: 'sector', role: 'category', labelVi: 'Khối' }, { name: 'lat', role: 'geo', geoLevel: 'point_lat' }, { name: 'lng', role: 'geo', geoLevel: 'point_lng' }, { name: 'value', role: 'measure', aggDefault: 'sum' }, { name: 'cost', role: 'measure', aggDefault: 'sum' }];
+  const pointSuggestion = { id: 'points', chartType: 'point', title: 'Points', bindings: { region: 'name', lat: 'lat', lng: 'lng', group: 'sector' },
+    metricButtons: ['value', 'cost'].map(field => ({ field, label: field, icon: '●', color: '#123456' })) };
   const first = build('point-one');
   stage('point');
   assert(Object.keys(canvas.getStyle().sources).length === 0, 'runtime created layers before choosing a map');
   await first.api.load({ kind: 'ai-pipeline', pipeline: pipeline(pointRows, pointColumns, pointSuggestion) }, { name: 'points.csv' });
   assert(first.api.getView().data.features.length === 2, 'point data missing');
+  const pointModule = first.api.context.modules.active();
+  assert(!first.dom.document.querySelector('.ai-point-metric'), 'Point still offers a metric filter');
+  assert(first.dom.document.getElementById('map-metric-control').hidden, 'Point still offers quick metric buttons');
+  assert(pointModule.metricField() === null && pointModule.metricColumns().length === 0, 'Point still advertises map metrics');
+  assert(pointModule.changeMetric('value') === false, 'A stale Point metric can still be selected');
+  assert(!JSON.stringify(canvas.getPaintProperty('point-one--point-marker', 'circle-radius')).includes('value'), 'Point sizes still depend on a metric');
+  assert(first.api.getView().data.features[1].properties.value === null, 'Point dropped a missing-measure record');
+  assert(first.dom.document.getElementById('point-legend').querySelectorAll('.point-legend-row').length === 2, 'Point group colors disappeared without a metric');
+  assert(first.dom.document.getElementById('point-legend').textContent.includes('Khối'), 'Point legend ignored the AI group binding');
+  const pointColor = canvas.getPaintProperty('point-one--point-marker', 'circle-color');
+  assert(pointColor[1][1][1] === 'sector' && pointColor.includes('Tư nhân') && pointColor.includes('Công lập'), 'Point paint does not use the ownership groups');
+  await pointModule.handleChange({ target: { value: 'all', matches: selector => selector.split(',').some(item => item.trim() === '.ai-point-mode') } });
+  assert(JSON.stringify(canvas.getPaintProperty('point-one--point-marker', 'circle-color')) === JSON.stringify(pointColor), 'All groups lost their individual colors');
+  const pointLegend = first.dom.document.getElementById('point-legend');
+  assert(pointLegend.querySelectorAll('.point-legend-row').length === 2 && !pointLegend.textContent.includes('Tất cả khối'), 'All groups collapsed into one legend entry');
+  assert(pointLegend.getBoundingClientRect().width <= 260, 'Point legend is wider than its compact limit');
+  assert(first.dom.document.getElementById('point-fixed-color-field').hidden, 'All groups still offer a single point color');
+  assert(!first.dom.document.getElementById('point-group-color-field').hidden && first.dom.document.querySelectorAll('.point-group-color').length === 2, 'All groups lost per-group color controls');
+  await pointModule.handleChange({ target: { value: 'sector', matches: selector => selector.split(',').some(item => item.trim() === '.ai-point-group') } });
+  assert(Array.isArray(canvas.getPaintProperty('point-one--point-marker', 'circle-color')), 'Choosing a category lost Point group colors');
   const opacity = first.dom.document.getElementById('point-opacity'); opacity.value = '.4'; opacity.dispatchEvent(new Event('input', { bubbles: true }));
   assert(canvas.getPaintProperty('point-one--point-marker', 'circle-opacity') === .4, 'point controls not bound');
   const second = build('point-two');

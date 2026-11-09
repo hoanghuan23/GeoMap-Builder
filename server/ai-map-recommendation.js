@@ -8,6 +8,7 @@ import { profileTabularData } from "../src/shared/import/tabular-data.js";
 import { requestAiJson } from "./ai-provider.js";
 import { applyGeographicEnrichment } from '../src/shared/import/geographic-enrichment.js';
 import { lookupRegionBoundary, validateRegionLookupInput } from './region-boundary-lookup.js';
+import { geocodePointAnalysis } from './point-geocoding.js';
 
 const LAYER_ORDER_SCHEMA = {
   type: "object",
@@ -82,8 +83,8 @@ export function aiMapRecommendationPlugin(env) {
         ? baseInstructions
         : `${isText ? `${TEXT_EXTRACTION_INSTRUCTIONS}\n\n` : ""}${baseInstructions}\n\nChỉ trả về một JSON object đúng schema sau, không bọc trong Markdown. Dùng chính xác tên field, kiểu dữ liệu và giá trị enum trong schema:\n${JSON.stringify(schema)}`;
       const aiInput = isLayerOrder ? body.layers : isText
-        ? { text: documentText, geographicLookupAllowed: true, regionLookupFallbackAllowed: false, supportedCharts: supportedChartsForPrompt() }
-        : { profile: body.profile, geographicLookupAllowed: body.profile.samplesIncluded === true, regionLookupFallbackAllowed: false, supportedCharts: supportedChartsForPrompt(),
+        ? { text: documentText, geographicLookupAllowed: true, pointGeocodingAvailable: true, regionLookupFallbackAllowed: false, supportedCharts: supportedChartsForPrompt() }
+        : { profile: body.profile, geographicLookupAllowed: body.profile.samplesIncluded === true, ...(body.profile.samplesIncluded === true ? { pointGeocodingAvailable: true } : {}), regionLookupFallbackAllowed: false, supportedCharts: supportedChartsForPrompt(),
         ...(body.profile.spatial?.nativeGeometry === true ? { spatialContext: "Geometry có sẵn trong file; phân tích properties để đặt datasetTitle/grain/metadata và cấu hình popup/tìm kiếm. Không bịa tên cột tọa độ/địa danh; AI vẫn phải đề xuất kiểu bản đồ phù hợp với profile.spatial.geometryKinds: area dùng choropleth, line dùng map_line, point dùng point với bindings.lat/lng là coordinateBindings đã trích từ geometry. Có thể đề xuất thêm arc_flow khi các properties chứa định danh hai đầu và lưu lượng OD có hướng, cùng hai cặp tọa độ độc lập có sẵn hoặc đã tra cứu xác minh qua geographicEnrichment; không suy ra OD từ geometry tuyến hoặc chỉ một cặp tọa độ. Chỉ với Polygon/Line/Point dùng geometry gốc, bindings.region và value được phép null nếu không có trường phù hợp; không bắt buộc cột địa danh hay chỉ số để vẽ geometry gốc. Arc Flow luôn cần đủ bảy binding bắt buộc; value là tên cột lưu lượng có role measure, không được null dù có geometry gốc. Giá trị dùng để tô màu phải là cột có thật. Nếu suggestions rỗng thì ứng dụng không tự tạo bản đồ." } : {}) };
       const startedAt = Date.now();
       const parsed = await requestAiJson(env, {
@@ -103,7 +104,8 @@ export function aiMapRecommendationPlugin(env) {
       // exhaustion. Initial analysis may enrich point coordinates only.
       const analysisInput = { ...rawAnalysis, geographicEnrichment: (Array.isArray(rawAnalysis?.geographicEnrichment) ? rawAnalysis.geographicEnrichment : [])
         .filter(item => ['point_lat', 'point_lng'].includes(item?.geoLevel)) };
-      const responseBody = isLayerOrder ? parsed : validateAndNormalizeAnalysis(analysisInput, profile);
+      const geocoded = isLayerOrder ? { analysis: analysisInput, report: null } : await geocodePointAnalysis(analysisInput, profile, env);
+      const responseBody = isLayerOrder ? parsed : validateAndNormalizeAnalysis({ ...geocoded.analysis, pointGeocoding: geocoded.report }, profile);
       if (isText) records = applyGeographicEnrichment(records, responseBody.geographicEnrichment || []);
       if (!isLayerOrder) {
         responseBody.suggestions = responseBody.suggestions.filter(item => Object.hasOwn(AI_MAP_REGISTRY, item.chartType));

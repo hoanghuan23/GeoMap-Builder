@@ -314,10 +314,10 @@ function requiredCoverage(suggestion, validRowRate) {
   return fields.length ? Math.min(...fields.map(field => Number(validRowRate?.[field] || 0))) : 0;
 }
 
-export function evaluateSuggestion(suggestion, records, columns, validRowRate) {
+export function evaluateSuggestion(suggestion, records, columns, validRowRate, analysis = {}) {
   const definition = mapRegistry[suggestion.chartType];
   if (!definition) return { ...suggestion, available: false, feasibilityScore: 0, effectiveConfidence: 0, unavailableReason: "Kiểu bản đồ không được hỗ trợ." };
-  const result = definition.evaluate(suggestion, records, columns);
+  const result = definition.evaluate(suggestion, records, columns, analysis);
   const feasibilityScore = definition.independentCoverage ? result.coverage : Math.min(requiredCoverage(suggestion, validRowRate), result.coverage ?? 1);
   return { ...suggestion, feasibilityScore, effectiveConfidence: Math.min(1, Math.max(0, suggestion.confidence)),
     available: !result.reason, unavailableReason: result.reason || "" };
@@ -326,6 +326,6 @@ export function evaluateSuggestion(suggestion, records, columns, validRowRate) {
 /** Check render feasibility only; every suggestion and its priority come from the analysis. */
 export function prepareSuggestions(analysis, records, validRowRate) {
   const suggestions = (analysis.suggestions || []).filter(suggestion => Object.hasOwn(mapRegistry, suggestion.chartType));
-  return suggestions.map(suggestion => evaluateSuggestion(suggestion, records, analysis.columns, validRowRate))
+  return suggestions.map(suggestion => evaluateSuggestion(suggestion, records, analysis.columns, validRowRate, analysis))
     .sort((a, b) => b.confidence - a.confidence);
 }

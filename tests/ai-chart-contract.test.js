@@ -20,6 +20,22 @@ function normalizeFixture(raw, profile) {
   return validateAndNormalizeAnalysis({ ...raw, columns: [...mockAiAnalysis(profile).columns.filter(column => !declared.has(column.name)), ...(raw.columns || [])] }, profile);
 }
 
+test("Point group binding survives server/client normalization separately from identity", () => {
+  const columns = [{ name: "code", role: "id" }, { name: "sector", role: "category" },
+    { name: "lat", role: "geo", geoLevel: "point_lat" }, { name: "lng", role: "geo", geoLevel: "point_lng" }];
+  const dataProfile = { rowCount: 47, columns: columns.map(column => ({ name: column.name })) };
+  const raw = { columns, suggestions: [{ id: "facilities", chartType: "point",
+    bindings: { lat: "lat", lng: "lng", region: "code", group: "sector" } }] };
+  const normalized = normalizeFixture(raw, dataProfile);
+  assert.deepEqual(normalized.suggestions[0].bindings, raw.suggestions[0].bindings);
+  assert.deepEqual(normalizeFixture(JSON.parse(JSON.stringify(normalized)), dataProfile), normalized);
+  for (const group of ["code", "lat", "missing"]) {
+    const invalid = normalizeFixture({ ...raw, suggestions: [{ ...raw.suggestions[0],
+      bindings: { ...raw.suggestions[0].bindings, group } }] }, dataProfile);
+    assert.equal(invalid.suggestions.length, 0);
+  }
+});
+
 test("AI search defaults survive server/client normalization and reject invalid fields", () => {
   assert.ok(ANALYSIS_RESPONSE_SCHEMA.required.includes("search_bar"));
   assert.ok(ANALYSIS_RESPONSE_SCHEMA.required.includes("search_fields"));
@@ -109,7 +125,7 @@ test("only Line admits AI buttons for low-cardinality status categories, and nev
   const result = normalizeFixture({ columns, suggestions: [line] }, dataProfile);
   assert.deepEqual(result.suggestions[0].metricButtons, [metricButtons[1]]);
   const point = { ...line, id: "point", chartType: "point", bindings: { lat: "lat", lng: "lng", region: "road" } };
-  assert.deepEqual(normalizeFixture({ columns, suggestions: [point] }, dataProfile).suggestions[0].metricButtons.map(button => button.field), ["sequence"]);
+  assert.deepEqual(normalizeFixture({ columns, suggestions: [point] }, dataProfile).suggestions[0].metricButtons, []);
 });
 
 test("popup recommendations have a compact per-map schema and survive server/client normalization", () => {

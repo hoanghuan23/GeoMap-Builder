@@ -513,6 +513,10 @@ export function featureLabel(feature) {
 
 export function focusMapOnFeature(map, feature) {
   const center = featureCenter(feature);
+  if (center && feature?.geometry?.type === "Point" && !feature?.place_type?.length) {
+    map.flyTo({ center, zoom: 16, duration: 900, essential: true });
+    return true;
+  }
   const bbox = featuresBounds([feature]);
   if (Array.isArray(bbox) && bbox.length === 4 && bbox.every(Number.isFinite) && bbox[0] < bbox[2] && bbox[1] < bbox[3]) {
     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {

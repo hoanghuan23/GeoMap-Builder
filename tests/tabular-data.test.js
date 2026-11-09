@@ -85,3 +85,45 @@ test("profile ngày có min/max chính xác và reservoir sampling lặp lại �
   assert.equal(date.max.slice(0, 10), "2026-09-30");
   assert.deepEqual(first.columns[1].samples, second.columns[1].samples);
 });
+
+test("address evidence preserves same-row identities, full addresses and Maps links beyond the head", () => {
+  const records = Array.from({ length: 47 }, (_, index) => ({
+    id: `P${index}`, name: "Cơ sở trùng tên",
+    "Địa chỉ": `Số ${index + 1} đường Thử Nghiệm, khu vực ${index % 2 ? 'A' : 'B'}`,
+    map: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`Cơ sở trùng tên ${index}, ${'địa chỉ đối chiếu '.repeat(8)}`)}`
+  }));
+  const snapshot = structuredClone(records);
+  const profile = profileTabularData(records);
+  assert.equal(profile.head.length, 8);
+  assert.equal(profile.scopeRows.length, 47);
+  assert.deepEqual(profile.scopeRows, records);
+  assert.ok(profile.scopeRows[46].map.length > 160);
+  assert.equal(profile.scopeRowsTruncated, false);
+  assert.deepEqual(records, snapshot);
+  const privateProfile = profileTabularData(records, { includeSamples: false });
+  assert.equal(privateProfile.scopeRows, undefined);
+  assert.equal(privateProfile.scopeRowsTruncated, undefined);
+  assert.ok(privateProfile.columns.every(column => !column.samples && !column.distinctValues));
+});
+
+for (const field of ['Địa chỉ', 'dia_chi', 'street_address']) {
+  test(`address sampling is bounded and works without Maps links: ${field}`, () => {
+    const records = Array.from({ length: 130 }, (_, index) => ({ id: `P${index}`, [field]: `${index + 1} Test Street` }));
+    const profile = profileTabularData(records);
+    assert.equal(profile.scopeRows.length, 100);
+    assert.equal(profile.scopeRowsTruncated, true);
+    assert.deepEqual(profile.scopeRows[99], records[99]);
+  });
+}
+
+test("Maps links select evidence without relying on a column name; other links and email do not", () => {
+  for (const url of [
+    'https://www.google.com/maps/search/?api=1&query=Test', 'https://maps.google.com/?q=Test',
+    'https://www.google.co.uk/maps/place/Test', 'https://maps.app.goo.gl/fixture', 'https://goo.gl/maps/fixture'
+  ]) {
+    const records = Array.from({ length: 12 }, (_, index) => ({ id: `P${index}`, reference: `${url}${index}` }));
+    assert.equal(profileTabularData(records).scopeRows.length, 12);
+  }
+  assert.equal(profileTabularData([{ 'Email address': 'a@example.org', reference: 'https://example.org/page' }]).scopeRows, undefined);
+  assert.equal(profileTabularData([{ reference: 'https://google.evil.com/maps/place/Test' }]).scopeRows, undefined);
+});

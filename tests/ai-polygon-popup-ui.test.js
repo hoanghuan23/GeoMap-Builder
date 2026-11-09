@@ -404,6 +404,9 @@ test("Point and both Line providers keep color legends and toggles without measu
     dataset.pointModels = {}; dataset.pointSelections = {}; dataset.recommendation = recommendationForSuggestion(dataset.suggestions[0]);
     refreshPointView(dataset.suggestions[0], {rebuildControls:true}); renderPointStyleControls(); renderPointLegend();`);
   assert.equal(point.run("dataset.activePointView.metric"), null);
+  assert.equal(point.run("dataset.activePointView.legendRows.length"), 2);
+  assert.equal(point.get("point-group-color-field").hidden, false);
+  point.run("pointSelectionFor(activePointSuggestion()).mode = 'all'; refreshPointView(activePointSuggestion());");
   assert.equal(point.run("dataset.activePointView.paint['circle-color']"), point.run("state.pointStyle.color"));
   assert.equal(point.get("point-fixed-color-field").hidden, false);
   assert.equal(point.get("point-show-legend-field").hidden, false);
@@ -415,7 +418,7 @@ test("Point and both Line providers keep color legends and toggles without measu
   assert.equal(point.get("point-legend").hidden, true);
   point.run("state.pointStyle.showLegend = true; renderPointLegend();");
   assert.equal(point.get("point-legend").hidden, false);
-  assert.equal(point.sources.get("point-data").data.features.length, 2);
+  assert.equal(point.sources.get("point-data").data.features.length, storeRecords.length);
   for (const options of [{ road: true }, { path: true }]) {
     const h = harness(options);
     h.run(`dataset.analysis.columns = dataset.analysis.columns.filter(column => column.role === 'geo' || column.name === 'Tên đường');
@@ -603,23 +606,22 @@ for (const [geoLevel, locationField, metric, otherMetric, names] of [
   });
 }
 
-test("Point metric buttons sync size and sidebar without changing groups, map time or popup metrics", async () => {
+test("Point hides metric controls and ignores metric changes while preserving groups, time and popup charts", async () => {
   const h = harness({ point: true, metricButtons: [
     { field: "doanh_thu_vnd", label: "Doanh thu", icon: "💰", color: "#16a34a" },
     { field: "chi_phi_vnd", label: "Chi phí", icon: "🧾", color: "#e11d48" }
   ] }); h.mode("line");
   const selectionBefore = h.run("JSON.stringify(pointSelectionFor(activePointSuggestion()))");
   const popupBefore = h.run("JSON.stringify(popupSelectionFor())");
-  const buttons = h.get("map-metric-list").children;
-  assert.deepEqual(buttons.map(button => button.dataset.metricField), ["doanh_thu_vnd", "chi_phi_vnd"]);
-  await h.get("map-metric-list").events.click({ target: buttons[1] });
-  assert.equal(h.all(".ai-point-metric")[0].value, "chi_phi_vnd");
-  assert.equal(h.run("dataset.activePointView.selection.metricField"), "chi_phi_vnd");
-  assert.equal(h.run("JSON.stringify({...pointSelectionFor(activePointSuggestion()), metricField:'doanh_thu_vnd'})"), selectionBefore);
+  const paintBefore = h.run("JSON.stringify(dataset.activePointView.paint)");
+  assert.equal(h.get("map-metric-control").hidden, true);
+  assert.deepEqual(h.get("map-metric-list").children, []);
+  assert.equal(h.all(".ai-point-metric").length, 0);
+  await h.run("changeAiMapMetric('chi_phi_vnd')");
+  assert.equal(h.run("dataset.activePointView.selection.metricField"), null);
+  assert.equal(h.run("JSON.stringify(pointSelectionFor(activePointSuggestion()))"), selectionBefore);
+  assert.equal(h.run("JSON.stringify(dataset.activePointView.paint)"), paintBefore);
   assert.equal(h.run("JSON.stringify(popupSelectionFor())"), popupBefore);
-  assert.equal(buttons[1].attributes["aria-pressed"], "true");
-  const sidebar = h.all(".ai-point-metric")[0]; sidebar.value = "doanh_thu_vnd"; await h.change(sidebar);
-  assert.equal(buttons[0].attributes["aria-pressed"], "true");
 });
 
 test("Line metric buttons retain filters and the same eligible fields as the sidebar", async () => {
@@ -664,14 +666,15 @@ test("missing or empty AI button configuration stays hidden and preserves manual
   }
 });
 
-test("Point initializes its size from the first AI button rather than the first numeric column", () => {
+test("Point ignores old AI size buttons and uses a uniform radius", () => {
   const h = harness({ point: true, metricButtons: [
     { field: "chi_phi_vnd", label: "Chi phí", icon: "🧾", color: "#e11d48" },
     { field: "doanh_thu_vnd", label: "Doanh thu", icon: "💰", color: "#16a34a" }
   ] });
-  assert.equal(h.run("pointSelectionFor(activePointSuggestion()).metricField"), "chi_phi_vnd");
-  assert.equal(h.all(".ai-point-metric")[0].value, "chi_phi_vnd");
-  assert.equal(h.get("map-metric-list").children[0].attributes["aria-pressed"], "true");
+  assert.equal(h.run("pointSelectionFor(activePointSuggestion()).metricField"), null);
+  assert.equal(h.all(".ai-point-metric").length, 0);
+  assert.equal(h.get("map-metric-control").hidden, true);
+  assert.equal(h.run("JSON.stringify(dataset.activePointView.paint['circle-radius'])"), JSON.stringify(['interpolate', ['linear'], ['zoom'], 4, 4, 10, 6, 16, 10]));
 });
 
 test("uneven legend labels stay on one row while ticks retain their scale positions", async () => {
@@ -1349,8 +1352,8 @@ test("Point defaults to information and switches chart-only popups for the click
   assert.equal(h.all(".ai-popup-settings").length, 0);
   assert.equal(h.all(".ai-point-time").length, 1);
   assert.equal(h.all(".ai-point-range").length, 0);
-  assert.equal(h.all(".ai-point-time")[0].value, "2026-03-01T00:00:00.000Z");
-  assert.equal(h.sources.get("point-data").data.features.length, 2);
+  assert.equal(h.all(".ai-point-time")[0].value, "");
+  assert.equal(h.sources.get("point-data").data.features.length, storeRecords.length);
   h.run("renderAiSuggestionGrid(); openMapPopup(state.pointData.features[0], [105.85,21.02], 'point-marker')");
   assert.match(h.get("map-type-summary").textContent, /2 đề xuất/);
   assert.equal(h.popups[0].card.children.length, 2);
@@ -1370,22 +1373,33 @@ test("Point defaults to information and switches chart-only popups for the click
   assert.ok(h.cleared.length >= 3);
 });
 
-test("Point map time/metric filters preserve chart range and close popups for hidden objects", async () => {
+test("Point map time/group filters preserve chart range and close popups for hidden objects", async () => {
   const h = harness({ point: true }); h.mode("line");
   h.run("openMapPopup(state.pointData.features[0], [105.85,21.02], 'point-marker')");
   const before = JSON.stringify(h.rendered.at(-1).config.data);
   const time = h.all(".ai-point-time")[0];
+  assert.equal(time.children[0].textContent, "Tất cả");
+  time.value = ""; await h.change(time);
+  assert.equal(h.sources.get("point-data").data.features.length, 6);
+  assert.equal(h.run("dataset.activePointView.selection.time"), "");
+  assert.match(h.get("point-legend").children.at(-1).textContent, /Tất cả thời gian/);
+  assert.equal(JSON.stringify(h.rendered.at(-1).config.data), before);
   time.value = "2026-01-01T00:00:00.000Z"; await h.change(time);
   assert.equal(h.run("mapPopupView.feature.properties.doanh_thu_vnd"), 0);
   assert.equal(h.sources.get("point-data").data.features.length, 2);
   assert.equal(JSON.stringify(h.rendered.at(-1).config.data), before);
-  const metric = h.all(".ai-point-metric")[0]; metric.value = "chi_phi_vnd"; await h.change(metric);
-  assert.equal(h.run("state.aiDataset.activePointView.selection.metricField"), "chi_phi_vnd");
+  assert.equal(h.all(".ai-point-metric").length, 0);
+  assert.equal(h.run("state.aiDataset.activePointView.selection.metricField"), null);
   assert.equal(h.rendered.at(-1).config.series[0].key, "doanh_thu_vnd");
   const group = h.all(".ai-point-value").find(control => control.value === "Cửa hàng CH01");
   group.checked = false; await h.change(group);
   assert.equal(h.run("mapPopupView"), null);
   assert.equal(h.popups[0].removed, true);
+  time.value = ""; await h.change(time);
+  assert.equal(h.sources.get("point-data").data.features.length, 3);
+  assert.ok(h.sources.get("point-data").data.features.every(feature => feature.properties.ma_cua_hang === "CH02"));
+  h.run("populatePointControls(activePointSuggestion())");
+  assert.equal(h.all(".ai-point-time")[0].value, "");
 });
 
 test("Point display selector includes text store names and a city with a single value", () => {
@@ -1395,7 +1409,35 @@ test("Point display selector includes text store names and a city with a single 
   assert.deepEqual(group.children.map(option => option.value), ["ten_cua_hang", "thanh_pho"]);
   group.value = "thanh_pho"; h.change(group);
   assert.deepEqual(h.all(".ai-point-value").map(input => input.value), ["Hà Nội"]);
-  assert.equal(h.sources.get("point-data").data.features.length, 2);
+  assert.equal(h.sources.get("point-data").data.features.length, storeRecords.length);
+});
+
+test("Point picker accepts more than eight groups and reset keeps only the top five", async () => {
+  const pointRecords = Array.from({ length: 10 }, (_, index) => ({ ...storeRecords[0],
+    ma_cua_hang: `CH${index}`, ten_cua_hang: `Cửa hàng ${index}`, vi_do: 21 + index / 100
+  }));
+  const h = harness({ point: true, pointRecords });
+  const mode = h.all(".ai-point-mode")[0]; mode.value = "pick"; await h.change(mode);
+  assert.equal(h.all(".ai-point-value").filter(input => input.checked).length, 10);
+  for (const value of ["Cửa hàng 8", "Cửa hàng 9"]) {
+    const input = h.all(".ai-point-value").find(input => input.value === value);
+    input.checked = false; await h.change(input);
+  }
+  assert.equal(h.sources.get("point-data").data.features.length, 8);
+  for (const value of ["Cửa hàng 8", "Cửa hàng 9"]) {
+    const input = h.all(".ai-point-value").find(input => input.value === value);
+    input.checked = true; await h.change(input);
+    assert.equal(input.checked, true);
+  }
+  assert.equal(h.sources.get("point-data").data.features.length, 10);
+  assert.equal(new Set(h.run("dataset.activePointView.legendRows.map(row => row.color)")).size, 10);
+  assert.equal(h.all(".ai-point-picker")[0].children[1].children[0].textContent, "10/10");
+  assert.equal(h.all(".ai-point-reset")[0].textContent, "Đặt lại (top 5)");
+  h.click(h.all(".ai-point-reset")[0]);
+  assert.deepEqual(h.all(".ai-point-value").filter(input => input.checked).map(input => input.value),
+    ["Cửa hàng 0", "Cửa hàng 1", "Cửa hàng 2", "Cửa hàng 3", "Cửa hàng 4"]);
+  assert.equal(h.sources.get("point-data").data.features.length, 5);
+  assert.equal(h.all(".ai-point-picker")[0].children[1].children[0].textContent, "5/10");
 });
 
 test("Point city selection filters stores, preserves one map time and keeps each store's chart separate", async () => {

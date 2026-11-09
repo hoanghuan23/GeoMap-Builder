@@ -1,11 +1,10 @@
 import { humanizeField } from "../../charts/data-transformers.js";
 import { serializeTabularValue } from "../../shared/import/tabular-data.js";
 import { timeValueInfo, timeValuesAreComparable, uniqueTimeValues } from "../../shared/data/time-values.js";
-import { numericMapColor, numericMapValue as numberValue } from "../../shared/data/map-value.js";
+import { numericMapValue as numberValue } from "../../shared/data/map-value.js";
 
 export const POINT_COLOR = "#00d084";
 export const POINT_COLORS = Object.freeze(["#5b8ff9", "#f58b61", "#63c785", "#f6bd16", "#9270ca", "#6dc8ec", "#d9548a", "#2f9e9e"]);
-export const POINT_GROUP_LIMIT = 8;
 export const POINT_DEFAULT_GROUPS = 5;
 export const DEFAULT_POINT_STYLE = Object.freeze({
   color: POINT_COLOR,
@@ -46,7 +45,7 @@ function fieldLabel(column) {
 }
 
 /** Build once per Point suggestion from the normalized source records. */
-export function createPointModel(records, columns, { lat, lng }) {
+export function createPointModel(records, columns, { lat, lng, group }) {
   const measures = columns.filter(column => column.role === "measure" && ![lat, lng].includes(column.name));
   const features = records.flatMap((record, index) => {
     const latitude = numberValue(record?.[lat]);
@@ -83,7 +82,7 @@ export function createPointModel(records, columns, { lat, lng }) {
   return {
     data: { type: "FeatureCollection", features },
     measures: measures.map(column => ({ ...column, label: fieldLabel(column) })),
-    groups, timeColumn, times,
+    groups, defaultGroupField: group || null, timeColumn, times,
     totalRecords: records.length,
     coordinateCount: features.length,
     coordinateRate: records.length ? features.length / records.length : 0
@@ -91,20 +90,36 @@ export function createPointModel(records, columns, { lat, lng }) {
 }
 
 export function normalizePointSelection(model, saved = {}) {
-  const metric = model.measures.find(column => column.name === saved.metricField)
-    || model.measures.find(column => model.data.features.some(feature => feature.properties[column.name] != null)) || model.measures[0];
+  const compactGroup = column => column.values.length > 1 && column.values.length <= POINT_COLORS.length
+    && column.values.length < model.coordinateCount;
   const group = model.groups.find(column => column.name === saved.groupField)
+    || model.groups.find(column => column.name === model.defaultGroupField)
+    || model.groups.find(column => column.role === "category" && compactGroup(column))
+    || model.groups.find(column => column.role === "text" && compactGroup(column))
     || model.groups.find(column => column.values.length > 1) || model.groups[0];
   const validKeys = new Set(group?.values.map(item => item.key));
-  let selectedValues = [...new Set(saved.selectedValues || [])].filter(key => validKeys.has(key)).slice(0, POINT_GROUP_LIMIT);
-  if (!selectedValues.length) selectedValues = group?.values.slice(0, POINT_DEFAULT_GROUPS).map(item => item.key) || [];
-  const time = model.times.includes(saved.time) ? saved.time : model.times.at(-1) || null;
+  let selectedValues = [...new Set(saved.selectedValues || [])].filter(key => validKeys.has(key));
+  const mode = !group || saved.mode === "all" ? "all"
+    : saved.mode === "pick" || selectedValues.length || group.values.length <= POINT_COLORS.length ? "pick" : "all";
+  if (!selectedValues.length) selectedValues = group?.values.slice(0,
+    saved.mode === "pick" ? POINT_DEFAULT_GROUPS : group.values.length).map(item => item.key) || [];
+  const time = model.times.includes(saved.time) ? saved.time : model.timeColumn ? "" : null;
   return {
-    metricField: metric?.name || null,
+    metricField: null,
     groupField: group?.name || null,
-    mode: group && saved.mode !== "all" ? "pick" : "all",
+    mode,
     selectedValues, time
   };
+}
+
+function extraGroupColor(index) {
+  const hue = (index * 137.508) % 360;
+  const channel = offset => {
+    const k = (offset + hue / 30) % 12;
+    return Math.round(255 * (.5 - .325 * Math.max(-1, Math.min(k - 3, 9 - k, 1))))
+      .toString(16).padStart(2, "0");
+  };
+  return `#${channel(0)}${channel(8)}${channel(4)}`;
 }
 
 function assignColors(keys, previous) {
@@ -112,35 +127,29 @@ function assignColors(keys, previous) {
   const used = new Set();
   for (const key of keys) {
     const color = previous[key];
-    if (POINT_COLORS.includes(color) && !used.has(color)) { colors[key] = color; used.add(color); }
+    if (colorValue(color, null) && !used.has(color)) { colors[key] = color; used.add(color); }
   }
+  let extraColorIndex = 0;
   for (const key of keys) {
     if (Object.hasOwn(colors, key)) continue;
-    const color = POINT_COLORS.find(candidate => !used.has(candidate));
+    let color = POINT_COLORS.find(candidate => !used.has(candidate));
+    while (!color || used.has(color)) color = extraGroupColor(extraColorIndex++);
     colors[key] = color;
     used.add(color);
   }
   return colors;
 }
 
-function radiusExpression(metric, size = 100) {
+function radiusExpression(size = 100) {
   const scale = size / 100;
-  if (!metric) return ["interpolate", ["linear"], ["zoom"], 4, 4 * scale, 10, 6 * scale, 16, 10 * scale];
-  const atZoom = (small, large) => {
-    small *= scale; large *= scale;
-    const value = ["get", metric.field];
-    const scaled = metric.min == null ? small : metric.min === metric.max ? (small + large) / 2
-      : ["interpolate", ["linear"], value, metric.min, small, metric.max, large];
-    return ["case", ["==", ["typeof", value], "number"], scaled, small];
-  };
-  return ["interpolate", ["linear"], ["zoom"], 4, atZoom(3, 7), 10, atZoom(4, 12), 16, atZoom(7, 18)];
+  return ["interpolate", ["linear"], ["zoom"], 4, 4 * scale, 10, 6 * scale, 16, 10 * scale];
 }
 
-export function pointPaint(input = {}, metric = null, color = null) {
+export function pointPaint(input = {}, color = null) {
   const style = mergePointStyle(input);
   return {
-    "circle-color": metric ? numericMapColor(metric.field, color ?? style.color) : color ?? style.color,
-    "circle-radius": radiusExpression(metric, style.size),
+    "circle-color": color ?? style.color,
+    "circle-radius": radiusExpression(style.size),
     "circle-opacity": style.opacity,
     "circle-stroke-color": style.borderColor,
     "circle-stroke-width": style.showBorder ? style.borderWidth : 0,
@@ -154,43 +163,35 @@ export function buildPointView(model, saved = {}, previousColors = {}, inputStyl
   const selection = normalizePointSelection(model, saved);
   const group = model.groups.find(column => column.name === selection.groupField);
   const selected = new Set(selection.selectedValues);
-  const paletteColors = assignColors(selection.selectedValues, previousColors);
-  const colors = Object.fromEntries(selection.selectedValues.map(key => [key, colorValue(inputStyle.groupColors?.[key], paletteColors[key])]));
-  const selectedTime = model.timeColumn ? timeValueInfo(selection.time, model.timeColumn) : null;
+  const groupKeys = group?.values.map(item => item.key) || [];
+  const visibleKeys = selection.mode === "all" ? groupKeys : selection.selectedValues;
+  const paletteColors = assignColors(groupKeys, previousColors);
+  const colors = Object.fromEntries(visibleKeys.map(key => [key, colorValue(inputStyle.groupColors?.[key], paletteColors[key])]));
+  const selectedTime = model.timeColumn && selection.time ? timeValueInfo(selection.time, model.timeColumn) : null;
   const features = model.data.features.filter(feature => {
     if (selection.mode === "pick" && !selected.has(groupKey(feature.properties[selection.groupField]))) return false;
-    if (model.timeColumn) {
+    if (model.timeColumn && selection.time) {
       const time = timeValueInfo(feature.properties[model.timeColumn.name], model.timeColumn);
       if (!time || time.key !== selectedTime?.key) return false;
     }
     return true;
   });
-  const measure = model.measures.find(column => column.name === selection.metricField);
-  let metric = null;
-  if (measure) {
-    let min = Infinity; let max = -Infinity; let missingCount = 0;
-    for (const feature of features) {
-      const value = feature.properties[measure.name];
-      if (value == null) { missingCount += 1; continue; }
-      min = Math.min(min, value); max = Math.max(max, value);
-    }
-    metric = { field: measure.name, label: measure.label, unit: measure.unit || "", min: Number.isFinite(min) ? min : null, max: Number.isFinite(max) ? max : null, missingCount };
-  }
   const counts = new Map();
   for (const feature of features) {
     const key = groupKey(feature.properties[selection.groupField]);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
-  const legendRows = metric && selection.mode === "pick"
-    ? selection.selectedValues.map(key => ({ key, label: key, color: colors[key], count: counts.get(key) || 0 }))
-    : [{ key: "all", label: group ? `Tất cả ${group.label.toLocaleLowerCase("vi")}` : "Tất cả điểm", color: style.color, count: features.length }];
-  const color = metric && selection.mode === "pick"
+  const legendRows = group
+    ? visibleKeys.map(key => ({ key, label: key, color: colors[key], count: counts.get(key) || 0 }))
+    : [{ key: "all", label: "Tất cả điểm", color: style.color, count: features.length }];
+  const color = group
     ? ["match", ["to-string", ["get", selection.groupField]], ...legendRows.flatMap(row => [row.key, row.color]), POINT_COLOR]
     : style.color;
+  if (group && counts.has(null)) legendRows.push({ key: null, label: "Chưa có thông tin", color: POINT_COLOR, count: counts.get(null) });
   return {
-    selection, colors, paletteColors, metric, style,
+    selection, colors, paletteColors, metric: null, style,
     data: { type: "FeatureCollection", features },
-    paint: pointPaint(style, metric, color),
+    paint: pointPaint(style, color),
     legendTitle: group?.label || "Điểm dữ liệu", legendRows,
     stats: { visibleCount: features.length, totalCount: model.coordinateCount, coordinateRate: model.coordinateRate }
   };

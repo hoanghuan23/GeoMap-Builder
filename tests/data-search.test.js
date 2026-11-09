@@ -294,6 +294,18 @@ test("filtering, replacing and clearing data cannot reuse stale search results",
   assert.equal(get("map-search-input").value, "");
 });
 
+test("selecting a Point search result zooms into its coordinates even when it has a broad bbox", t => {
+  const { controller, search, camera, selected } = harness(t);
+  const feature = { type: "Feature", properties: { name: "Cơ sở Tô Ngọc Vân" },
+    bbox: [102, 8, 110, 24], geometry: { type: "Point", coordinates: [105.82, 21.07] } };
+  controller.setData({ data: { type: "FeatureCollection", features: [feature] },
+    chartType: "point", columns: [{ name: "name", role: "text" }], search_bar: true, search_fields: ["name"] });
+  search("To Ngoc Van")[0].handlers.click();
+  assert.equal(camera.length, 1);
+  assert.deepEqual(camera[0][0], { center: [105.82, 21.07], zoom: 16, duration: 900, essential: true });
+  assert.equal(selected[0][0], feature);
+});
+
 test("keyboard selection, submit, Escape and clear operate on local suggestions", t => {
   const { controller, get, search, selected } = harness(t);
   controller.setData(countryData());

@@ -8,7 +8,7 @@ import { GEOGRAPHIC_SCOPES_SCHEMA } from "../../maps/polygon/scopes.js";
 import { PIE_BINDING_SCHEMA, normalizePieBinding } from '../popup/pie-chart-data.js';
 
 import { POPUP_CONTENT_SCHEMA, normalizePopupContent } from "../popup/popup-content-contract.js";
-import { GEOGRAPHIC_ENRICHMENT_SCHEMA, normalizeGeographicEnrichment, profileWithGeographicEnrichment } from './geographic-enrichment.js';
+import { GEOGRAPHIC_ENRICHMENT_SCHEMA, normalizeGeographicEnrichment, profileWithGeographicEnrichment, normalizePointGeocodingReport } from './geographic-enrichment.js';
 
 const ROLE_VALUES = Object.freeze(["geo", "time", "measure", "category", "id", "text", "ignore"]);
 const AGG_VALUES = Object.freeze(["sum", "mean", "max", "min", "count"]);
@@ -135,7 +135,8 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
               sourceLng: { ...nullable({ type: "string" }), description: "Arc Flow: cột kinh độ đầu đi, bắt buộc không null; role geo point_lng hoặc measure." },
               targetLat: { ...nullable({ type: "string" }), description: "Arc Flow: cột vĩ độ đầu đến, bắt buộc không null và khác sourceLat; role geo point_lat hoặc measure." },
               targetLng: { ...nullable({ type: "string" }), description: "Arc Flow: cột kinh độ đầu đến, bắt buộc không null và khác sourceLng; role geo point_lng hoặc measure." },
-              time: nullable({ type: "string" }), group: nullable({ type: "string" }),
+              time: nullable({ type: "string" }),
+              group: { ...nullable({ type: "string" }), description: "Point: cột phân loại có ý nghĩa để tô màu các nhóm địa điểm, role category/text; ưu tiên 2–8 nhóm, độc lập với region định danh đối tượng. Null khi không có phân loại phù hợp." },
               region: nullable({ type: "string" }),
               value: { ...nullable({ type: "string" }), description: "Arc Flow: bắt buộc là tên cột đo độ lớn luồng, role measure, không null dù unit/agg chưa rõ; không phải số tổng, tọa độ hay nhãn nhóm. Polygon/Line có thể null khi không có chỉ số phù hợp." },
               lat: nullable({ type: "string" }),
@@ -153,7 +154,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
             items: {
               type: "object", additionalProperties: false, required: ["field", "label", "icon", "color"],
               properties: {
-                field: { type: "string", description: "Tên cột gốc có thật, phù hợp để tô màu Polygon/Line hoặc làm kích thước Point." },
+                field: { type: "string", description: "Tên cột gốc có thật, phù hợp để tô màu Polygon/Line. Point không có nút chỉ số." },
                 label: { type: "string", minLength: 1, maxLength: 80, description: "Nhãn tiếng Việt ngắn, giữ đúng ý nghĩa cột; không tự đổi đơn vị." },
                 icon: { type: "string", minLength: 1, maxLength: 12, description: "Một emoji hoặc ký hiệu Unicode phù hợp nội dung chỉ số; không sinh HTML, SVG, URL hay code." },
                 color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$", description: "Màu nền biểu tượng do AI chọn theo ý nghĩa chỉ số." }
@@ -216,9 +217,11 @@ function list(value) {
   return Array.isArray(value) ? value : [value];
 }
 
-function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
+function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile, problems = []) {
+  const reject = reason => { problems.push(reason); return null; };
   const spec = AI_CHART_REGISTRY[raw?.chartType];
-  if (!spec || typeof raw.id !== "string" || !raw.id.trim() || seenIds.has(raw.id)) return null;
+  if (!spec) return reject('Kiểu bản đồ không được hỗ trợ.');
+  if (typeof raw.id !== "string" || !raw.id.trim() || seenIds.has(raw.id)) return reject('ID bản đồ trống hoặc trùng.');
   const b = raw.bindings || {};
   const plan = spec.bindingPlan(b, profile);
   const nativeGeometry = plan.native;
@@ -227,8 +230,12 @@ function validateSuggestion(raw, roleOf, fieldNames, seenIds, profile) {
   for (const slot of required) {
     const value = b[slot];
     const names = list(value).filter(name => typeof name === "string" && name);
-    if (!names.length || plan.scalar && (typeof value !== "string" || names.length !== 1)
-      || names.some(name => !fieldNames.has(name) || !spec.slots[slot]?.includes(roleOf.get(name)))) return null;
+    if (!names.length) return reject(`Thiếu bindings.${slot}${raw.chartType === 'point' ? ': chưa có cột tọa độ đã xác minh' : ''}.`);
+    if (plan.scalar && (typeof value !== "string" || names.length !== 1)) return reject(`bindings.${slot} phải là một tên cột.`);
+    const missing = names.find(name => !fieldNames.has(name));
+    if (missing) return reject(`bindings.${slot} tham chiếu cột chưa có dữ liệu: ${missing}.`);
+    const wrongRole = names.find(name => !spec.slots[slot]?.includes(roleOf.get(name)));
+    if (wrongRole) return reject(`Cột ${wrongRole} có role ${roleOf.get(wrongRole)}, không phù hợp bindings.${slot}.`);
     normalizedBindings[slot] = names[0];
   }
   if (plan.distinct && new Set(required.map(slot => b[slot])).size !== required.length) return null;
@@ -263,7 +270,9 @@ export function fallbackAnalysis(profile, { datasetTitle = "Dữ liệu tải l�
 export function validateAndNormalizeAnalysis(raw, profile) {
   const geographicEnrichment = normalizeGeographicEnrichment(raw, profile);
   profile = profileWithGeographicEnrichment(profile, geographicEnrichment);
-  const fallback = fallbackAnalysis(profile, { datasetTitle: raw?.datasetTitle || "Dữ liệu tải lên" });
+  const pointGeocoding = normalizePointGeocodingReport(raw?.pointGeocoding, profile);
+  const fallback = { ...fallbackAnalysis(profile, { datasetTitle: raw?.datasetTitle || "Dữ liệu tải lên" }),
+    ...(pointGeocoding ? { pointGeocoding } : {}) };
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...fallback, validationErrors: ["AI không trả về object hợp lệ."] };
   const actualColumns = profile?.columns || [];
   const fieldNames = new Set(actualColumns.map(column => column.name));
@@ -281,9 +290,10 @@ export function validateAndNormalizeAnalysis(raw, profile) {
   const rawSuggestions = Array.isArray(raw.suggestions) ? raw.suggestions : null;
   const suggestionsByType = new Map();
   for (const rawSuggestion of rawSuggestions || []) {
-    const suggestion = validateSuggestion(rawSuggestion, roleOf, fieldNames, seenIds, profile);
+    const problems = [];
+    const suggestion = validateSuggestion(rawSuggestion, roleOf, fieldNames, seenIds, profile, problems);
     if (!suggestion) {
-      errors.push(`Bỏ suggestion không hợp lệ: ${rawSuggestion?.id || rawSuggestion?.chartType || "(trống)"}`);
+      errors.push(`Bỏ suggestion không hợp lệ: ${rawSuggestion?.id || rawSuggestion?.chartType || "(trống)"}${problems.length ? ` · ${problems.join(' ')}` : ''}`);
       continue;
     }
     suggestion.metricButtons = raw.source === "rule" ? [] : normalizeMetricButtons(rawSuggestion.metricButtons, columns, suggestion, profile);
@@ -319,6 +329,7 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     grain: typeof raw.grain === "string" && raw.grain.trim() ? raw.grain.trim() : fallback.grain,
     columns,
     ...(geographicEnrichment.length ? { geographicEnrichment } : {}),
+    ...(pointGeocoding ? { pointGeocoding } : {}),
     ...(raw.popupContent ? { popupContent: normalizePopupContent(raw.popupContent, columns) } : {}),
     suggestions: suggestions.map(suggestion => ({ ...suggestion, source })),
     ...normalizeDataSearchConfig(raw, columns),

@@ -1,6 +1,19 @@
 const LEVELS = ['country', 'admin1', 'admin2', 'point_lat', 'point_lng'];
 const empty = value => value == null || value === '';
 
+export function normalizePointGeocodingReport(raw, profile) {
+  if (!['Codex', 'OpenAI', 'MapTiler', 'MapTiler + Google Maps'].includes(raw?.provider) || profile?.samplesIncluded !== true
+    || !Number.isInteger(raw.total) || raw.total < 1 || raw.total > Math.min(100, profile.rowCount)
+    || !Number.isInteger(raw.matched) || raw.matched < 0 || raw.matched > raw.total
+    || raw.unmatched !== raw.total - raw.matched) return null;
+  const counts = ['maptilerMatched', 'googleMapsMatched', 'googleMapsAttempted', 'approximate'];
+  const hasCounts = counts.every(key => Number.isInteger(raw[key]) && raw[key] >= 0 && raw[key] <= raw.total)
+    && raw.maptilerMatched + raw.googleMapsMatched === raw.matched && raw.googleMapsMatched <= raw.googleMapsAttempted && raw.approximate <= raw.googleMapsMatched;
+  return { provider: raw.provider, total: raw.total, matched: raw.matched, unmatched: raw.unmatched,
+    ...(hasCounts ? Object.fromEntries(counts.map(key => [key, raw[key]])) : {}),
+    truncated: raw.truncated === true, reason: typeof raw.reason === 'string' ? raw.reason.slice(0, 400) : '' };
+}
+
 export const GEOGRAPHIC_ENRICHMENT_SCHEMA = {
   type: 'array', description: 'Thông tin địa lý còn thiếu đã tra cứu trên mạng, kèm khóa ghép và URL nguồn. [] khi không cần hoặc chưa xác minh được.',
   items: {
