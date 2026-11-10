@@ -12,6 +12,63 @@
     --side: 370px
 }
 
+.map-failure-dialog {
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    margin: auto;
+    padding: 28px;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--panel);
+    color: var(--ink);
+    box-shadow: 0 24px 80px #11213a30;
+    font-size: 14px;
+    line-height: 1.65;
+}
+.map-failure-dialog::backdrop { background: #11213a66; }
+.map-failure-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 26px;
+    line-height: 1;
+}
+.map-failure-close:hover { background: var(--bg); color: var(--ink); }
+.map-failure-close:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.map-failure-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #fff4df;
+    color: #a75b08;
+    font-size: 25px;
+    font-weight: 700;
+}
+.map-failure-dialog h2 { margin: 14px 36px 16px 0; font-size: 21px; line-height: 1.4; }
+.map-failure-item + .map-failure-item { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.map-failure-item h3 { margin: 0 0 8px; font-size: 16px; }
+.map-failure-item .map-failure-file { margin-bottom: 14px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.map-failure-summary { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; padding: 12px 14px; margin: 0 0 16px; border-radius: 10px; background: var(--bg); font-size: 13px; }
+.map-failure-summary dt { font-weight: 600; }
+.map-failure-summary dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.map-failure-item p { margin: 0 0 16px; }
+.map-failure-item h4 { margin: 0 0 8px; font-size: 14px; }
+.map-failure-item ul, .map-failure-item ol { margin: 0; padding-left: 21px; }
+.map-failure-item .map-failure-steps-intro { margin: 0 0 8px; }
+.map-failure-item li + li { margin-top: 8px; }
+
 * {
     box-sizing: border-box
 }

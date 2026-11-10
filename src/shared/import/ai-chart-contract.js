@@ -298,6 +298,15 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     rawByName.set(column.name, column);
   }
   const columns = actualColumns.map(column => normalizeColumn(rawByName.get(column.name), unclassifiedColumn(column)));
+  // Keep diagnostic evidence when a map is rejected, including the server/client
+  // normalization pass. This metadata never selects or enables a map.
+  const priorContext = raw.mapFailureContext;
+  const priorColumns = new Map((Array.isArray(priorContext?.columns) ? priorContext.columns : [])
+    .filter(column => fieldNames.has(column?.name)).map(column => [column.name, column]));
+  const diagnosticColumns = actualColumns.map(column => normalizeColumn(
+    priorColumns.get(column.name) || rawByName.get(column.name), unclassifiedColumn(column)));
+  const diagnosticAttempts = (Array.isArray(priorContext?.attempts) ? priorContext.attempts : [])
+    .filter(item => Object.hasOwn(mapRegistry, item?.chartType));
   const roleOf = new Map(columns.map(column => [column.name, column.role]));
   const seenIds = new Set();
   const rawSuggestions = Array.isArray(raw.suggestions) ? raw.suggestions : null;
@@ -307,6 +316,7 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     const suggestion = validateSuggestion(rawSuggestion, roleOf, fieldNames, seenIds, profile, problems);
     if (!suggestion) {
       errors.push(`Bỏ suggestion không hợp lệ: ${rawSuggestion?.id || rawSuggestion?.chartType || "(trống)"}${problems.length ? ` · ${problems.join(' ')}` : ''}`);
+      if (Object.hasOwn(mapRegistry, rawSuggestion?.chartType)) diagnosticAttempts.push(rawSuggestion);
       continue;
     }
     if (Array.isArray(rawSuggestion.mapDisplayFields)) {
@@ -334,6 +344,14 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     const existing = suggestionsByType.get(suggestion.chartType);
     if (!existing || suggestion.confidence > existing.confidence) suggestionsByType.set(suggestion.chartType, suggestion);
   }
+  const mapFailureContext = diagnosticAttempts.length ? {
+    columns: diagnosticColumns.map(({ name, labelVi, role, geoLevel }) => ({ name, labelVi, role, geoLevel })),
+    attempts: [...new Map(diagnosticAttempts.map(item => [item.chartType, {
+      chartType: item.chartType,
+      bindings: Object.fromEntries(Object.keys(mapRegistry[item.chartType].slots).flatMap(slot =>
+        typeof item.bindings?.[slot] === 'string' && fieldNames.has(item.bindings[slot]) ? [[slot, item.bindings[slot]]] : []))
+    }])).values()]
+  } : null;
   const suggestions = [...suggestionsByType.values()].sort((a, b) => b.confidence - a.confidence);
   for (const column of columns) {
     const mapSuggestions = suggestions.filter(item => mapRegistry[item.chartType]?.colorLegend && item.bindings.value === column.name);
@@ -353,12 +371,15 @@ export function validateAndNormalizeAnalysis(raw, profile) {
     }
   }
   // An explicit empty list is the AI's suitability decision, not a failed response.
-  if (!suggestions.length && rawSuggestions?.length !== 0) return { ...fallback, validationErrors: errors.length ? errors : ["AI không có suggestion hợp lệ."] };
+  if (!suggestions.length && rawSuggestions?.length !== 0) return { ...fallback,
+    ...(mapFailureContext ? { mapFailureContext } : {}),
+    validationErrors: errors.length ? errors : ["AI không có suggestion hợp lệ."] };
   const source = raw.source === "rule" ? "rule" : "ai";
   return {
     datasetTitle: typeof raw.datasetTitle === "string" && raw.datasetTitle.trim() ? raw.datasetTitle.trim() : fallback.datasetTitle,
     grain: typeof raw.grain === "string" && raw.grain.trim() ? raw.grain.trim() : fallback.grain,
     columns,
+    ...(mapFailureContext ? { mapFailureContext } : {}),
     ...(geographicEnrichment.length ? { geographicEnrichment } : {}),
     ...(pointGeocoding ? { pointGeocoding } : {}),
     ...(raw.popupContent ? { popupContent: normalizePopupContent(raw.popupContent, columns) } : {}),

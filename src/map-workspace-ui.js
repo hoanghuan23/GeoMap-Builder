@@ -15,6 +15,7 @@ import { createMapTemplateRenderer } from './map-template-renderer.js';
 import { createMapProcessingStatus } from './shared/ui/map-processing-status.js';
 import { createAiMapEditor } from './ai-map-editor.js';
 import { createMapAppearance } from './map-appearance.js';
+import { createMapFailureDialog } from './shared/ui/map-failure-dialog.js';
 
 const fileKey = file => file.datasetKey || `${file.name}:${file.size}:${file.lastModified}`;
 const textNode = (tag, text, className) => Object.assign(document.createElement(tag), { textContent: text, ...(className ? { className } : {}) });
@@ -28,6 +29,7 @@ const pendingLocationReason = layer => layer.runtime.state.aiDataset?.analysis?.
 
 export async function startMapWorkspace(createRuntime, { styles, styleLabels, renderCatalog, templatePicker }) {
   const workspace = createMapWorkspace();
+  const failureDialog = createMapFailureDialog(document);
   const appearance = createMapAppearance({ panel: document.querySelector('.map-panel'), workspace });
   const uploads = new Map(); const keys = new Set(); const runtimes = new Map();
   const requestComposition = createCompositionClient();
@@ -73,6 +75,7 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   let readyResolve; const ready = new Promise(resolve => { readyResolve = resolve; });
   let uploadSequence = 0; let scheduled = false; let queue = Promise.resolve();
   let selectedSignature = ''; let compositionController; let currentStyle = 'liberty'; let styleReady = false;
+  let basemapFailureShown = false;
   const mounted = new Set();
   const search = createMapSearch({ map, minFilteredObjects: CONFIG.DATA_SEARCH_MIN_FILTERED_OBJECTS,
     onRegionChange(regionId) {
@@ -86,7 +89,14 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       selectLayer(entry.layerId);
     }
   });
-  const enqueue = task => { const next = queue.then(task); queue = next.catch(error => { console.error(error); status(error.message); }); return next; };
+  const enqueue = task => {
+    const next = queue.then(task);
+    queue = next.catch(error => {
+      if (error?.name === 'AbortError') return;
+      console.error(error); status(error.message); failureDialog.show([{ error }]);
+    });
+    return next;
+  };
   const enqueueAnalysis = task => {
     const finish = processingStatus.begin();
     return enqueue(async () => { try { return await task(); } finally { finish(); } });
@@ -118,6 +128,9 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
     metric.dataset.layerId = id;
     const api = createRuntime({ id, document: dom.document, map: manager.map, nativeMap: map, maplibregl: manager.popupLibrary(globalThis.maplibregl), preparsedResults,
       managedWorkspace: true, onStatus: status,
+      onMapFailure(error, suggestion) {
+        if (runtimes.has(id)) failureDialog.show([{ fileName: api.state.fileName, dataset: api.state.aiDataset, error, suggestion }]);
+      },
       arcFlowOverlay, onArcInteract: () => selectLayer(id),
       popupSources: feature => joinedPopupSources(workspace, id, feature),
       popupMetadata() {
@@ -378,12 +391,15 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       }
     }));
     const readyEntries = [];
+    const failures = [];
     for (const entry of results.filter(Boolean)) {
       const { id, upload, result, error } = entry;
       if (!uploads.has(id)) continue;
       if (error) {
         upload.processing = false;
-        upload.status = 'Lỗi'; upload.message = error.message || 'Không thể đọc file'; keys.delete(upload.key); renderUploads(); continue;
+        upload.status = 'Lỗi'; upload.message = error.message || 'Không thể đọc file'; keys.delete(upload.key);
+        if (error.name !== 'AbortError') failures.push({ fileName: upload.file.name, error, stage: 'read' });
+        renderUploads(); continue;
       }
       if (result.kind === 'sheet-selection') {
         upload.processing = false;
@@ -424,6 +440,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
         item?.api.dispose(); item?.manager.dispose(); item?.dom.dispose();
         keys.delete(upload.key);
         upload.status = 'Lỗi'; upload.message = error.message || 'Không thể dựng bản đồ';
+        if (uploads.has(id) && error.name !== 'AbortError') failures.push({ fileName: upload.file.name, error,
+          dataset: item?.api.state.aiDataset });
       }
       renderUploads();
     }
@@ -432,6 +450,16 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
       const layer = workspace.layersById[id]; layer.descriptor = describeWorkspaceLayer(id, runtimes.get(id).api, layer.title);
     }
     if (pendingIds.length) await compose(pendingIds);
+    // Attribute-only files may become usable after joining an existing map.
+    // Report once per completed import, never from the recurring UI sync.
+    for (const id of pendingIds) {
+      const layer = workspace.layersById[id];
+      if (!layer || workspace.attributeJoins.some(join => join.sourceId === id)) continue;
+      if (describeWorkspaceLayer(id, layer.runtime, layer.title).available) continue;
+      const upload = [...uploads.values()].find(upload => upload.layerId === id);
+      if (upload) failures.push({ fileName: upload.file.name, dataset: layer.runtime.state.aiDataset });
+    }
+    failureDialog.show(failures);
     sync();
     const waitingForSheet = [...uploads.values()].some(upload => upload.sheets && !upload.processing);
     status(waitingForSheet ? 'Hãy chọn bảng (sheet) cần phân tích trong từng file Excel rồi bấm Phân tích bảng đã chọn.'
@@ -551,7 +579,8 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   $('basemap-options').addEventListener('click', event => {
     const option = event.target.closest('.basemap-option'); if (!option || !styles[option.dataset.mapStyle]) return;
     if (styleReady && currentStyle === option.dataset.mapStyle) return;
-    currentStyle = option.dataset.mapStyle; styleReady = false; arcFlowOverlay.setStyleReady(false); map.setStyle(styles[currentStyle], { diff: false });
+    currentStyle = option.dataset.mapStyle; styleReady = false; basemapFailureShown = false;
+    arcFlowOverlay.setStyleReady(false); map.setStyle(styles[currentStyle], { diff: false });
     document.querySelectorAll('.basemap-option').forEach(button => { button.classList.toggle('active', button.dataset.mapStyle === currentStyle); button.setAttribute('aria-pressed', String(button.dataset.mapStyle === currentStyle)); });
     $('basemap-selection').replaceChildren(document.createTextNode('Nền đang dùng: '), textNode('b', styleLabels[currentStyle]));
     $('map4d-attribution').hidden = currentStyle !== 'map4d'; $('satellite-attribution').hidden = currentStyle !== 'satellite'; $('vector-attribution').hidden = ['map4d', 'satellite'].includes(currentStyle);
@@ -564,10 +593,16 @@ export async function startMapWorkspace(createRuntime, { styles, styleLabels, re
   map.on('rotate', updateCompass);
   updateCompass();
   map.on('style.load', () => { styleReady = true; mounted.clear(); readyResolve(); sync(); arcFlowOverlay.setStyleReady(true); search.refreshHighlight(); });
-  map.on('remove', () => { arcFlowOverlay.dispose(); appearance.dispose(); });
+  map.on('remove', () => { arcFlowOverlay.dispose(); appearance.dispose(); failureDialog.dispose(); });
   map.on('error', event => {
     console.warn('MapLibre:', event.error?.message);
-    if (!styleReady) status('Chưa tải được nền bản đồ. Bạn có thể chọn nền khác để thử lại.');
+    if (!styleReady) {
+      status('Chưa tải được nền bản đồ. Bạn có thể chọn nền khác để thử lại.');
+      if (!basemapFailureShown) {
+        basemapFailureShown = true;
+        failureDialog.show([{ stage: 'basemap' }]);
+      }
+    }
   });
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { map.resize(); for (const item of runtimes.values()) item.api.resizePopup(); }).observe($('map'));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) map.resize(); });

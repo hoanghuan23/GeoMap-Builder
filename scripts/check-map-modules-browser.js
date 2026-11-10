@@ -22,7 +22,8 @@ const server = await createServer({ server: { host: '127.0.0.1', port: testPort,
 }] });
 try {
   await server.listen(); const address = server.httpServer.address();
-  const fixture = templateComposition ? 'map-template-composition-browser' : templates ? 'map-template-browser' : 'map-modules-browser';
+  const fixture = process.argv.includes('--map-failures') ? 'map-failure-browser'
+    : templateComposition ? 'map-template-composition-browser' : templates ? 'map-template-browser' : 'map-modules-browser';
   const url = `http://127.0.0.1:${address.port}/tests/fixtures/${fixture}.html${webgl ? '?webgl=1' : ''}${screenshots ? '&screenshots=1' : ''}`;
   const child = spawn(browser, ['--headless', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run',
     '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',

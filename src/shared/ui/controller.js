@@ -492,8 +492,16 @@ export function createController(context) {
       const button = event.target.closest(".map-type");
       if (!button) return;
       if (button.dataset.aiSuggestion) {
-        try { await services.runtime.selectAiSuggestion(button.dataset.aiSuggestion); }
-        catch (error) { if (error?.name !== "AbortError") { console.error(error); showToast(error.message || "Không thể dựng đề xuất này."); } }
+        const requestedSuggestion = state.aiDataset?.suggestions.find(item => item.id === button.dataset.aiSuggestion);
+        try {
+          const result = await services.runtime.selectAiSuggestion(button.dataset.aiSuggestion);
+          if (result === false) options.onMapFailure?.(undefined, requestedSuggestion);
+        }
+        catch (error) {
+          if (error?.name !== "AbortError") {
+            console.error(error); showToast(error.message || "Không thể dựng đề xuất này."); options.onMapFailure?.(error, requestedSuggestion);
+          }
+        }
         return;
       }
       document.querySelectorAll(".map-type").forEach(x => x.classList.remove("active"));
