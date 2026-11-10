@@ -1,4 +1,5 @@
 import { mapRegistry } from "../../maps/registry.js";
+import { normalizeMapDisplayFields } from '../data/display-fields.js';
 import { TIME_GRANULARITIES } from "../data/time-values.js";
 import { measureAggregation } from "../data/measure-semantics.js";
 import { normalizePolygonLegendRecommendation, normalizeLegendUnit, polygonLegendTarget, POLYGON_LEGEND_SCHEMA } from "../data/polygon-legend-contract.js";
@@ -119,7 +120,7 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend", "popupSuggestions", "metricButtons", "geographicScopes", "pointGroupFields"],
+        required: ["id", "chartType", "title", "bindings", "agg", "confidence", "reason", "legend", "popupSuggestions", "metricButtons", "geographicScopes", "pointGroupFields", "mapDisplayFields"],
         properties: {
           geographicScopes: GEOGRAPHIC_SCOPES_SCHEMA,
           id: { type: "string" },
@@ -163,6 +164,8 @@ export const ANALYSIS_RESPONSE_SCHEMA = Object.freeze({
               }
             }
           },
+          mapDisplayFields: { type: "array", items: { type: "string" },
+            description: "Các cột hữu ích để chọn hiển thị cho từng bản đồ, theo thứ tự ưu tiên; cột đầu tiên là mặc định. Point chọn nhóm màu; Polygon/Line chọn chỉ số hoặc phân loại tô màu; Arc Flow chọn số đo lưu lượng. Không liệt kê toàn bộ cột." },
           pointGroupFields: { type: "array", items: { type: "string" },
             description: "Point: chỉ các cột phù hợp để người dùng chọn hiển thị/tô màu theo nhóm, xếp theo mức quan trọng; cột đầu tiên là mặc định. Kiểu bản đồ khác trả []." },
           popupSuggestions: {
@@ -306,7 +309,25 @@ export function validateAndNormalizeAnalysis(raw, profile) {
       errors.push(`Bỏ suggestion không hợp lệ: ${rawSuggestion?.id || rawSuggestion?.chartType || "(trống)"}${problems.length ? ` · ${problems.join(' ')}` : ''}`);
       continue;
     }
+    if (Array.isArray(rawSuggestion.mapDisplayFields)) {
+      suggestion.mapDisplayFields = normalizeMapDisplayFields(rawSuggestion.mapDisplayFields, suggestion, columns);
+      if (suggestion.chartType === 'point') {
+        suggestion.pointGroupFields = [...suggestion.mapDisplayFields];
+        const group = suggestion.mapDisplayFields[0];
+        if (['category', 'text'].includes(roleOf.get(group))) suggestion.bindings.group = group;
+        else delete suggestion.bindings.group;
+      } else {
+        const field = suggestion.mapDisplayFields[0] || (suggestion.chartType === 'arc_flow' ? suggestion.bindings.value : null);
+        if (field !== suggestion.bindings.value) {
+          suggestion.bindings.value = field;
+          const column = columns.find(column => column.name === field);
+          suggestion.agg = column?.role === 'measure' ? measureAggregation(column) : null;
+          suggestion.legend = null;
+        }
+      }
+    }
     suggestion.metricButtons = raw.source === "rule" ? [] : normalizeMetricButtons(rawSuggestion.metricButtons, columns, suggestion, profile);
+    if (suggestion.mapDisplayFields) suggestion.metricButtons = suggestion.metricButtons.filter(button => suggestion.mapDisplayFields.includes(button.field));
     suggestion.geographicScopes = mapRegistry[suggestion.chartType].normalizeScopes?.(
       rawSuggestion.geographicScopes, profile, suggestion, reason => errors.push(reason)
     ) || [];

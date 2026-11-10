@@ -89,7 +89,8 @@ export function createInfoImagePopup(documentRef, { sources, coordinates, title,
       if (links.children.length) section.append(links);
       const excluded = new Set([config.titleField, ...config.imageFields, ...config.descriptionFields, ...config.addressFields, ...config.linkFields]);
       const details = node('dl', 'info-image-details');
-      for (const detail of aiPopupRows(record, source.columns)) {
+      const detailColumns = selected ? [...selected].map(name => source.columns.find(column => column.name === name)).filter(Boolean) : source.columns;
+      for (const detail of aiPopupRows(record, detailColumns)) {
         if (excluded.has(detail.field) || detail.field.startsWith('__') || selected && !selected.has(detail.field)) continue;
         const row = node('div', ''); const value = node('dd', '');
         setPopupValue(documentRef, value, record[detail.field], detail.value);

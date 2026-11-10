@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { ANALYSIS_RESPONSE_SCHEMA, fallbackAnalysis, validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
 import { mockAiAnalysis } from "./fixtures/mock-ai-analysis.js";
 import { legendFixture } from "./fixtures/polygon-legend-fixture.js";
+import { analysis as arcAnalysis, suggestion as arcSuggestion } from './fixtures/arc-flow-fixture.js';
 
 const profile = {
   rowCount: 2,
@@ -48,6 +49,50 @@ test("Point display fields preserve AI priority and discard invalid columns", ()
   const result = normalizeFixture(raw, dataProfile);
   assert.deepEqual(result.suggestions[0].pointGroupFields, ["status", "sector", "city"]);
   assert.deepEqual(normalizeFixture(result, dataProfile).suggestions[0].pointGroupFields, result.suggestions[0].pointGroupFields);
+});
+
+test("every map preserves AI display choices, uses the first field and keeps popup choices independent", () => {
+  assert.ok(ANALYSIS_RESPONSE_SCHEMA.properties.suggestions.items.required.includes('mapDisplayFields'));
+  for (const chartType of ['choropleth', 'map_line', 'point', 'arc_flow']) {
+    const columns = [...arcAnalysis.columns, { name: 'region', role: 'geo', geoLevel: 'country' },
+      { name: 'cost', role: 'measure', aggDefault: 'mean' }, { name: 'status', role: 'category' },
+      { name: 'description', role: 'text' }, { name: 'internal_id', role: 'id' }];
+    const point = chartType === 'point';
+    const bindings = chartType === 'arc_flow' ? arcSuggestion.bindings : point
+      ? { lat: 'origin_lat', lng: 'origin_lng', region: 'internal_id', group: 'status' }
+      : { region: 'region', value: 'passengers' };
+    const choices = point ? ['status', 'region'] : ['cost', 'passengers'];
+    const raw = { columns, popupFields: ['description', 'passengers'], suggestions: [{
+      id: chartType, chartType, bindings, agg: 'sum',
+      mapDisplayFields: [...choices, choices[0], 'missing', 'origin_lat', 'internal_id'], pointGroupFields: [] }] };
+    const profile = { columns, rowCount: 3 };
+    const normalized = validateAndNormalizeAnalysis(raw, profile);
+    const suggestion = normalized.suggestions[0];
+    assert.deepEqual(suggestion.mapDisplayFields, choices, chartType);
+    assert.deepEqual(normalized.popupFields, ['description', 'passengers']);
+    if (point) {
+      assert.deepEqual(suggestion.pointGroupFields, choices);
+      assert.equal(suggestion.bindings.group, 'status');
+    } else {
+      assert.equal(suggestion.bindings.value, 'cost', chartType);
+      assert.equal(suggestion.agg, 'mean');
+    }
+    assert.deepEqual(validateAndNormalizeAnalysis(JSON.parse(JSON.stringify(normalized)), profile), normalized, chartType);
+    assert.deepEqual(raw.suggestions[0].bindings, bindings, 'normalization must not change its input');
+  }
+});
+
+test("an explicit empty display list removes Polygon/Line thematic coloring and quick buttons", () => {
+  for (const chartType of ['choropleth', 'map_line']) {
+    const normalized = normalizeFixture({ suggestions: [{ id: 'plain', chartType,
+      bindings: { region: 'province', value: 'temperature' }, mapDisplayFields: [],
+      metricButtons: [{ field: 'temperature', label: 'Nhiệt độ', icon: '☀', color: '#123456' }] }] }, profile);
+    assert.deepEqual(normalized.suggestions[0].mapDisplayFields, []);
+    assert.equal(normalized.suggestions[0].bindings.value, null);
+    assert.equal(normalized.suggestions[0].agg, null);
+    assert.equal(normalized.suggestions[0].legend, null);
+    assert.deepEqual(normalized.suggestions[0].metricButtons, []);
+  }
 });
 
 test("AI search defaults survive server/client normalization and reject invalid fields", () => {

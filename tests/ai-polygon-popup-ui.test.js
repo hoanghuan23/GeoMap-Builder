@@ -9,7 +9,7 @@ import * as pipeline from "../src/shared/import/ai-chart-pipeline.js";
 import * as times from "../src/shared/data/time-values.js";
 import { AI_CHART_REGISTRY, validateAndNormalizeAnalysis } from "../src/shared/import/ai-chart-contract.js";
 import { comparableFilterValue, displayFilterValue, requestAiDataAnalysis } from "../src/shared/import/ai-data-analysis.js";
-import { createAiPopupContent } from "../src/shared/popup/ai-popup.js";
+import { createAiPopupContent, aiPopupRows } from "../src/shared/popup/ai-popup.js";
 import { createInfoImagePopup } from "../src/shared/popup/info-image-popup.js";
 import { collapseCountryFeatures, joinRecordsToMapTilerBoundaries } from "../src/shared/geography/vietnam-admin-data.js";
 import { buildDataSearchIndex, searchDataIndex } from "../src/shared/search/map-search.js";
@@ -410,6 +410,8 @@ test("Point and both Line providers keep color legends and toggles without measu
   assert.equal(point.run("dataset.activePointView.legendRows.length"), 2);
   assert.equal(point.get("point-group-color-field").hidden, false);
   point.run("pointSelectionFor(activePointSuggestion()).mode = 'all'; refreshPointView(activePointSuggestion());");
+  assert.equal(point.run("dataset.activePointView.paint['circle-color'][0]"), 'match', 'all groups retain their category colors');
+  point.run("activePointSuggestion().mapDisplayFields = []; refreshPointView(activePointSuggestion(), {rebuildControls:true});");
   assert.equal(point.run("dataset.activePointView.paint['circle-color']"), point.run("state.pointStyle.color"));
   assert.equal(point.get("point-fixed-color-field").hidden, false);
   assert.equal(point.get("point-show-legend-field").hidden, false);
@@ -1413,6 +1415,50 @@ test("Point display selector includes text store names and a city with a single 
   group.value = "thanh_pho"; h.change(group);
   assert.deepEqual(h.all(".ai-point-value").map(input => input.value), ["Hà Nội"]);
   assert.equal(h.sources.get("point-data").data.features.length, storeRecords.length);
+});
+
+test("Polygon and Line selectors show only AI display choices in priority order", async () => {
+  for (const options of [{}, { road: true }]) {
+    const h = harness(options);
+    const all = h.run('runtimeApi.context.modules.active().allMetricColumns().map(column => column.name)');
+    assert.ok(all.length >= 2);
+    const choices = [all[1], all[0]];
+    h.dataset.suggestions.find(item => item.id === h.dataset.selectedSuggestionId).mapDisplayFields = choices;
+    h.run('populateAiFilters(dataset)');
+    assert.deepEqual(h.all('.ai-metric-selector')[0].children.map(option => option.value), choices);
+    const records = JSON.stringify(h.dataset.records);
+    await h.run(`changeAiMapMetric(${JSON.stringify(choices[0])})`);
+    assert.equal(h.run('runtimeApi.context.modules.active().metricField()'), choices[0]);
+    assert.equal(JSON.stringify(h.dataset.records), records);
+    h.dataset.suggestions.find(item => item.id === h.dataset.selectedSuggestionId).mapDisplayFields = [choices[0]];
+    await h.run(`changeAiMapMetric(${JSON.stringify(choices[1])})`);
+    assert.equal(h.run('runtimeApi.context.modules.active().metricField()'), choices[0], 'omitted fields cannot be selected');
+    h.dataset.metricFieldsConfigured = true;
+    h.run('populateAiFilters(dataset)');
+    assert.equal(h.all('.ai-metric-selector')[0].children.length, all.length, 'chat can restore omitted columns');
+  }
+});
+
+test("information popup choices apply to Polygon, Line and Point independently of map choices", () => {
+  for (const options of [{}, { road: true }, { point: true }]) {
+    const h = harness(options);
+    const columns = h.dataset.analysis.columns.filter(column => ['measure', 'time'].includes(column.role));
+    assert.ok(columns.length >= 2);
+    h.dataset.analysis.popupFields = [columns[1].name, columns[0].name];
+    h.run('testPopupFeature = {properties: Object.fromEntries(dataset.analysis.columns.map(column => [column.name, 42]))}');
+    const rows = h.run('aiWeatherPopupContent(testPopupFeature).children[1].children.map(row => row.children[0].textContent)');
+    assert.deepEqual(Array.from(rows), aiPopupRows(Object.fromEntries(columns.map(column => [column.name, 42])), [columns[1], columns[0]]).map(row => row.label));
+    h.dataset.popupFields = [];
+    assert.equal(h.run('aiWeatherPopupContent(testPopupFeature).children[1].children.length'), 0);
+  }
+});
+
+test("Point accepts the shared AI display list with priority over legacy choices", () => {
+  const h = harness({ point: true, pointGroupFields: ['ten_cua_hang'] });
+  h.dataset.suggestions[0].mapDisplayFields = ['thanh_pho'];
+  h.run('dataset.pointSelections = {}; refreshPointView(dataset.suggestions[0], {rebuildControls:true})');
+  assert.deepEqual(h.all('.ai-point-group')[0].children.map(option => option.value), ['thanh_pho']);
+  assert.equal(h.run('dataset.activePointView.selection.groupField'), 'thanh_pho');
 });
 
 test("Point selector uses only AI proposed groups and defaults to its first choice", () => {

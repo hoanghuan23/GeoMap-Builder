@@ -76,3 +76,15 @@ test('extent covers geometry collections and ignores invalid positions', () => {
   assert.deepEqual(geometryExtent(data), [0, -10, 106, 0]);
   assert.equal(geometryExtent(null), null);
 });
+
+
+test('GeoJSON initializes AI popup fields and preserves per-map display priority without changing its source', () => {
+  const analysis = { ...pipeline.analysis, popupFields: ['date', 'temperature'],
+    suggestions: pipeline.analysis.suggestions.map(suggestion => ({ ...suggestion, mapDisplayFields: ['temperature'] })) };
+  const dataset = nativeMapDataset({ type: 'FeatureCollection', features }, { ...pipeline, analysis }, 'weather.geojson');
+  assert.deepEqual(dataset.popupFields, ['date', 'temperature']);
+  assert.deepEqual(dataset.suggestions[0].mapDisplayFields, ['temperature']);
+  dataset.popupFields.pop();
+  assert.deepEqual(analysis.popupFields, ['date', 'temperature']);
+  assert.equal(features[0].properties[dataset.nativeGeometry.identityField], undefined);
+});

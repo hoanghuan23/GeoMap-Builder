@@ -44,6 +44,8 @@ Markup cố định của bộ điều chỉnh thuộc `controls.js` của modul
 
 Server ghép các đoạn hướng dẫn thuần của module với hướng dẫn chung theo thứ tự cũ. Không đổi cấu trúc request/response, số lần gọi AI hay ý nghĩa bindings. Các tính năng đã gỡ vẫn không được chấp nhận. Registry dùng chung không import factory trình duyệt; deck.gl vẫn tải qua renderer động khi Arc Flow được dùng.
 
+Mỗi suggestion có `mapDisplayFields`: các cột AI chọn cho bộ điều khiển dữ liệu, theo thứ tự ưu tiên; cột đầu tiên là mặc định. Point dùng nhóm màu (đọc được `pointGroupFields` cũ), Polygon/Line dùng chỉ số hoặc phân loại tô màu, Arc Flow dùng số đo lưu lượng. Danh sách rỗng không tự được điền bằng toàn bộ cột. `popupFields` ở cấp analysis chọn riêng nội dung và thứ tự trường thông tin cho cả bốn loại, bao gồm GeoJSON; các chỉ số không được chọn trên bản đồ vẫn dùng được trong popup. Các lựa chọn chỉ ảnh hưởng trình bày, giữ nguyên dữ liệu gốc và không gọi lại AI khi chuyển chỉ số. Chat có thể thay đổi các trường sau khi render.
+
 ## Thêm một loại mới
 
 1. Tạo thư mục module, định nghĩa `id`, `viewType`, tên/icon, slots, `bindingPlan`, `evaluate`, khả năng UI và các hướng dẫn AI riêng. Các bindings mới phải được khai báo trong schema phản hồi dùng chung nếu chưa có.

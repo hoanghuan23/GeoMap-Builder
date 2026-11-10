@@ -9,7 +9,7 @@ import { formatTimeValue as default_formatTimeValue } from "../../shared/data/ti
 import { timeValueInfo as default_timeValueInfo } from "../../shared/data/time-values.js";
 import { popupTimeColumn as default_popupTimeColumn } from "../../shared/popup/ai-popup-chart.js";
 import { EMPTY_FEATURE_COLLECTION } from '../../shared/configuration.js';
-import { visibleDatasetColumns } from '../../shared/data/display-fields.js';
+import { visibleDatasetColumns, mapDisplayColumns } from '../../shared/data/display-fields.js';
 
 /** point operations for one workspace layer. */
 export function createController(context) {
@@ -50,12 +50,9 @@ export function createController(context) {
     const dataset = state.aiDataset;
     dataset.pointModels ||= Object.create(null);
     const model = dataset.pointModels[suggestion.id] ||= createPointModel(dataset.records, dataset.analysis.columns, suggestion.bindings);
-    const proposed = Array.isArray(suggestion.pointGroupFields)
-      ? suggestion.pointGroupFields.map(name => model.groups.find(column => column.name === name)).filter(Boolean)
-      : model.groups;
-    const groups = includeHidden ? proposed : visibleDatasetColumns(dataset, proposed);
+    const groups = mapDisplayColumns(dataset, suggestion, model.groups, { includeHidden });
     return { ...model, groups, measures: includeHidden ? model.measures : visibleDatasetColumns(dataset, model.measures),
-      defaultGroupField: Array.isArray(suggestion.pointGroupFields) ? groups[0]?.name || null : model.defaultGroupField };
+      defaultGroupField: Array.isArray(suggestion.mapDisplayFields ?? suggestion.pointGroupFields) ? groups[0]?.name || null : model.defaultGroupField };
   }
 
   function pointSelectionFor(suggestion) {

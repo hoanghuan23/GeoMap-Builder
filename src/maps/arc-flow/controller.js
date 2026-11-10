@@ -2,6 +2,8 @@ import { buildArcFlowView, createArcFlowModel, mergeArcFlowStyle } from './data.
 import { formatTimeValue, uniqueTimeValues } from '../../shared/data/time-values.js';
 import { serializeTabularValue } from '../../shared/import/tabular-data.js';
 import { createAiPopupContent } from '../../shared/popup/ai-popup.js';
+import { mapDisplayColumns, popupDisplayColumns, normalizeMapDisplayFields } from '../../shared/data/display-fields.js';
+import { measureAggregation } from '../../shared/data/measure-semantics.js';
 
 const empty = { type: 'FeatureCollection', features: [] };
 const reasonLabels = { missingEndpoint: 'thiếu điểm đi/đến', missingCoordinates: 'thiếu tọa độ', invalidCoordinates: 'tọa độ ngoài phạm vi',
@@ -20,8 +22,27 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
   const field = (caption, control) => { const node = element('label', null, 'field'); node.append(element('span', caption), control); return node; };
   const modelFor = suggestion => {
     const dataset = state.aiDataset; dataset.arcFlowModels ||= Object.create(null);
-    return dataset.arcFlowModels[suggestion.id] ||= createArcFlowModel(dataset.records, dataset.analysis.columns, suggestion);
+    const cached = dataset.arcFlowModels[suggestion.id];
+    if (cached?.bindings.value === suggestion.bindings.value && cached.aggregation === (suggestion.agg || measureAggregation(dataset.analysis.columns.find(column => column.name === suggestion.bindings.value)))) return cached;
+    return dataset.arcFlowModels[suggestion.id] = createArcFlowModel(dataset.records, dataset.analysis.columns, { ...suggestion, bindings: { ...suggestion.bindings } });
   };
+  function allMetricColumns(suggestion = currentSuggestion) {
+    if (!suggestion) return [];
+    const columns = state.aiDataset.analysis.columns;
+    const names = new Set(normalizeMapDisplayFields(columns.map(column => column.name), suggestion, columns));
+    return columns.filter(column => names.has(column.name));
+  }
+  function metricColumns() { return mapDisplayColumns(state.aiDataset, currentSuggestion, allMetricColumns()); }
+  function changeMetric(name) {
+    if (!metricColumns().some(column => column.name === name)) return false;
+    const column = state.aiDataset.analysis.columns.find(column => column.name === name);
+    const candidate = { ...currentSuggestion, bindings: { ...currentSuggestion.bindings, value: name }, agg: column.aggDefault || null };
+    const model = createArcFlowModel(state.aiDataset.records, state.aiDataset.analysis.columns, candidate);
+    if (!model.available) { onStatus?.(model.unavailableReason); return false; }
+    Object.assign(currentSuggestion, candidate);
+    state.aiDataset.arcFlowModels[currentSuggestion.id] = model;
+    refresh(); return true;
+  }
   const selectionFor = suggestion => {
     const dataset = state.aiDataset; dataset.arcFlowSelections ||= Object.create(null);
     dataset.arcFlowSelections[suggestion.id] ||= { filters: {}, topN: 100, time: '' };
@@ -31,12 +52,14 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
   function openInfo(title, rows, position, records, feature) {
     if (!active) return;
     closePopup(); onInteract?.();
-    const properties = { __arcPopupTitle: title };
-    const columns = rows.map(([labelVi, value, column], index) => {
-      const name = `detail-${index}`; properties[name] = value;
-      return { role: 'measure', ...column, name, labelVi };
-    });
-    const createContent = () => createAiPopupContent(doc, { properties }, columns, '__arcPopupTitle', { datasetTitle: state.aiDataset.analysis.datasetTitle });
+    const createContent = () => {
+      const properties = { __arcPopupTitle: title };
+      const columns = (typeof rows === 'function' ? rows() : rows).map(([labelVi, value, column], index) => {
+        const name = `detail-${index}`; properties[name] = value;
+        return { role: 'measure', ...column, name, labelVi };
+      });
+      return createAiPopupContent(doc, { properties }, columns, '__arcPopupTitle', { datasetTitle: state.aiDataset.analysis.datasetTitle });
+    };
     if (onPopup) {
       onPopup({ title, createContent, position, feature, records: records.map(record => ({ ...record, __arcPopupTitle: title })) });
       return;
@@ -49,22 +72,37 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
     const p = feature.properties; const unit = state.arcFlowView?.model.unit || '';
     const flows = state.arcFlowView.flows.filter(flow => flow.source.id === p.__arcNodeId || flow.target.id === p.__arcNodeId);
     const indices = new Set(flows.flatMap(flow => flow.rowIndices));
-    openInfo(p.__arcName, [['Tổng vào', Number(p.__inbound), { unit }], ['Tổng ra', Number(p.__outbound), { unit }],
-      ['Phạm vi', 'Dữ liệu đang lọc, trước Top N', { role: 'text' }]], feature.geometry.coordinates,
-      [...indices].map(index => state.aiDataset.records[index]), feature);
+    const records = [...indices].map(index => state.aiDataset.records[index]);
+    const rows = () => {
+      const dataset = state.aiDataset; const b = currentSuggestion.bindings;
+      const totals = [['Tổng vào', Number(p.__inbound), { unit }], ['Tổng ra', Number(p.__outbound), { unit }]];
+      if (!Array.isArray(dataset.popupFields ?? dataset.analysis.popupFields)) return [...totals,
+        ['Phạm vi', 'Dữ liệu đang lọc, trước Top N', { role: 'text' }]];
+      return popupDisplayColumns(dataset).flatMap(column => {
+        if (column.name === b.value) return totals;
+        if ([b.source, b.target, b.sourceLat, b.sourceLng, b.targetLat, b.targetLng].includes(column.name)) return [];
+        const values = [...new Map(records.filter(record => record[column.name] != null && record[column.name] !== '')
+          .map(record => [String(serializeTabularValue(record[column.name])), record[column.name]])).values()];
+        return values.length ? [[column.labelVi || column.name, values.length === 1 ? values[0] : values, column]] : [];
+      });
+    };
+    openInfo(p.__arcName, rows, feature.geometry.coordinates, records, feature);
   }
   function flowClick(flow, position) {
     const view = state.arcFlowView; if (!view) return;
     const b = currentSuggestion.bindings;
-    const rows = [[view.model.metricLabel, flow.value, { unit: view.model.unit }], ['Bản ghi tổng hợp', flow.rowIndices.length]];
-    const popupColumns = Array.isArray(state.aiDataset.popupFields)
-      ? state.aiDataset.popupFields.map(name => view.model.columns.find(column => column.name === name)).filter(Boolean)
-      : view.model.columns;
-    for (const column of popupColumns) if (![b.source, b.target, b.sourceLat, b.sourceLng, b.targetLat, b.targetLng, b.value].includes(column.name)) {
-      const value = flow.properties[column.name];
-      if (value != null && value !== '') rows.push([column.labelVi || column.name, value, column]);
-    }
-    rows.push(['Bộ lọc', filterDescription(), { role: 'text' }]);
+    const rows = () => {
+      const selected = state.aiDataset.popupFields ?? state.aiDataset.analysis.popupFields;
+      const result = [];
+      for (const column of popupDisplayColumns(state.aiDataset, view.model.columns)) {
+        if ([b.source, b.target, b.sourceLat, b.sourceLng, b.targetLat, b.targetLng].includes(column.name)) continue;
+        const value = column.name === b.value ? flow.value : flow.properties[column.name];
+        if (value != null && value !== '') result.push([column.name === b.value ? view.model.metricLabel : column.labelVi || column.name,
+          value, column.name === b.value ? { ...column, unit: view.model.unit } : column]);
+      }
+      if (!Array.isArray(selected)) result.push(['Bản ghi tổng hợp', flow.rowIndices.length], ['Bộ lọc', filterDescription(), { role: 'text' }]);
+      return result;
+    };
     openInfo(`${flow.source.name} → ${flow.target.name}`, rows, position?.slice(0, 2) || flow.source.position,
       flow.rowIndices.map(index => state.aiDataset.records[index]), view.data.features.find(feature => feature.id === flow.id));
   }
@@ -101,6 +139,9 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
     const root = $('ai-filter-controls'); const model = modelFor(currentSuggestion); const view = state.arcFlowView; const selection = selectionFor(currentSuggestion);
     const controls = [];
     const update = changes => { Object.assign(selection, changes); refresh(); };
+    const metrics = metricColumns();
+    if (metrics.length) controls.push(field('Chỉ số lưu lượng', select(metrics.map(column => [column.name, column.labelVi || column.name]),
+      currentSuggestion.bindings.value, name => { if (!changeMetric(name)) renderFilters(); }, 'Chỉ số lưu lượng')));
     for (const [side, caption] of [['source', 'Điểm đi'], ['target', 'Điểm đến']]) {
       const points = [...new Map(model.rows.map(row => [row[side].id, row[side]])).values()].sort((a, b) => a.name.localeCompare(b.name, 'vi'));
       const counts = new Map(); points.forEach(point => counts.set(point.name, (counts.get(point.name) || 0) + 1));
@@ -220,11 +261,12 @@ export function createArcFlowController({ state, document: doc, getMap, maplibre
       delete state.aiDataset.arcFlowSelections[currentSuggestion.id]; state.arcFlowStyle = mergeArcFlowStyle({ animated: !reducedMotion() });
       refresh(); renderStyle(); return true;
     },
-    update(change={}) {if(change.style)state.arcFlowStyle=mergeArcFlowStyle({...state.arcFlowStyle,...change.style});
+    update(change={}) {if(change.metric)return changeMetric(change.metric);
+      if(change.style)state.arcFlowStyle=mergeArcFlowStyle({...state.arcFlowStyle,...change.style});
       if(change.selection)Object.assign(selectionFor(currentSuggestion),change.selection);
       if(change.filters)Object.assign(selectionFor(currentSuggestion).filters,change.filters);
       if(change.selection||change.filters)refresh();else{renderStyle();renderLegend();publish();}},
-    openNode, closePopup, refreshControls: renderFilters,
+    openNode, closePopup, refreshControls: renderFilters, allMetricColumns, metricColumns, changeMetric,
     getView: () => ({ data: state.arcFlowView?.data, tableRecords: state.arcFlowView?.tableRecords || [] }),
     dispose() { disposed = true; activationRevision++; closePopup(); overlay?.removeLayer(id); },
     searchData() {

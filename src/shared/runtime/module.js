@@ -1,5 +1,5 @@
 import { geometryExtent } from '../view/map-layer-data.js';
-import { visibleDatasetColumns } from '../data/display-fields.js';
+import { mapDisplayColumns } from '../data/display-fields.js';
 
 /** A map owns its mutable model; only dataset metadata is shared within its runtime. */
 export function moduleContext(context, defaults) {
@@ -85,7 +85,11 @@ export function lifecycle(context, definition, controller, behavior) {
     handleChange: event => behavior.handleChange?.(event),
     handleClick: event => behavior.handleClick?.(event),
     allMetricColumns: () => behavior.metricColumns?.() || [],
-    metricColumns: () => visibleDatasetColumns(context.state.aiDataset, behavior.metricColumns?.() || []),
+    metricColumns: () => {
+      const dataset = context.state.aiDataset;
+      const suggestion = dataset?.suggestions.find(item => item.id === dataset.selectedSuggestionId);
+      return mapDisplayColumns(dataset, suggestion, behavior.metricColumns?.() || []);
+    },
     metricField: () => behavior.metricField?.(),
     changeMetric: field => api.metricColumns().some(column => column.name === field) ? behavior.changeMetric?.(field) : false,
     getView: () => behavior.getView(),

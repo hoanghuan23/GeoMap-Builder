@@ -1,5 +1,5 @@
 import { mapRegistry } from '../../maps/registry.js';
-import { visibleDatasetColumns } from '../data/display-fields.js';
+import { visibleDatasetColumns, popupDisplayColumns } from '../data/display-fields.js';
 import { BarRenderer as default_BarRenderer, LineRenderer as default_LineRenderer, PieRenderer as default_PieRenderer } from '../../charts/lazy-renderers.js';
 import { pieChartFields } from './pie-chart-data.js';
 import { humanizeField as default_humanizeField } from "../../charts/data-transformers.js";
@@ -118,8 +118,7 @@ export function createController(context) {
     const dataset=state.aiDataset; const recommendation=dataset.recommendation || {};
     const info=context.modules.active()?.getPopupContext(feature) || {};
     const scale=info.legendScale;
-    const availableColumns=visibleDatasetColumns(dataset);
-    const popupColumns=Array.isArray(dataset.popupFields) ? dataset.popupFields.map(name=>availableColumns.find(column=>column.name===name)).filter(Boolean) : availableColumns;
+    const popupColumns=popupDisplayColumns(dataset);
     const displayedColumns=popupColumns.filter(column=>!column.name.startsWith('__')).map(column=>{
       if(column.name===scale?.field)return {...column,unit:scale.unit,labelVi:scale.aggregation==='count'?'Số bản ghi':column.labelVi};
       return column.role==='time'&&recommendation.filters?.some(filter=>filter.field===column.name&&filter.control==='datetime-select')?{...column,granularity:'datetime'}:column;
@@ -200,7 +199,7 @@ export function createController(context) {
       const baseRecords = view.arcInfo?.records || popupRegionRecords(dataset.records, view.feature, dataset.recommendation?.geometry?.field,
         { chartType: activeMapPopupSuggestion().chartType, columns: dataset.analysis.columns, bindings: activeMapPopupSuggestion().bindings });
       card = createInfoImagePopup(document, { sources: [{ title: dataset.fileName || dataset.analysis.datasetTitle,
-        columns: visibleDatasetColumns(dataset), displayFields: dataset.popupFields,
+        columns: visibleDatasetColumns(dataset), displayFields: dataset.popupFields ?? dataset.analysis.popupFields,
         popupContent: { ...content, titleField }, records: baseRecords.length ? baseRecords : [view.feature.properties || {}] }, ...joined],
         title: view.arcInfo?.title,
         coordinates: view.feature.geometry?.type === "Point" ? view.feature.geometry.coordinates : null,

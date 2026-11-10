@@ -31,6 +31,7 @@ export function nativeMapDataset(data, pipeline, fileName) {
   return { ...pipeline, records, rawRecords: pipeline.rawRecords || features.map(feature => feature.properties || {}), analysis: { ...pipeline.analysis, columns }, fileName,
     suggestions, selectedSuggestionId: suggestions.find(item => item.available)?.id || null,
     nativeGeometry: { features, records, identityField, titleField }, nativeTitleField: titleField,
+    ...(Array.isArray(pipeline.analysis.popupFields) ? { popupFields: [...pipeline.analysis.popupFields] } : {}),
     popupSelections: {}, filters: {}, geoAliases: {}, geoSelections: {}, roadColorOverrides: {}, recommendation: null };
 }
 

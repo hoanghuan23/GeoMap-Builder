@@ -159,3 +159,43 @@ test('late Arc Flow activation cannot change a replacement dataset, a switched t
     h.controller.dispose();
   }
 });
+
+
+test('Arc Flow uses AI metric choices, rebuilds totals and legend on selection, and preserves filters and records', async () => {
+  const h = harness({ records: [row({ passengers: 10, capacity: 30 }), row({ passengers: 20, capacity: 40 })] });
+  h.state.aiDataset.analysis = { ...analysis, columns: [...analysis.columns,
+    { name: 'capacity', role: 'measure', unit: 'chỗ', aggDefault: 'sum' }] };
+  const selected = { ...suggestion, bindings: { ...suggestion.bindings }, mapDisplayFields: ['capacity', 'passengers'] };
+  assert.equal(await h.controller.activate(selected), true);
+  assert.deepEqual(h.control('Chỉ số lưu lượng').children.map(option => option.value), ['capacity', 'passengers']);
+  const records = JSON.stringify(h.state.aiDataset.records);
+  const time = h.control('Thời điểm'); time.value = '2026-09-15'; time.events.change();
+  assert.equal(h.controller.changeMetric('capacity'), true);
+  assert.equal(h.state.arcFlowView.total, 70);
+  assert.equal(h.state.arcFlowView.model.unit, 'chỗ');
+  assert.equal(h.state.arcFlowView.selection.time, '2026-09-15');
+  assert.equal(h.control('Chỉ số lưu lượng').value, 'capacity');
+  assert.equal(h.controller.changeMetric('origin_lat'), false);
+  assert.equal(h.state.arcFlowView.total, 70);
+  assert.equal(h.controller.changeMetric('passengers'), true);
+  assert.equal(h.state.arcFlowView.total, 30);
+  assert.equal(JSON.stringify(h.state.aiDataset.records), records);
+  assert.equal(suggestion.bindings.value, 'passengers', 'fixture and source bindings stay intact');
+});
+
+test('Arc Flow popup respects AI fields, their order, explicit emptiness and hidden columns', async () => {
+  const h = harness({ records: [row({ passengers: 10 })] });
+  h.state.aiDataset.analysis = { ...analysis, popupFields: ['period', 'passengers'] };
+  await h.controller.activate({ ...suggestion });
+  const open = () => { h.published.at(-1).onClick(h.state.arcFlowView.flows[0]); return h.popups.at(-1); };
+  const labels = popup => descendants(popup.content).filter(node => node.tag === 'dt').map(node => node.textContent);
+  assert.deepEqual(labels(open()), ['period', 'passengers']);
+  h.controller.openNode(h.state.arcFlowView.nodes.features[0]);
+  assert.deepEqual(labels(h.popups.at(-1)), ['period', 'Tổng vào', 'Tổng ra']);
+  h.state.aiDataset.hiddenMetricFields = ['passengers'];
+  assert.deepEqual(labels(open()), ['period']);
+  h.state.aiDataset.popupFields = [];
+  assert.deepEqual(labels(open()), []);
+  h.controller.openNode(h.state.arcFlowView.nodes.features[0]);
+  assert.deepEqual(labels(h.popups.at(-1)), []);
+});

@@ -2,7 +2,7 @@ import { normalizeEditContext, normalizeEditResult } from './ai-map-edit-contrac
 import { popupDisplayOptions } from './shared/popup/ai-popup-chart.js';
 import { resolveAggregation } from './shared/import/ai-chart-pipeline.js';
 import { normalizePolygonLegendRecommendation, polygonLegendTarget } from './shared/data/polygon-legend-contract.js';
-import { visibleDatasetColumns } from './shared/data/display-fields.js';
+import { visibleDatasetColumns, popupDisplayColumns } from './shared/data/display-fields.js';
 import { POPUP_TYPES } from './shared/import/ai-chart-contract.js';
 
 const selected = api => api.state.aiDataset?.suggestions.find(item => item.id === api.state.aiDataset.selectedSuggestionId);
@@ -32,9 +32,7 @@ export function createAiMapEditor({ workspace, runtimes, templatePicker, appeara
           style: view.configuration?.style || {}, metric: module?.metricField(), metrics: module?.metricColumns().map(column => column.name) || [],
           availableMetrics: (module?.allMetricColumns?.() || module?.metricColumns() || []).map(column => column.name),
           popupModes, popupMode: dataset?.popupSelections?.[suggestion?.id]?.mode || popupDisplayOptions(popup, visibleDatasetColumns(dataset, columns))[0]?.name,
-          popupFields: Array.isArray(dataset?.popupFields)
-            ? dataset.popupFields.filter(name => visibleDatasetColumns(dataset, columns).some(column => column.name === name))
-            : visibleDatasetColumns(dataset, columns).map(column => column.name), legendTarget, legend,
+          popupFields: popupDisplayColumns(dataset, columns).map(column => column.name), legendTarget, legend,
           hexEnabled: view.configuration?.regionHexEnabled, hexResolution: view.configuration?.regionHexResolution };
       }) });
   }
