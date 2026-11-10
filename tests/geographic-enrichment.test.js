@@ -7,6 +7,7 @@ import { profileTabularData } from '../src/shared/import/tabular-data.js';
 import { validateAndNormalizeAnalysis } from '../src/shared/import/ai-chart-contract.js';
 import { applyGeographicEnrichment, normalizeGeographicEnrichment } from '../src/shared/import/geographic-enrichment.js';
 import { prepareSuggestions } from '../src/shared/import/ai-chart-pipeline.js';
+import { administrativeContextFields, geographicLocationName } from '../src/shared/geography/geographic-grain.js';
 import { airportArcFlowFixture } from './fixtures/airport-arc-flow-fixture.js';
 
 function airportLookupFixture() {
@@ -55,6 +56,62 @@ function connect(t, result, { codex = false, inspect } = {}) {
     return { ok: true, json: async () => codex ? { success: true, result } : { output_text: JSON.stringify(result) } };
   });
   return () => upstreamCalls;
+}
+
+for (const codex of [false, true]) {
+  for (const subject of ['district', 'city', 'station']) {
+    test(`temperature ${subject} grain survives detailed addresses and coordinates through ${codex ? 'Codex' : 'Responses'}`, async t => {
+      // Put detailed location columns first so column order cannot change the AI binding.
+      const records = [1, 2].flatMap(day => ['Ba Đình', 'Đống Đa'].map((district, index) => ({
+        'Địa chỉ ghi nhận': `${index + 1} Phố kiểm thử, ${district}, Hà Nội`,
+        'Địa chỉ trụ sở': '10 Phố khác, Hà Nội',
+        'Vĩ độ': 21.02 + index / 100, 'Kinh độ': 105.8 + index / 100,
+        'Trạm': `Trạm ${index + 1}`, 'Quận': district, 'Thành phố': 'Hà Nội',
+        'Ngày': `2026-09-0${day}`, 'Nhiệt độ': 25 + day + index
+      })));
+      const original = structuredClone(records);
+      const columns = [
+        { name: 'Địa chỉ ghi nhận', role: 'text' }, { name: 'Địa chỉ trụ sở', role: 'text' },
+        { name: 'Vĩ độ', role: 'geo', geoLevel: 'point_lat' }, { name: 'Kinh độ', role: 'geo', geoLevel: 'point_lng' },
+        { name: 'Trạm', role: 'text' }, { name: 'Quận', role: 'geo', geoLevel: 'admin2', country: 'VN' },
+        { name: 'Thành phố', role: 'geo', geoLevel: 'admin1', country: 'VN' },
+        { name: 'Ngày', role: 'time', timeParse: 'iso', granularity: 'day' },
+        { name: 'Nhiệt độ', role: 'measure', unit: '°C', aggDefault: 'mean' }
+      ];
+      const region = subject === 'district' ? 'Quận' : subject === 'city' ? 'Thành phố' : 'Trạm';
+      // Simulate the semantic decision from AI; the integration must preserve it.
+      const analysis = { datasetTitle: 'Nhiệt độ Hà Nội', grain: `Mỗi quan sát đại diện cho ${region} theo ngày`, columns,
+        popupContent: { titleField: region, imageFields: [], descriptionFields: [],
+          addressFields: ['Địa chỉ ghi nhận', 'Thành phố'], linkFields: [] },
+        popupFields: ['Nhiệt độ', 'Địa chỉ ghi nhận', 'Địa chỉ trụ sở'],
+        suggestions: [{ id: 'temperature', chartType: subject === 'station' ? 'point' : 'choropleth', confidence: .95,
+          bindings: subject === 'station' ? { region, lat: 'Vĩ độ', lng: 'Kinh độ' } : { region, value: 'Nhiệt độ' },
+          mapDisplayFields: subject === 'station' ? [] : ['Nhiệt độ'], agg: 'mean',
+          popupSuggestions: [{ name: 'info', confidence: 1 }], metricButtons: [] }] };
+      const calls = connect(t, analysis, { codex, inspect(input, instructions) {
+        assert.ok(input.profile.head.every(row => row['Địa chỉ ghi nhận'] && row['Địa chỉ trụ sở']));
+        assert.match(instructions, /xác định đối tượng mà từng dòng mô tả và phạm vi mà chỉ số thực sự đại diện/);
+        assert.match(instructions, /không đổi sang Point hoặc vẽ theo địa chỉ đó khi quan sát vẫn đại diện cho vùng/);
+      } });
+      const output = await requestAiDataAnalysis(records);
+      assert.equal(calls(), 1, 'regional observations never trigger address geocoding; stations retain existing coordinates');
+      assert.equal(output.analysis.source, 'ai');
+      const suggestions = prepareSuggestions(output.analysis, output.records, output.validRowRate);
+      assert.equal(suggestions.length, 1);
+      assert.equal(suggestions[0].available, true);
+      assert.equal(suggestions[0].bindings.region, region);
+      assert.equal(suggestions[0].chartType, analysis.suggestions[0].chartType);
+      if (subject !== 'station') {
+        const geometry = { field: region, contextFields: administrativeContextFields(output.analysis.columns, region) };
+        assert.equal(geographicLocationName(output.records[0], geometry), subject === 'district' ? 'Ba Đình, Hà Nội' : 'Hà Nội');
+      }
+      assert.deepEqual(output.analysis.popupFields, analysis.popupFields, 'context addresses remain available as information');
+      for (const field of ['Địa chỉ ghi nhận', 'Địa chỉ trụ sở', 'Vĩ độ', 'Kinh độ', 'Nhiệt độ']) {
+        assert.deepEqual(output.records.map(record => record[field]), original.map(record => record[field]));
+      }
+      assert.deepEqual(records, original);
+    });
+  }
 }
 
 for (const codex of [false, true]) {
